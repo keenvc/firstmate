@@ -50,6 +50,9 @@
 #   droid-hook       Factory Droid per-task runtime-settings hooks
 #                    (UserPromptSubmit opens; Stop, SessionEnd, and the
 #                    idle_prompt Notification an Escape interrupt emits close)
+#   cline-hook       Cline workspace hook config files (.cline/hooks):
+#                    TaskStart opens a turn; TaskComplete, TaskCancel,
+#                    TaskError, and SessionShutdown all close it
 #   codex-hook, codex-appserver  reserved: Codex, gated by
 #                    fm_busy_codex_semantic_source
 #   kimi-wire, kimi-hook  reserved: standalone Kimi, gated by fm_busy_kimi_verified
@@ -343,6 +346,7 @@ fm_busy_sources_for_harness() {  # <harness>
     commandcode) adapter=commandcode-mod ;;
     polytoken) adapter=polytoken-hook ;;
     kiro) adapter=kiro-hook ;;
+    cline*) adapter=cline-hook ;;
     pi|pi-signed) adapter=pi-ext ;;
     omp) adapter=omp-ext ;;
     kimi*)

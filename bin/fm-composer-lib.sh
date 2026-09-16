@@ -591,6 +591,15 @@ FM_DELIVERY_POLYTOKEN_BUSY_REGEX_DEFAULT='^[[:space:]]*Running for [0-9]+([.][0-
 # the footer row (`›` glyph first), so prose that merely names the phrase, such
 # as a grep of these docs in another harness's pane, is never read as busy.
 FM_DELIVERY_KIRO_BUSY_REGEX_DEFAULT='^[[:space:]]*›[[:space:]]+Kiro is working'
+# cline (Cline CLI) renders an in-transcript busy row while a turn runs: a
+# braille spinner, `Thinking...`, and the `(esc to cancel)` token (verified
+# live, cline 3.0.62). Its idle composer is the `Ask anything...` placeholder
+# and its bottom status row does NOT change between busy and idle, so this
+# in-transcript token is the delivery guard's only busy signature. When the
+# turn ends the row is rewritten as `Thinking:` with the token gone, so a
+# finished turn cannot fake an acknowledgement. Delivery guard only; recorded
+# worker state comes from the cline-hook fold in bin/fm-busy-lib.sh.
+FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT='\(esc to cancel\)'
 FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT='^[[:space:]]*(🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)[[:space:]]+·[[:space:]]+'
 
 fm_busy_lines_match() {  # [harness]
@@ -614,6 +623,7 @@ fm_busy_lines_match() {  # [harness]
       droid) regex=$FM_DELIVERY_DROID_BUSY_REGEX_DEFAULT ;;
       polytoken) regex=$FM_DELIVERY_POLYTOKEN_BUSY_REGEX_DEFAULT ;;
       kiro) regex=$FM_DELIVERY_KIRO_BUSY_REGEX_DEFAULT ;;
+      cline) regex=$FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT ;;
       kimi) regex=$FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT ;;
       cursor) regex=$FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT ;;
       '') regex=$FM_DELIVERY_BUSY_REGEX_DEFAULT ;;
@@ -660,7 +670,14 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # the `>` glyph inside its bordered composer (verified live, droid 0.251.0), and
 # its terminal cursor parks on the first ghost letter, leaving a reverse-video
 # remnant that the plain-row anchors below resolve to `empty`.
-FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$|^Try ".*"$'
+# cline (Cline CLI) renders `Ask anything...` in a session that already has
+# turns and the welcome placeholder `What can I do for you?` in a fresh session
+# (verified live, cline 3.0.62); both are dim/muted placeholders in an
+# otherwise-empty bordered composer and both must read `empty`, or a first cline
+# spawn's readiness gate would time out on a fresh profile. Their truecolor
+# (38;2;131;137;140, luminance 135.5) sits above the shared ghost ceiling, which
+# is why cline names itself in fm_composer_gray_ghost_scope above.
+FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$|^Try ".*"$|^What can I do for you\?$'
 
 # KIRO ONLY (fm_composer_kiro_scope): idle placeholders that carry a submit hint
 # typed input never renders, so the whole anchored row proves an empty composer
