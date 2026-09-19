@@ -57,8 +57,12 @@
 # case: disclosed uncertainty keeps a candidate eligible, only concrete
 # contradictory evidence blocks it. A notice on stderr says its headroom was
 # never verified, because that is a disclosure and not a claim of headroom.
-# The marker is not harness-restricted in code, but claude is the only harness
-# with a config-dir seat, so it is the only practical caller.
+# The marker is refused on every harness but claude, in the same validation
+# loop that refuses a malformed token, because claude is the only harness with
+# a config-dir seat (bin/fm-spawn.sh refuses --claude-config-dir for any other
+# harness for the same reason). Without that restriction the marker would be an
+# unrestricted quota-gate off-switch anywhere else, with no seat behind it to
+# justify the unknown.
 #
 # omp (Oh My Pi) has no single primary family, so its candidate model prefix
 # selects the family: openai-codex/<id> checks the codex row and
@@ -394,6 +398,9 @@ for c in "${CANDIDATES[@]}"; do
     omp) die "omp quota mapping covers only the openai-codex and claude-bridge prefixes: $model" ;;
     *) die "unknown harness: $harness" ;;
   esac
+  if candidate_is_seated "$c" && [ "$harness" != claude ]; then
+    die "invalid candidate: $c (@seated is only meaningful for the claude harness, the only one with a config seat)"
+  fi
 done
 
 chosen="none"

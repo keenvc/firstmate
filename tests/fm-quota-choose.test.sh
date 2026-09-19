@@ -320,6 +320,24 @@ fi
   || fail "seated unmapped omp prefix returned: $err"
 ok "the seat marker exempts a candidate from the quota row only, never from the other gates"
 
+# Only claude has a config seat, so the marker anywhere else would be a quota
+# off-switch with nothing behind it. The fixture's codex rows are exhausted at
+# model:codex_bengalfox, so an accepted marker there would select a candidate
+# the snapshot says is spent.
+if err=$(call_choose --snapshot "$LAB/captured.json" --candidate codex:default@seated 2>&1); then
+  fail "a seated non-claude candidate was selected instead of refused"
+fi
+[ "$err" = "error: invalid candidate: codex:default@seated (@seated is only meaningful for the claude harness, the only one with a config seat)" ] \
+  || fail "seated non-claude candidate returned: $err"
+if err=$(call_choose --snapshot "$LAB/captured.json" --candidate pi:default --candidate codex:model:codex_bengalfox@seated 2>&1); then
+  fail "a trailing seated non-claude candidate was hidden by an earlier selection"
+fi
+[ "$err" = "error: invalid candidate: codex:model:codex_bengalfox@seated (@seated is only meaningful for the claude harness, the only one with a config seat)" ] \
+  || fail "trailing seated non-claude candidate returned: $err"
+out=$(call_choose --snapshot "$LAB/captured.json" --candidate claude:model:fable@seated)
+[ "$out" = "claude model:fable" ] || fail "the claude harness must still accept the seat marker, got '$out'"
+ok "the seat marker is refused on every harness but claude"
+
 printf '{"schemaVersion":5,"providers":{"provider":"claude","quotaSemantics":{"effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":50,"runway":{"status":"through_reset"}}]}}}\n' > "$MALFORMED"
 if err=$(call_choose --snapshot "$MALFORMED" --candidate claude:default 2>&1); then
   fail "malformed provider collection unexpectedly dispatched"
