@@ -81,14 +81,21 @@ One platform fact is pinned by the same case: a background child without job con
 ```
 $ FM_OPENHANDS_SIGNALS_LIVE=1 ./tests/fm-openhands-signals-live-e2e.test.sh
 ok - the real run log folds busy while the SDK turn is in flight
-ok - the settled run folds idle, touches turn-end, and stops acknowledging
 ok - the real SDK worker answered its launch prompt
+ok - the settled pane's last firstmate row is idle, not an acknowledgement
+ok - the settled run folds idle, touches turn-end, and stops acknowledging
 ok - a single C-c cancels the real run and stops the driver
 ```
 
-The guard is opt-in (`fm_live_gate opt-in FM_OPENHANDS_SIGNALS_LIVE openhands tmux`) because it submits real prompts through the configured provider.
+The guard is opt-in (`fm_live_gate opt-in FM_OPENHANDS_SIGNALS_LIVE tmux`) because it submits real prompts through the configured provider.
 It launches the real driver under the real venv interpreter in an isolated tmux socket, with the real `config/openhands-llm.env` profile, inside a throwaway git workspace.
 It requires the working delivery row to render while the turn runs, the fold to go busy then settled, the computed answer (12345+67890) to land, the turn-end marker to be touched, a steered long run to open its pair, and a single C-c to close it as cancelled and stop the process.
+
+Two live-only platform facts were fixed by this guard on the reference host, and each is pinned in the driver:
+
+- **Quiet pane**: the SDK's `cli_mode=True` rendering floods stdout/stderr with rich panels (system prompt, tool schemas, token counters - hundreds of lines within seconds of a run opening), which buried the firstmate working row far past a read window and broke the settled-pane assertion. The driver now redirects the SDK's fd 1/2 to `<run-log>.sdk.log` (chmod 600, append) and writes its own rows through a saved duplicate of the pane's stdout, so the pane carries firstmate rows alone. The answer is asserted from the sdk log, and the settled pane is judged by its last firstmate literal (idle/cancelled can never acknowledge, and it is written below any historical working row in scrollback).
+- **Hard interrupt exit**: a single C-c cancelled the pair and touched turn-end, but the interpreter then blocked forever at teardown joining the SDK's non-daemon stdout/stderr reader threads (`openhands/sdk/utils/command.py`), leaving a live `python` process in the pane. The interrupt path now closes the conversation under a 5s daemon watchdog deadline and exits via `os._exit(130)`, so teardown can never wedge the pane; the guard polls `pane_current_command` because the bounded close briefly keeps the driver alive after the cancelled close.
+
 The guard asserts the firstmate-owned mechanics, so the profile's current `LLM_MODEL` is the right model for the run; the reference host's profile carried `anthropic/claude-opus-4-8` at verification time, and the Fireworks DeepSeek profile lands by swapping `LLM_MODEL` and the key in the same file with no harness-side change.
 
 ## Still unproven
