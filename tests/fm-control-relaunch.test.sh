@@ -1647,6 +1647,34 @@ test_relaunch_preserves_the_recorded_claude_config_dir() {
   pass "fm-spawn --relaunch: reuses the task's recorded Claude config directory for the replacement launch, never a fresh flag"
 }
 
+test_relaunch_refusal_names_the_recorded_seat_not_the_flag() {
+  local dir out rc seat
+  dir=$(new_case seat-gone rl92)
+  add_ship_task "$dir" rl92 claude
+  seat="$dir/claude-seat-gone"
+  mkdir -p "$seat"
+  seat=$(cd "$seat" && pwd -P)
+  printf 'claude_config_dir=%s\n' "$seat" >> "$dir/home/state/rl92.meta"
+  # The operator removed the seat after the task was spawned, which is what a
+  # stuck-crewmate relaunch runs into. A relaunch caller never passed
+  # --claude-config-dir and is forbidden from passing it, so the refusal must
+  # point at the task's record instead of at that flag.
+  rmdir "$seat"
+  printf 'zsh' > "$dir/fake/command"
+
+  out=$(run_spawn "$dir" rl92 --relaunch); rc=$?
+  expect_code 1 "$rc" "a relaunch whose recorded seat is gone should refuse"
+  assert_contains "$out" "this task's recorded Claude config directory '$seat' is not an accessible directory" \
+    "the relaunch refusal should name the task's recorded seat as the thing that is gone"
+  assert_contains "$out" "--claude-config-dir cannot override it on a relaunch" \
+    "the relaunch refusal should say the flag is not the caller's fix"
+  assert_not_contains "$out" "error: --claude-config-dir" \
+    "the relaunch refusal must not blame a flag the caller never passed"
+  [ ! -s "$dir/fake/literal" ] \
+    || fail "an unusable recorded seat must launch nothing (got: $(cat "$dir/fake/literal"))"
+  pass "fm-spawn --relaunch: an unusable recorded seat refuses in the record's own terms, not the flag's"
+}
+
 test_spawn_relaunch_refuses_an_unrecorded_task() {
   local dir out rc
   dir=$(new_case norecord rl17)
@@ -1758,6 +1786,7 @@ test_spawn_relaunch_keeps_its_early_meta_lock_continuous
 test_spawn_relaunch_refuses_a_pending_authoritative_close
 test_spawn_relaunch_refuses_contradicting_flags
 test_relaunch_preserves_the_recorded_claude_config_dir
+test_relaunch_refusal_names_the_recorded_seat_not_the_flag
 test_spawn_relaunch_refuses_an_unrecorded_task
 test_spawn_relaunch_refuses_a_pane_outside_the_worktree
 test_relaunch_reverifies_an_already_in_flight_item_instead_of_rewriting_it

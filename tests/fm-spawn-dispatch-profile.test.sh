@@ -1052,9 +1052,21 @@ test_claude_config_dir_without_config_refuses() {
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --claude-config-dir "$CASE_DIR/seat-empty")
   status=$?
   expect_code 1 "$status" "a --claude-config-dir with no .claude.json must refuse the spawn"
-  assert_contains "$out" "holds no usable Claude configuration" "refusal must name the missing configuration"
+  assert_contains "$out" "--claude-config-dir '$CASE_DIR/seat-empty' holds no usable Claude configuration" \
+    "refusal must name the flag the caller passed and the missing configuration"
+  # Preparing the store means two interactive steps, not just a login: the
+  # separate Bypass Permissions confirmation a spawned pane cannot answer is
+  # raised only under --dangerously-skip-permissions, so the recommended
+  # command must carry that flag and the refusal must say a login alone is
+  # not enough.
+  assert_contains "$out" "CLAUDE_CONFIG_DIR='$CASE_DIR/seat-empty' claude --dangerously-skip-permissions" \
+    "refusal must recommend the one command that reaches both interactive steps"
+  assert_contains "$out" "Bypass Permissions confirmation" \
+    "refusal must name the second interactive step, not just the login"
+  assert_contains "$out" "config/claude-permission-mode to auto" \
+    "refusal must offer the launch mode that never meets that confirmation"
   assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
-  pass "a --claude-config-dir with no Claude configuration refuses before any endpoint or metadata"
+  pass "a --claude-config-dir with no Claude configuration refuses before any endpoint or metadata, naming both interactive steps"
 }
 
 test_claude_config_dir_refused_for_non_claude_harness() {

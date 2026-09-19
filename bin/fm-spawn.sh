@@ -2101,14 +2101,27 @@ fi
 # reads as a stuck agent. Only the directory's existence and shape are
 # inspected - its contents are never read or printed - because the directory
 # path is the whole interface this flag grants.
-fm_claude_seat_validate() { # <candidate-dir>
-  local raw=$1 real
+# A store also has to have accepted the machine-scoped Bypass Permissions
+# confirmation, which is separate from the trust dialog, is raised only by
+# --dangerously-skip-permissions, and which a spawned pane cannot answer
+# (docs/verification/runtime-backends.md). That acceptance leaves no record in
+# .claude.json - unlike hasTrustDialogAccepted and the import flags that
+# bin/fm-claude-trust.sh reads and writes, it is absent from the store both at
+# the top level and under projects.<path> - so it cannot be checked here, and
+# the refusal below naming both interactive steps is the only guard against it.
+# <origin> is how the refusals name the directory, because on a relaunch the
+# seat comes from the task's record rather than from a flag the caller passed.
+fm_claude_seat_validate() { # <candidate-dir> <origin>
+  local raw=$1 origin=$2 real
   real=$(CDPATH='' cd -P -- "$raw" 2>/dev/null && pwd -P) || {
-    echo "error: --claude-config-dir '$raw' is not an accessible directory" >&2
+    echo "error: $origin '$raw' is not an accessible directory" >&2
     return 1
   }
   [ -f "$real/.claude.json" ] || {
-    echo "error: --claude-config-dir '$real' holds no usable Claude configuration (no .claude.json found); log in once with CLAUDE_CONFIG_DIR='$real' claude, then retry" >&2
+    echo "error: $origin '$real' holds no usable Claude configuration (no .claude.json found)" >&2
+    echo "hint: prepare that store in one interactive sitting - run CLAUDE_CONFIG_DIR='$real' claude --dangerously-skip-permissions once and accept everything it shows: first the login, then that store's own Bypass Permissions confirmation" >&2
+    echo "hint: logging in alone is not enough - the Bypass Permissions confirmation is raised only by --dangerously-skip-permissions, and a spawned pane cannot answer it, so a seat that has never accepted it wedges the worker" >&2
+    echo "hint: to leave that confirmation unaccepted for this seat, set config/claude-permission-mode to auto, which launches with --permission-mode auto and never asks for bypass mode" >&2
     return 1
   }
   printf '%s\n' "$real"
@@ -2124,7 +2137,10 @@ CLAUDE_SEAT_DIR=
 if [ "$RELAUNCH" -eq 1 ]; then
   CLAUDE_SEAT_RECORD=$RELAUNCH_PRIOR_CLAUDE_CONFIG_DIR
   if [ -n "$CLAUDE_SEAT_RECORD" ] && [ "$HARNESS" = claude ]; then
-    CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_RECORD") || exit 1
+    CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_RECORD" "this task's recorded Claude config directory") || {
+      echo "hint: the seat is the one recorded in this task's meta and --claude-config-dir cannot override it on a relaunch; restore that directory, or relaunch the task under a non-claude --harness" >&2
+      exit 1
+    }
     CLAUDE_SEAT_RECORD=$CLAUDE_SEAT_DIR
   fi
 elif [ -n "$CLAUDE_SEAT_ARG" ]; then
@@ -2132,7 +2148,7 @@ elif [ -n "$CLAUDE_SEAT_ARG" ]; then
     echo "error: --claude-config-dir applies only to claude spawns; this spawn resolved harness '$HARNESS'" >&2
     exit 1
   }
-  CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_ARG") || exit 1
+  CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_ARG" "--claude-config-dir") || exit 1
   CLAUDE_SEAT_RECORD=$CLAUDE_SEAT_DIR
 fi
 
