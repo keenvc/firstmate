@@ -2109,12 +2109,17 @@ fi
 # path is the whole interface this flag grants.
 # A store also has to have accepted the machine-scoped Bypass Permissions
 # confirmation, which is separate from the trust dialog, is raised only by
-# --dangerously-skip-permissions, and which a spawned pane cannot answer
-# (docs/verification/runtime-backends.md). That acceptance leaves no record in
-# .claude.json - unlike hasTrustDialogAccepted and the import flags that
-# bin/fm-claude-trust.sh reads and writes, it is absent from the store both at
-# the top level and under projects.<path> - so it cannot be checked here, and
-# the refusal below naming both interactive steps is the only guard against it.
+# --dangerously-skip-permissions, and which a spawned pane cannot answer;
+# docs/verification/runtime-backends.md:461 records that warning appearing
+# against an isolated CLAUDE_CONFIG_DIR, and the section around it verifies the
+# workspace-trust dialog only, not this one. No record of that acceptance was
+# found in .claude.json: on Claude Code 2.1.278, a read of the live store's key
+# NAMES (never values) found nothing bypass- or permission-shaped among its 80
+# top-level keys or across the keys of its 56 projects.<path> entries, where
+# hasTrustDialogAccepted and the import-consent flags bin/fm-claude-trust.sh
+# reads and writes do live. Whether Claude Code records it somewhere else - a
+# separate file, an OS keychain - was not checked. So nothing here can screen
+# for it, and the refusal below names both interactive steps instead.
 # <origin> is how the refusals name the directory, because on a relaunch the
 # seat comes from the task's record rather than from a flag the caller passed.
 fm_claude_seat_validate() { # <candidate-dir> <origin>
