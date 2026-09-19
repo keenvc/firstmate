@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Firstmate-owned OpenHands (SDK) crewmate driver.
+
+Contract owner for the openhands harness launch surface: bin/fm-spawn.sh's
+launch_template is the caller and this driver is what runs in the crewmate
+pane. It is a headless batch process, not a vendor TUI, so firstmate owns
+every signal it emits and no hook layer is needed anywhere.
+
+Lifecycle:
+  - The LLM profile (LLM_API_KEY, LLM_MODEL) is loaded from the --llm-env
+    file (active-home config/openhands-llm.env, chmod 600, never committed).
+    The key is never printed, logged, or written to the run log.
+  - The positional brief, when present, is the first message. Afterwards
+    stdin is read line by line: every non-empty line is a follow-up message
+    (the steering surface), the literal /exit or /quit exits, and EOF exits.
+  - Every run appends one JSONL pair to the --run-log sidecar
+    (state/<id>.openhands-run, truncated by the spawn so a relaunch never
+    folds a predecessor's open run):
+      {"ts": <iso8601>, "event": "run_started", "run": <n>}
+      {"ts": <iso8601>, "event": "run_terminal", "run": <n>, "terminal": "completed"|"cancelled"}
+    This file is the single owner of that record format; bin/fm-busy-lib.sh
+    owns the fold (an unmatched run_started is busy, a trailing run_terminal
+    is idle, anything else is unknown).
+  - Every finished run, completed or cancelled, touches --turn-end
+    (state/<id>.turn-ended), the turn-end signal the supervisor consumes.
+  - SIGINT (the control plane's interrupt key, C-c) cancels the in-flight
+    run: the pair is closed with terminal=cancelled, the conversation is
+    closed, and the driver exits 130. Worktree state is preserved; the
+    resume path is a deterministic relaunch, never a native resume.
+
+Pane rows, the rendered surface firstmate reads (keep the literals stable;
+the working row is the verified delivery signature,
+FM_DELIVERY_OPENHANDS_BUSY_REGEX_DEFAULT in bin/fm-composer-lib.sh):
+  [fm-openhands] working
+  [fm-openhands] idle
+  [fm-openhands] cancelled
+
+Exit codes: 0 normal exit; 2 missing, unreadable, or incomplete --llm-env;
+3 the OpenHands SDK is not importable by this interpreter; 130 interrupted.
+
+--selftest exercises the run-log, turn-end, and stdin contract with a stub
+run and no SDK import, so portable CI and the live guard can prove the
+firstmate-owned half of the adapter without credentials. --selftest-hold
+<seconds> holds the stub run open so the interrupt guard can land a SIGINT
+mid-run deterministically.
+"""
+
+import argparse
+import datetime
+import json
+import os
+import sys
+import time
+
+WORKING_ROW = "[fm-openhands] working"
+IDLE_ROW = "[fm-openhands] idle"
+CANCELLED_ROW = "[fm-openhands] cancelled"
+EXIT_COMMANDS = ("/exit", "/quit")
+
+
+def emit(row):
+    sys.stdout.write(row + "\n")
+    sys.stdout.flush()
+
+
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def load_llm_profile(path):
+    """Parse the env-file profile; the caller owns refusal messaging."""
+    profile = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            profile[key.strip()] = value.strip()
+    return profile
+
+
+class RunLog:
+    """Append-only JSONL run lifecycle records; the format owner is here."""
+
+    def __init__(self, path):
+        self.path = path
+        self.count = 0
+
+    def started(self):
+        self.count += 1
+        self._append({"ts": now_iso(), "event": "run_started", "run": self.count})
+
+    def terminal(self, terminal):
+        self._append(
+            {
+                "ts": now_iso(),
+                "event": "run_terminal",
+                "run": self.count,
+                "terminal": terminal,
+            }
+        )
+
+    def _append(self, record):
+        with open(self.path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def touch(path):
+    if path:
+        with open(path, "a", encoding="utf-8"):
+            pass
+
+
+class StubConversation:
+    """The --selftest stand-in: same surface, no SDK, no credentials."""
+
+    def __init__(self, hold=0.0):
+        self.messages = []
+        self.hold = hold
+
+    def send_message(self, message):
+        self.messages.append(message)
+
+    def run(self):
+        if self.hold > 0:
+            time.sleep(self.hold)
+        return None
+
+    def close(self):
+        return None
+
+
+def run_turn(conversation, log, turn_end, message):
+    log.started()
+    emit(WORKING_ROW)
+    try:
+        conversation.send_message(message)
+        conversation.run()
+    except KeyboardInterrupt:
+        log.terminal("cancelled")
+        emit(CANCELLED_ROW)
+        touch(turn_end)
+        raise
+    log.terminal("completed")
+    emit(IDLE_ROW)
+    touch(turn_end)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Firstmate OpenHands crewmate driver (see module docstring)."
+    )
+    parser.add_argument("brief", nargs="?", default="")
+    parser.add_argument("--model", default="")
+    parser.add_argument("--llm-env", default=os.environ.get("FM_OPENHANDS_LLM_ENV", ""))
+    parser.add_argument("--turn-end", default="")
+    parser.add_argument("--run-log", required=True)
+    parser.add_argument("--selftest", action="store_true")
+    parser.add_argument(
+        "--selftest-hold",
+        type=float,
+        default=0.0,
+        help="stub-run seconds for --selftest; the interrupt guard holds a run open",
+    )
+    args = parser.parse_args()
+
+    if args.selftest:
+        conversation = StubConversation(hold=args.selftest_hold)
+    else:
+        if not args.llm_env or not os.path.isfile(args.llm_env):
+            sys.stderr.write(
+                "error: --llm-env is required and must name the active home's "
+                "config/openhands-llm.env profile file\n"
+            )
+            return 2
+        try:
+            profile = load_llm_profile(args.llm_env)
+        except OSError as error:
+            sys.stderr.write("error: could not read %s: %s\n" % (args.llm_env, error))
+            return 2
+        api_key = profile.get("LLM_API_KEY", "")
+        model = args.model or profile.get("LLM_MODEL", "")
+        if not api_key or not model:
+            sys.stderr.write(
+                "error: %s must define non-empty LLM_API_KEY and LLM_MODEL "
+                "(the key is never printed)\n" % args.llm_env
+            )
+            return 2
+        os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
+        try:
+            from openhands.sdk import Conversation, LLM
+            from openhands.tools import get_default_agent
+        except ImportError as error:
+            sys.stderr.write(
+                "error: the OpenHands SDK is not importable by this interpreter: %s\n"
+                % error
+            )
+            return 3
+        llm = LLM(model=model, api_key=api_key)
+        agent = get_default_agent(llm=llm, cli_mode=True)
+        conversation = Conversation(agent=agent, workspace=os.getcwd())
+
+    log = RunLog(args.run_log)
+    if args.brief:
+        run_turn(conversation, log, args.turn_end, args.brief)
+
+    for line in sys.stdin:
+        text = line.strip()
+        if text in EXIT_COMMANDS:
+            break
+        if not text:
+            continue
+        run_turn(conversation, log, args.turn_end, text)
+
+    conversation.close()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # A run in flight has already closed its own pair; this covers an
+        # interrupt at the idle stdin loop, where no run is open.
+        emit(CANCELLED_ROW)
+        sys.exit(130)
