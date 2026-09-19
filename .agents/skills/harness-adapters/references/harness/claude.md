@@ -42,7 +42,18 @@ Never send Enter to that one either: it was observed rendering in the same shape
 Firstmate cannot move a selection with Enter, Escape, and C-c alone, so it cannot accept this dialog at all, and an operator accepts it once per machine instead.
 Inspect the pane to identify which dialog is on screen, and report it rather than answering it.
 A launch under `config/claude-permission-mode=auto` never meets the bypass confirmation, because it does not request bypass mode: on 2.1.269 `claude --permission-mode auto` reached the composer directly with the footer `⏵⏵ auto mode on (shift+tab to cycle)`, so a captain who refuses the bypass dialog selects `auto` there instead of accepting it.
+That setting is fleet-wide rather than per seat - `config/claude-permission-mode` is read once per home and governs every claude launch from it, crewmates, scouts, secondmates, and relaunches alike - so choosing `auto` to avoid the dialog for one seat moves every claude lane in that home with it.
 The workspace-trust dialog is unaffected by the permission mode and still needs the pre-registration above.
+
+### Preparing a config seat
+
+Preparing a seat for `--claude-config-dir` (see "Config seat" above) is two interactive steps, not one, and the operator does both by hand before the first seated spawn.
+First, log the account in for that store: `CLAUDE_CONFIG_DIR=<dir> claude`.
+Second, accept that store's own bypass-permissions confirmation, which the login alone never raises - only `--dangerously-skip-permissions` asks for it - so the one command that reaches both in a single sitting is `CLAUDE_CONFIG_DIR=<dir> claude --dangerously-skip-permissions`, accepting whatever it shows.
+A seat that was only logged into is the trap: it holds a `.claude.json`, so `fm-spawn.sh`'s seat check accepts it, and the pane then wedges on the bypass dialog that firstmate cannot answer, which the supervisor reads as a stuck agent.
+`../../../../../docs/verification/runtime-backends.md` records that exact counter-case: an isolated `CLAUDE_CONFIG_DIR` holding only a copied `.claude.json` cleared the trust dialog and then surfaced the bypass warning.
+A captain who will not accept that dialog for a seat runs the whole home under `config/claude-permission-mode=auto` instead, with the fleet-wide consequence stated above; there is no per-seat way to decline it.
+`fm-spawn.sh` cannot verify either step: no record of the bypass acceptance was found in `.claude.json` on 2.1.278 (key names only, top level and `projects.<path>`, where `hasTrustDialogAccepted` and the import-consent flags do live), and whether Claude Code records it elsewhere was not checked, so the seat check confirms only that a store exists at that path.
 
 ## Composer ghost
 

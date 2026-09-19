@@ -2,7 +2,7 @@
 # Choose the first quota-eligible candidate from a ranked list.
 #
 # Usage:
-#   fm-quota-choose.sh [--snapshot <path>] [--candidate <harness:model>]...
+#   fm-quota-choose.sh [--snapshot <path>] [--candidate <harness:model>[@seated]]...
 #
 # Reads one already-captured quota-axi default TOON or JSON snapshot from the
 # provided file, or from stdin when --snapshot is omitted. For each --candidate
@@ -35,6 +35,26 @@
 # provider - is owned by AGENTS.md section 4 and the quota-array-dispatch skill,
 # not by this helper. Use this helper only when the brief already fixed the
 # candidate order and every candidate's provider is the harness's primary family.
+#
+# Seat exception: quota-axi measures one account per provider family, so a lane
+# running on a non-default config seat (bin/fm-spawn.sh's --claude-config-dir,
+# today the only seat firstmate has) spends an account this snapshot never
+# describes. Judging such a candidate by the family's single row is wrong in
+# both directions - it can veto a seat with full headroom, or clear a seat that
+# is exhausted. Mark that candidate with a trailing `@seated`
+# (`claude:default@seated`): the harness and model parse exactly as they do
+# without the marker, the suffix must be exactly `@seated` or the candidate is
+# refused, and an unmarked candidate keeps today's behavior byte for byte.
+# A seated candidate is never measured against the family row at all. Its quota
+# is reported as honestly unknown rather than as fabricated per-seat data, and
+# AGENTS.md section 4's rule for exactly this case applies - disclosed
+# uncertainty keeps a candidate eligible, and only concrete contradictory
+# evidence blocks it - so a seated candidate is selected when candidate order
+# reaches it, and a notice on stderr says its headroom was never verified.
+# There is no per-seat quota evidence anywhere in quota-axi's schema today, so
+# nothing can contradict a seated candidate; that is a disclosure, not a claim
+# of headroom. The marker is not harness-restricted in code, but claude is the
+# only harness with a config-dir seat, so it is the only practical caller.
 #
 # omp (Oh My Pi) has no single primary family, so its candidate model prefix
 # selects the family: openai-codex/<id> checks the codex row and
@@ -93,11 +113,24 @@ done
 
 [ "${#CANDIDATES[@]}" -gt 0 ] || die "no candidates supplied"
 
-# A candidate is <harness>:<model>. A bare harness with no colon means the
-# default model. Reject empty harnesses and characters that cannot form a safe
-# token. A colon-separated model is legal (e.g. model:codex_bengalfox).
+# A candidate is <harness>:<model>, optionally marked `@seated`. A bare harness
+# with no colon means the default model. Reject empty harnesses and characters
+# that cannot form a safe token. A colon-separated model is legal (e.g.
+# model:codex_bengalfox). The marker is stripped before the token is validated,
+# so `@` remains illegal everywhere else and a suffix that is not exactly
+# `@seated` refuses rather than being read as part of the model.
+candidate_is_seated() { case "$1" in *@seated) return 0 ;; *) return 1 ;; esac; }
+candidate_token() { printf '%s\n' "${1%@seated}"; }
+
 for c in "${CANDIDATES[@]}"; do
+  token=$c
   case "$c" in
+    *@*)
+      candidate_is_seated "$c" || die "invalid candidate: $c"
+      token=$(candidate_token "$c")
+      ;;
+  esac
+  case "$token" in
     ''|:*|*[!A-Za-z0-9._/:-]*) die "invalid candidate: $c" ;;
   esac
 done
@@ -347,9 +380,10 @@ effective_for_provider_model() {
 }
 
 for c in "${CANDIDATES[@]}"; do
-  harness=${c%%:*}
-  model=${c#*:}
-  [ "$model" = "$c" ] && model="default"
+  token=$(candidate_token "$c")
+  harness=${token%%:*}
+  model=${token#*:}
+  [ "$model" = "$token" ] && model="default"
   [ -n "$model" ] || die "invalid candidate: $c"
   fm_control_harness_supported "$harness" || die "unknown harness: $harness"
   provider_for_harness "$harness" "$model" >/dev/null || case "$harness" in
@@ -360,9 +394,15 @@ done
 
 chosen="none"
 for c in "${CANDIDATES[@]}"; do
-  harness=${c%%:*}
-  model=${c#*:}
-  [ "$model" = "$c" ] && model="default"
+  token=$(candidate_token "$c")
+  harness=${token%%:*}
+  model=${token#*:}
+  [ "$model" = "$token" ] && model="default"
+  if candidate_is_seated "$c"; then
+    echo "notice: candidate '$c' runs on a config seat, whose own account has no row in this quota snapshot; its headroom was not verified and it is treated as eligible with unknown quota" >&2
+    chosen="$harness $model"
+    break
+  fi
   provider=$(provider_for_harness "$harness" "$model")
   scope_model=$model
   [ "$harness" != omp ] || scope_model=${model#*/}

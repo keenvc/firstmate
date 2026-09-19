@@ -2107,21 +2107,16 @@ fi
 # reads as a stuck agent. Only the directory's existence and shape are
 # inspected - its contents are never read or printed - because the directory
 # path is the whole interface this flag grants.
-# A store also has to have accepted the machine-scoped Bypass Permissions
-# confirmation, which is separate from the trust dialog, is raised only by
-# --dangerously-skip-permissions, and which a spawned pane cannot answer;
-# docs/verification/runtime-backends.md:461 records that warning appearing
-# against an isolated CLAUDE_CONFIG_DIR, and the section around it verifies the
-# workspace-trust dialog only, not this one. No record of that acceptance was
-# found in .claude.json: on Claude Code 2.1.278, a read of the live store's key
-# NAMES (never values) found nothing bypass- or permission-shaped among its 80
-# top-level keys or across the keys of its 56 projects.<path> entries, where
-# hasTrustDialogAccepted and the import-consent flags bin/fm-claude-trust.sh
-# reads and writes do live. Whether Claude Code records it somewhere else - a
-# separate file, an OS keychain - was not checked. So nothing here can screen
-# for it: the .claude.json check below is a cheap sanity gate that refuses an
-# obviously empty directory, and every ACCEPTED seat carries a notice saying so,
-# because a store that was only logged into passes this check and then wedges.
+# The check is deliberately shallow, and says only what it can: a present
+# .claude.json proves a store exists there, never that it is logged in or that
+# it has accepted claude's once-per-machine bypass-permissions confirmation.
+# No record of that acceptance was found in .claude.json (Claude Code 2.1.278,
+# key names only, top level and projects.<path>, where hasTrustDialogAccepted
+# and the import-consent flags bin/fm-claude-trust.sh handles do live), and
+# whether Claude Code records it elsewhere was not checked, so nothing here can
+# screen for it. What preparing a seat actually requires is owned once by
+# .agents/skills/harness-adapters/references/harness/claude.md, which this
+# validator points at rather than restating at spawn time.
 # <origin> is how the messages name the directory, because on a relaunch the
 # seat comes from the task's record rather than from a flag the caller passed.
 fm_claude_seat_validate() { # <candidate-dir> <origin>
@@ -2131,10 +2126,9 @@ fm_claude_seat_validate() { # <candidate-dir> <origin>
     return 1
   }
   [ -f "$real/.claude.json" ] || {
-    echo "error: $origin '$real' holds no Claude configuration at all (no .claude.json found); log that store in once with CLAUDE_CONFIG_DIR='$real' claude, then retry" >&2
+    echo "error: $origin '$real' holds no Claude configuration at all (no .claude.json found); .agents/skills/harness-adapters/references/harness/claude.md under 'Workspace trust' owns what preparing a seat requires" >&2
     return 1
   }
-  echo "notice: $origin '$real' is taken as given - a .claude.json is present, which is all this check proves; the seat must also already have accepted that store's own machine-scoped Bypass Permissions confirmation, which only --dangerously-skip-permissions raises, which defaults to declining, and which firstmate cannot answer (its steering plane carries Enter, Escape and Ctrl-C alone), so prepare it once interactively with CLAUDE_CONFIG_DIR='$real' claude --dangerously-skip-permissions, or launch only under config/claude-permission-mode=auto, which never requests bypass mode and so never meets that dialog" >&2
   printf '%s\n' "$real"
 }
 # CLAUDE_SEAT_RECORD is what this task's meta remembers as its seat, carried

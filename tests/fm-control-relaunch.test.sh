@@ -1644,12 +1644,6 @@ test_relaunch_preserves_the_recorded_claude_config_dir() {
     || fail "the relaunch must keep the task's recorded Claude config directory, got '$recorded'"
   assert_grep "CLAUDE_CONFIG_DIR='$seat'" "$dir/fake/literal" \
     "the replacement launch did not use the task's recorded seat"
-  # A relaunch reuses a seat nobody re-inspects, so it reaches the same wedge
-  # as a fresh spawn and has to carry the same warning.
-  assert_contains "$out" "notice: this task's recorded Claude config directory '$seat'" \
-    "a reused recorded seat must carry the acceptance notice naming it"
-  assert_contains "$out" "Bypass Permissions confirmation" \
-    "the acceptance notice must name the confirmation the reuse check cannot verify"
   pass "fm-spawn --relaunch: reuses the task's recorded Claude config directory for the replacement launch, never a fresh flag"
 }
 

@@ -948,16 +948,7 @@ test_claude_config_dir_flag_records_meta_and_launch() {
   launch=$(cat "$LAUNCH_LOG")
   assert_contains "$launch" "CLAUDE_CONFIG_DIR='$seat' env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI" \
     "the launch did not use the named seat's config directory"
-  # A seat that was only logged into passes the existence check and then wedges
-  # on the Bypass Permissions confirmation, so the warning has to reach the
-  # operator on the path that accepts a seat, not only on a refusal.
-  assert_contains "$out" "notice: --claude-config-dir '$seat'" \
-    "an accepted seat must carry a notice naming it"
-  assert_contains "$out" "Bypass Permissions confirmation" \
-    "the acceptance notice must name the confirmation this check cannot verify"
-  assert_contains "$out" "config/claude-permission-mode=auto" \
-    "the acceptance notice must offer the launch mode that never meets that confirmation"
-  pass "--claude-config-dir is recorded in the task's own meta, reaches the launched process, and warns what acceptance does not prove"
+  pass "--claude-config-dir is recorded in the task's own meta and reaches the launched process"
 }
 
 test_claude_config_dir_flag_overrides_firstmates_ambient_store() {
@@ -1062,13 +1053,12 @@ test_claude_config_dir_without_config_refuses() {
   status=$?
   expect_code 1 "$status" "a --claude-config-dir with no .claude.json must refuse the spawn"
   # This check proves one thing - that no configuration exists there at all -
-  # so the refusal says that and points at the login. What a present
-  # .claude.json still cannot prove is carried by the notice on the acceptance
-  # path instead, which every seated spawn reaches.
+  # so the refusal says that and names the document that owns what preparing a
+  # seat requires, rather than restating it at spawn time.
   assert_contains "$out" "--claude-config-dir '$CASE_DIR/seat-empty' holds no Claude configuration at all" \
     "refusal must name the flag the caller passed and the missing configuration"
-  assert_contains "$out" "CLAUDE_CONFIG_DIR='$CASE_DIR/seat-empty' claude" \
-    "refusal must point at logging that store in"
+  assert_contains "$out" "harness-adapters/references/harness/claude.md" \
+    "refusal must point at the document that owns seat preparation"
   assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
   pass "a --claude-config-dir with no Claude configuration refuses before any endpoint or metadata"
 }

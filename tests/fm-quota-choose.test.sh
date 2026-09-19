@@ -259,6 +259,47 @@ fi
 [ "$err" = "error: invalid candidate: claude:" ] || fail "trailing empty model returned: $err"
 ok "all candidates are validated before selection"
 
+# A config-seated candidate spends an account this snapshot never measures, so
+# the family's single row must not judge it. The fixture's claude rows are a
+# barely-positive all_models scope and an exhausted model:fable scope, so
+# claude:model:fable is the candidate the default account's own row rejects.
+if out=$(call_choose --snapshot "$LAB/captured.json" --candidate claude:model:fable 2>/dev/null); then
+  fail "seat baseline: an unseated exhausted claude candidate was selected, got '$out'"
+fi
+[ "$out" = "none" ] || fail "seat baseline: expected 'none' for the unseated candidate, got '$out'"
+out=$(call_choose --snapshot "$LAB/captured.json" --candidate claude:model:fable@seated)
+[ "$out" = "claude model:fable" ] || fail "seated candidate: expected the default account's exhausted row to be ignored, got '$out'"
+ok "a seated candidate is not judged by the default account's quota row"
+
+# The seat exception removes the wrong-account penalty; it does not promote a
+# seated candidate over an earlier eligible one.
+out=$(call_choose --snapshot "$LAB/captured.json" --candidate pi:default --candidate claude:model:fable@seated)
+[ "$out" = "pi default" ] || fail "seat ordering: an earlier eligible candidate should still win, got '$out'"
+out=$(call_choose --snapshot "$LAB/captured.json" --candidate kimi:default --candidate claude:model:fable@seated)
+[ "$out" = "claude model:fable" ] || fail "seat ordering: a seated candidate should be reached past an exhausted one, got '$out'"
+ok "candidate order still governs a seated candidate"
+
+# Unknown headroom must be disclosed, never dressed up as measured quota.
+seat_err=$(QUOTA_AXI_CALLS="$LAB/seat-calls" QUOTA_AXI_FIXTURE="$FIXTURE" PATH="$FAKEBIN:$PATH" \
+  "$BIN/fm-quota-choose.sh" --snapshot "$LAB/captured.json" --candidate claude:model:fable@seated 2>&1 >/dev/null)
+printf '%s\n' "$seat_err" | grep -Fq "claude:model:fable@seated" \
+  || fail "seat notice did not name the chosen candidate: $seat_err"
+printf '%s\n' "$seat_err" | grep -Fq "headroom was not verified" \
+  || fail "seat notice did not disclose the unverified headroom: $seat_err"
+unseated_err=$(QUOTA_AXI_CALLS="$LAB/seat-calls" QUOTA_AXI_FIXTURE="$FIXTURE" PATH="$FAKEBIN:$PATH" \
+  "$BIN/fm-quota-choose.sh" --snapshot "$LAB/captured.json" --candidate pi:default 2>&1 >/dev/null)
+[ -z "$unseated_err" ] || fail "an unseated selection should stay silent on stderr: $unseated_err"
+ok "choosing a seated candidate discloses its unverified headroom on stderr"
+
+# The marker is an exact token, not a free-form suffix.
+for bad in 'claude:default@seat' 'claude:default@' 'claude@seated:default' '@seated'; do
+  if err=$(call_choose --snapshot "$LAB/captured.json" --candidate "$bad" 2>&1); then
+    fail "malformed seat marker '$bad' unexpectedly selected a candidate"
+  fi
+  [ "$err" = "error: invalid candidate: $bad" ] || fail "malformed seat marker '$bad' returned: $err"
+done
+ok "a malformed seat marker fails closed with the invalid-candidate error"
+
 printf '{"schemaVersion":5,"providers":{"provider":"claude","quotaSemantics":{"effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":50,"runway":{"status":"through_reset"}}]}}}\n' > "$MALFORMED"
 if err=$(call_choose --snapshot "$MALFORMED" --candidate claude:default 2>&1); then
   fail "malformed provider collection unexpectedly dispatched"
