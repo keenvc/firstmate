@@ -33,6 +33,12 @@ Lifecycle:
     run: the pair is closed with terminal=cancelled, the conversation is
     closed, and the driver exits 130. Worktree state is preserved; the
     resume path is a deterministic relaunch, never a native resume.
+    The interrupt exit is a hard os._exit(130): the SDK's own stdout/stderr
+    reader threads are non-daemon (openhands/sdk/utils/command.py), so a
+    normal interpreter teardown would block forever joining a thread whose
+    runtime pipe is still open, wedging the pane as a live `python` process.
+    The pair close, turn-end touch, and cancelled row all happen before the
+    raise, so nothing firstmate depends on is lost by skipping atexit.
 
 Pane rows, the rendered surface firstmate reads (keep the literals stable;
 the working row is the verified delivery signature,
@@ -68,6 +74,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 
 WORKING_ROW = "[fm-openhands] working"
@@ -85,6 +92,10 @@ EXIT_COMMANDS = ("/exit", "/quit")
 # firstmate makes becomes deterministic. --selftest never redirects, so emit
 # falls back to sys.stdout.
 PANE_FD = -1
+
+# The live conversation, module-scoped so the interrupt handler can close it
+# (bounded, via a daemon watchdog thread) before deciding how to exit.
+CONVERSATION = None
 
 
 def emit(row):
@@ -182,6 +193,32 @@ def cleanup_sdk_home():
         SDK_HOME = ""
 
 
+def close_conversation_bounded(conversation, timeout=5.0):
+    """Best-effort conversation close with a hard deadline.
+
+    The SDK's own runtime reader threads are non-daemon
+    (openhands/sdk/utils/command.py), so interpreter teardown would block
+    joining one whose pipe is still open and wedge the pane as a live
+    `python` process. The run's supervision signals (pair close, turn-end
+    touch, cancelled row) are written before the interrupt re-raises, so a
+    close that never finishes loses nothing firstmate depends on: run it on
+    a daemon thread, wait at most <timeout> seconds, and let the caller
+    hard-exit.
+    """
+    if conversation is None or timeout <= 0:
+        return
+
+    def close_it():
+        try:
+            conversation.close()
+        except Exception:
+            pass
+
+    closer = threading.Thread(target=close_it, daemon=True)
+    closer.start()
+    closer.join(timeout=timeout)
+
+
 class StubConversation:
     """The --selftest stand-in: same surface, no SDK, no credentials."""
 
@@ -274,7 +311,9 @@ def main():
             return 3
         llm = LLM(model=model, api_key=api_key)
         agent = get_default_agent(llm=llm, cli_mode=True)
-        conversation = Conversation(agent=agent, workspace=os.getcwd())
+        global CONVERSATION
+        CONVERSATION = Conversation(agent=agent, workspace=os.getcwd())
+        conversation = CONVERSATION
 
     log = RunLog(args.run_log)
     if args.brief:
@@ -294,13 +333,22 @@ def main():
 
 if __name__ == "__main__":
     rc = 0
+    interrupted = False
     try:
         rc = main()
     except KeyboardInterrupt:
         # A run in flight has already closed its own pair; this covers an
         # interrupt at the idle stdin loop, where no run is open.
+        interrupted = True
         emit(CANCELLED_ROW)
         rc = 130
     finally:
+        if interrupted:
+            # The run's signals are durable and the SDK teardown is not
+            # firstmate's, so an interrupted exit is hard: see
+            # close_conversation_bounded and the module docstring.
+            close_conversation_bounded(CONVERSATION)
+            cleanup_sdk_home()
+            os._exit(rc)
         cleanup_sdk_home()
     sys.exit(rc)

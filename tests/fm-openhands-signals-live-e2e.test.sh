@@ -160,11 +160,20 @@ done
 [ -n "$cancelled" ] || fail "a single C-c never closed the real run pair as cancelled"
 [ "$(fm_busy_openhands_run_state "$LOG" 2>/dev/null)" = settled ] \
   || fail "the cancelled close never folded settled"
-current=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$TARGET" '#{pane_current_command}' 2>/dev/null || true)
-case "$current" in
-  *python*) fail "the interrupted driver is still running as $current" ;;
-  *) pass "a single C-c cancels the real run and stops the driver" ;;
-esac
+# The interrupted driver must actually exit. SIGINT lands the bounded close
+# on the main thread (up to a few seconds: bin/fm-openhands-worker.py's
+# close_converation_bounded) before the hard os._exit(130), so poll rather
+# than single-check, or a scheduler delay could false-fail.
+driver_gone=
+for _ in $(seq 1 30); do
+  current=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$TARGET" '#{pane_current_command}' 2>/dev/null || true)
+  case "$current" in
+    *python*) sleep 1 ;;
+    *) driver_gone=1; break ;;
+  esac
+done
+[ -n "$driver_gone" ] || fail "the interrupted driver never exited (still running as $current)"
+pass "a single C-c cancels the real run and stops the driver"
 
 cleanup
 trap - EXIT
