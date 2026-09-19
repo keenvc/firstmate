@@ -1,0 +1,3 @@
+/tmp/fm-seat-live/run/seats/fleet-default -> projects: ["/tmp/fm-seat-live/run/proj-c","/tmp/fm-seat-live/run/proj-c-wt"]
+/tmp/fm-seat-live/run/seats/account-a -> projects: ["/tmp/fm-seat-live/run/proj-a","/tmp/fm-seat-live/run/proj-a-wt"]
+/tmp/fm-seat-live/run/seats/account-b -> projects: ["/tmp/fm-seat-live/run/proj-b","/tmp/fm-seat-live/run/proj-b-wt"]

@@ -1,0 +1,41 @@
+
+--- 1. a crewmate lane seated on account-A (firstmate itself sits on the fleet default) ---
+warning: /tmp/fm-seat-live/rl/home/data/lane-r/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned lane-r harness=claude kind=ship mode=no-mistakes yolo=off window=firstmate:fm-lane-r worktree=/tmp/fm-seat-live/rl/proj-wt
+  config store : /tmp/fm-seat-live/rl/seats/account-a
+  account      : captain@account-A
+  cwd          : /tmp/fm-seat-live/rl/proj-wt
+ready >
+
+--- 2. the agent wedges and is killed; the captain relaunches the task (no flag is allowed here) ---
+$ fm-spawn.sh lane-r --relaunch
+warning: /tmp/fm-seat-live/rl/home/data/lane-r/launch-brief.md records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode no-mistakes - confirm its definition of done matches
+spawned lane-r harness=claude kind=ship mode=no-mistakes yolo=off window=firstmate:fm-lane-r worktree=/tmp/fm-seat-live/rl/proj-wt
+relaunched pane:
+  config store : /tmp/fm-seat-live/rl/seats/account-a
+  account      : captain@account-A
+  cwd          : /tmp/fm-seat-live/rl/proj-wt
+ready >
+meta after relaunch: claude_config_dir=/tmp/fm-seat-live/rl/seats/account-a
+
+--- 3. adversarial: try to move a live task to the other account on relaunch ---
+$ fm-spawn.sh lane-r --relaunch --claude-config-dir /tmp/fm-seat-live/rl/seats/account-b
+error: --relaunch reuses the task's recorded Claude config directory; --claude-config-dir cannot override it
+exit=0
+meta still: claude_config_dir=/tmp/fm-seat-live/rl/seats/account-a
+
+--- 4. adversarial: the recorded seat is deleted, then the task is relaunched ---
+error: this task's recorded Claude config directory '/tmp/fm-seat-live/rl/seats/account-a' holds no Claude configuration at all (no .claude.json found); .agents/skills/harness-adapters/references/harness/claude.md under 'Workspace trust' owns what preparing a seat requires
+hint: the seat is the one recorded in this task's meta and --claude-config-dir cannot override it on a relaunch; restore that directory, or relaunch the task under a non-claude --harness
+exit=0
+pane after the refusal (must NOT be a claude on the fleet default):
+ready >
+Terminated
+bash-5.2$
+-- relaunch + a fresh --claude-config-dir --
+error: --relaunch reuses the task's recorded Claude config directory; --claude-config-dir cannot override it
+exit=1
+-- relaunch whose recorded seat was deleted --
+error: this task's recorded Claude config directory '/tmp/fm-seat-live/rl/seats/account-a' holds no Claude configuration at all (no .claude.json found); .agents/skills/harness-adapters/references/harness/claude.md under 'Workspace trust' owns what preparing a seat requires
+hint: the seat is the one recorded in this task's meta and --claude-config-dir cannot override it on a relaunch; restore that directory, or relaunch the task under a non-claude --harness
+exit=1

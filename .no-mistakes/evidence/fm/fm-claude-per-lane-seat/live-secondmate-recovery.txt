@@ -1,0 +1,29 @@
+
+--- 1. the operator seats a new secondmate on account-A (firstmate itself is on the fleet default) ---
+$ fm-spawn.sh sm1 /tmp/fm-seat-live/sm/sm1-home --secondmate --claude-config-dir /tmp/fm-seat-live/sm/seats/account-a
+warning: secondmate sm1 sync skipped before launch: primary default-branch commit cannot be resolved
+spawned sm1 harness=claude kind=secondmate mode=secondmate yolo=off window=firstmate:fm-sm1 worktree=/tmp/fm-seat-live/sm/sm1-home
+CLAUDE CODE (live stub)
+  config store : /tmp/fm-seat-live/sm/seats/account-a
+  account      : captain@account-A
+  cwd          : /tmp/fm-seat-live/sm/sm1-home
+ready >
+meta: claude_config_dir=/tmp/fm-seat-live/sm/seats/account-a
+
+--- 2. its agent dies (process killed in the pane), which is what the startup sweep recovers from ---
+pane now running: bash
+
+--- 3. the REAL bin/fm-bootstrap.sh startup sweep runs and recovers it (bare respawn, no flag) ---
+SECONDMATE_SYNC: secondmate sm1: skipped: primary default-branch commit cannot be resolved
+recovered pane:
+CLAUDE CODE (live stub)
+  config store : /tmp/fm-seat-live/sm/seats/account-a
+  account      : captain@account-A
+  cwd          : /tmp/fm-seat-live/sm/sm1-home
+ready >
+meta after recovery: claude_config_dir=/tmp/fm-seat-live/sm/seats/account-a
+
+--- 4. adversarial: the seat directory is removed, then the same sweep runs again ---
+SECONDMATE_LIVENESS: secondmate sm1: respawn failed after confirmed agent absence on existing endpoint: error: this secondmate's recorded Claude config directory '/tmp/fm-seat-live/sm/seats/account-a' holds no Claude configuration at all (no .claude.json found); .agents/skills/harness-adapters/references/harness/claude.md under 'Workspace trust' owns what preparing a seat requires
+pane command now: bash
+did anything launch on the fleet account? pane tail:

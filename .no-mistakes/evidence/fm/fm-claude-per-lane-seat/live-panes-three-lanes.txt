@@ -1,0 +1,29 @@
+$ tmux -L fm-seat-live list-windows -a
+firstmate:0: bash* (1 panes) [80x24] 
+firstmate:1: fm-lane-a (1 panes) [80x24] 
+firstmate:2: fm-lane-b (1 panes) [80x24] 
+firstmate:3: fm-lane-unseated (1 panes) [80x24] 
+
+$ tmux -L fm-seat-live capture-pane -p -t firstmate:fm-lane-a   (tail)
+/fm-seat-live/run/home/data/lane-a/launch-brief.md')"
+CLAUDE CODE (live stub)
+  config store : /tmp/fm-seat-live/run/seats/account-a
+  account      : captain@account-A
+  cwd          : /tmp/fm-seat-live/run/proj-a-wt
+ready >
+
+$ tmux -L fm-seat-live capture-pane -p -t firstmate:fm-lane-b   (tail)
+/fm-seat-live/run/home/data/lane-b/launch-brief.md')"
+CLAUDE CODE (live stub)
+  config store : /tmp/fm-seat-live/run/seats/account-b
+  account      : captain@account-B
+  cwd          : /tmp/fm-seat-live/run/proj-b-wt
+ready >
+
+$ tmux -L fm-seat-live capture-pane -p -t firstmate:fm-lane-unseated   (tail)
+/tmp/fm-seat-live/run/home/data/lane-unseated/launch-brief.md')"
+CLAUDE CODE (live stub)
+  config store : /tmp/fm-seat-live/run/seats/fleet-default
+  account      : captain@fleet-DEFAULT
+  cwd          : /tmp/fm-seat-live/run/proj-c-wt
+ready >

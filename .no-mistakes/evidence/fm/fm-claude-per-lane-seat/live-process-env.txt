@@ -1,0 +1,3 @@
+pid 3932597  CLAUDE_CONFIG_DIR=/tmp/fm-seat-live/run/seats/account-a
+pid 3938478  CLAUDE_CONFIG_DIR=/tmp/fm-seat-live/run/seats/account-b
+pid 3946834  CLAUDE_CONFIG_DIR=/tmp/fm-seat-live/run/seats/fleet-default

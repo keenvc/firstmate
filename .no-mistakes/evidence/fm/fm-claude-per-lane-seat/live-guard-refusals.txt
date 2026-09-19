@@ -1,0 +1,27 @@
+
+--- guard 1: --claude-config-dir naming a directory that does not exist ---
+$ fm-spawn.sh g-missing <project> --mode no-mistakes --yolo off --claude-config-dir /tmp/fm-seat-live/guards/no-such-seat
+error: --claude-config-dir '/tmp/fm-seat-live/guards/no-such-seat' is not an accessible directory
+exit=1
+meta written? no   tmux windows: 0
+
+--- guard 2: --claude-config-dir naming a plain file ---
+error: --claude-config-dir '/tmp/fm-seat-live/guards/plain-file' is not an accessible directory
+exit=1
+meta written? no   tmux windows: 0
+
+--- guard 3: a directory with no Claude store in it (login never done) ---
+error: --claude-config-dir '/tmp/fm-seat-live/guards/empty-seat' holds no Claude configuration at all (no .claude.json found); .agents/skills/harness-adapters/references/harness/claude.md under 'Workspace trust' owns what preparing a seat requires
+exit=1
+meta written? no   tmux windows: 0
+
+--- guard 4: the flag aimed at a non-claude harness ---
+error: --claude-config-dir applies only to claude spawns; this spawn resolved harness 'codex'
+exit=1
+meta written? no   tmux windows: 0
+
+--- guard 5: a remote secondmate, whose pane is launched on another host ---
+error: --claude-config-dir names a Claude config directory on this machine and is not supported for remote secondmates, whose launch happens on another host
+exit=2
+any ssh dispatch? none - ssh log empty
+meta written? no   tmux windows: 0
