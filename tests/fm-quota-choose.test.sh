@@ -260,7 +260,9 @@ fi
 ok "all candidates are validated before selection"
 
 # A config-seated candidate spends an account this snapshot never measures, so
-# the family's single row must not judge it. The fixture's claude rows are a
+# the family's single row must not judge it; it carries an unknown quota value
+# through the same eligibility decision every candidate goes through, where
+# unknown is eligible only for a seat. The fixture's claude rows are a
 # barely-positive all_models scope and an exhausted model:fable scope, so
 # claude:model:fable is the candidate the default account's own row rejects.
 if out=$(call_choose --snapshot "$LAB/captured.json" --candidate claude:model:fable 2>/dev/null); then
@@ -299,6 +301,24 @@ for bad in 'claude:default@seat' 'claude:default@' 'claude@seated:default' '@sea
   [ "$err" = "error: invalid candidate: $bad" ] || fail "malformed seat marker '$bad' returned: $err"
 done
 ok "a malformed seat marker fails closed with the invalid-candidate error"
+
+# The marker exempts a candidate from the default account's quota row, nothing
+# else: every gate that does not depend on quota still refuses a seated
+# candidate exactly as it refuses an unseated one.
+if err=$(call_choose --snapshot "$LAB/captured.json" --candidate bogus:default@seated 2>&1); then
+  fail "a seated candidate on an unknown harness was selected"
+fi
+[ "$err" = "error: unknown harness: bogus" ] || fail "seated unknown harness returned: $err"
+if err=$(call_choose --snapshot "$LAB/captured.json" --candidate pi:default --candidate 'claude:@seated' 2>&1); then
+  fail "a seated candidate with an empty model was hidden by an earlier selection"
+fi
+[ "$err" = "error: invalid candidate: claude:@seated" ] || fail "seated empty model returned: $err"
+if err=$(call_choose --snapshot "$LAB/captured.json" --candidate omp:ollama/qwen3:8b@seated 2>&1); then
+  fail "a seated omp candidate with an unmapped prefix was selected"
+fi
+[ "$err" = "error: omp quota mapping covers only the openai-codex and claude-bridge prefixes: ollama/qwen3:8b" ] \
+  || fail "seated unmapped omp prefix returned: $err"
+ok "the seat marker exempts a candidate from the quota row only, never from the other gates"
 
 printf '{"schemaVersion":5,"providers":{"provider":"claude","quotaSemantics":{"effectiveAvailability":[{"scope":"all_models","status":"known","effectivePercentRemaining":50,"runway":{"status":"through_reset"}}]}}}\n' > "$MALFORMED"
 if err=$(call_choose --snapshot "$MALFORMED" --candidate claude:default 2>&1); then

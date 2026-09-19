@@ -45,16 +45,20 @@
 # (`claude:default@seated`): the harness and model parse exactly as they do
 # without the marker, the suffix must be exactly `@seated` or the candidate is
 # refused, and an unmarked candidate keeps today's behavior byte for byte.
-# A seated candidate is never measured against the family row at all. Its quota
-# is reported as honestly unknown rather than as fabricated per-seat data, and
-# AGENTS.md section 4's rule for exactly this case applies - disclosed
-# uncertainty keeps a candidate eligible, and only concrete contradictory
-# evidence blocks it - so a seated candidate is selected when candidate order
-# reaches it, and a notice on stderr says its headroom was never verified.
-# There is no per-seat quota evidence anywhere in quota-axi's schema today, so
-# nothing can contradict a seated candidate; that is a disclosure, not a claim
-# of headroom. The marker is not harness-restricted in code, but claude is the
-# only harness with a config-dir seat, so it is the only practical caller.
+# A seated candidate is never measured against the family row: that lookup is
+# skipped and an honestly-unknown `{"status":"unknown"}` value stands in for the
+# per-seat data quota-axi does not carry, rather than a fabricated figure. It
+# then goes through the SAME eligibility decision as every other candidate, with
+# only that decision's unknown branch reading the seat marker - an unknown
+# status is eligible when seated and, exactly as before, ineligible when not.
+# The exhausted_now veto and the known-positive-percentage path are identical
+# for both, so per-seat evidence would block a seated candidate the day one
+# exists. Accepting unknown for a seat is AGENTS.md section 4's rule for this
+# case: disclosed uncertainty keeps a candidate eligible, only concrete
+# contradictory evidence blocks it. A notice on stderr says its headroom was
+# never verified, because that is a disclosure and not a claim of headroom.
+# The marker is not harness-restricted in code, but claude is the only harness
+# with a config-dir seat, so it is the only practical caller.
 #
 # omp (Oh My Pi) has no single primary family, so its candidate model prefix
 # selects the family: openai-codex/<id> checks the codex row and
@@ -398,21 +402,22 @@ for c in "${CANDIDATES[@]}"; do
   harness=${token%%:*}
   model=${token#*:}
   [ "$model" = "$token" ] && model="default"
+  seated=false
   if candidate_is_seated "$c"; then
-    echo "notice: candidate '$c' runs on a config seat, whose own account has no row in this quota snapshot; its headroom was not verified and it is treated as eligible with unknown quota" >&2
-    chosen="$harness $model"
-    break
+    seated=true
+    effective='{"status":"unknown"}'
+  else
+    provider=$(provider_for_harness "$harness" "$model")
+    scope_model=$model
+    [ "$harness" != omp ] || scope_model=${model#*/}
+    effective=$(effective_for_provider_model "$provider" "$scope_model")
   fi
-  provider=$(provider_for_harness "$harness" "$model")
-  scope_model=$model
-  [ "$harness" != omp ] || scope_model=${model#*/}
-  effective=$(effective_for_provider_model "$provider" "$scope_model")
   if [ -z "$effective" ] || [ "$effective" = "null" ]; then
     continue
   fi
-  if printf '%s\n' "$effective" | jq -e '
+  if printf '%s\n' "$effective" | jq -e --argjson seated "$seated" '
     if (.runway.status // "") == "exhausted_now" then false
-    elif .status == "unknown" then false
+    elif .status == "unknown" then $seated
     else
       .effectivePercentRemaining as $remaining |
       (($remaining | type) == "number") and
@@ -420,6 +425,7 @@ for c in "${CANDIDATES[@]}"; do
       ((.runway.status // "") != "exhausted_now")
     end
   ' >/dev/null 2>&1; then
+    [ "$seated" = false ] || echo "notice: candidate '$c' runs on a config seat, whose own account has no row in this quota snapshot; its headroom was not verified and it is treated as eligible with unknown quota" >&2
     chosen="$harness $model"
     break
   fi
