@@ -2119,8 +2119,10 @@ fi
 # hasTrustDialogAccepted and the import-consent flags bin/fm-claude-trust.sh
 # reads and writes do live. Whether Claude Code records it somewhere else - a
 # separate file, an OS keychain - was not checked. So nothing here can screen
-# for it, and the refusal below names both interactive steps instead.
-# <origin> is how the refusals name the directory, because on a relaunch the
+# for it: the .claude.json check below is a cheap sanity gate that refuses an
+# obviously empty directory, and every ACCEPTED seat carries a notice saying so,
+# because a store that was only logged into passes this check and then wedges.
+# <origin> is how the messages name the directory, because on a relaunch the
 # seat comes from the task's record rather than from a flag the caller passed.
 fm_claude_seat_validate() { # <candidate-dir> <origin>
   local raw=$1 origin=$2 real
@@ -2129,12 +2131,10 @@ fm_claude_seat_validate() { # <candidate-dir> <origin>
     return 1
   }
   [ -f "$real/.claude.json" ] || {
-    echo "error: $origin '$real' holds no usable Claude configuration (no .claude.json found)" >&2
-    echo "hint: prepare that store in one interactive sitting - run CLAUDE_CONFIG_DIR='$real' claude --dangerously-skip-permissions once and accept everything it shows: first the login, then that store's own Bypass Permissions confirmation" >&2
-    echo "hint: logging in alone is not enough - the Bypass Permissions confirmation is raised only by --dangerously-skip-permissions, and a spawned pane cannot answer it, so a seat that has never accepted it wedges the worker" >&2
-    echo "hint: if that confirmation cannot be accepted, setting config/claude-permission-mode to auto launches with --permission-mode auto and never asks for bypass mode - but that setting is home-wide and moves every claude launch from this home, not this seat alone" >&2
+    echo "error: $origin '$real' holds no Claude configuration at all (no .claude.json found); log that store in once with CLAUDE_CONFIG_DIR='$real' claude, then retry" >&2
     return 1
   }
+  echo "notice: $origin '$real' is taken as given - a .claude.json is present, which is all this check proves; the seat must also already have accepted that store's own machine-scoped Bypass Permissions confirmation, which only --dangerously-skip-permissions raises, which defaults to declining, and which firstmate cannot answer (its steering plane carries Enter, Escape and Ctrl-C alone), so prepare it once interactively with CLAUDE_CONFIG_DIR='$real' claude --dangerously-skip-permissions, or launch only under config/claude-permission-mode=auto, which never requests bypass mode and so never meets that dialog" >&2
   printf '%s\n' "$real"
 }
 # CLAUDE_SEAT_RECORD is what this task's meta remembers as its seat, carried

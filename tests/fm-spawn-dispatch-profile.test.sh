@@ -948,7 +948,16 @@ test_claude_config_dir_flag_records_meta_and_launch() {
   launch=$(cat "$LAUNCH_LOG")
   assert_contains "$launch" "CLAUDE_CONFIG_DIR='$seat' env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI" \
     "the launch did not use the named seat's config directory"
-  pass "--claude-config-dir is recorded in the task's own meta and reaches the launched process"
+  # A seat that was only logged into passes the existence check and then wedges
+  # on the Bypass Permissions confirmation, so the warning has to reach the
+  # operator on the path that accepts a seat, not only on a refusal.
+  assert_contains "$out" "notice: --claude-config-dir '$seat'" \
+    "an accepted seat must carry a notice naming it"
+  assert_contains "$out" "Bypass Permissions confirmation" \
+    "the acceptance notice must name the confirmation this check cannot verify"
+  assert_contains "$out" "config/claude-permission-mode=auto" \
+    "the acceptance notice must offer the launch mode that never meets that confirmation"
+  pass "--claude-config-dir is recorded in the task's own meta, reaches the launched process, and warns what acceptance does not prove"
 }
 
 test_claude_config_dir_flag_overrides_firstmates_ambient_store() {
@@ -1052,25 +1061,16 @@ test_claude_config_dir_without_config_refuses() {
   out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --claude-config-dir "$CASE_DIR/seat-empty")
   status=$?
   expect_code 1 "$status" "a --claude-config-dir with no .claude.json must refuse the spawn"
-  assert_contains "$out" "--claude-config-dir '$CASE_DIR/seat-empty' holds no usable Claude configuration" \
+  # This check proves one thing - that no configuration exists there at all -
+  # so the refusal says that and points at the login. What a present
+  # .claude.json still cannot prove is carried by the notice on the acceptance
+  # path instead, which every seated spawn reaches.
+  assert_contains "$out" "--claude-config-dir '$CASE_DIR/seat-empty' holds no Claude configuration at all" \
     "refusal must name the flag the caller passed and the missing configuration"
-  # Preparing the store means two interactive steps, not just a login: the
-  # separate Bypass Permissions confirmation a spawned pane cannot answer is
-  # raised only under --dangerously-skip-permissions, so the recommended
-  # command must carry that flag and the refusal must say a login alone is
-  # not enough.
-  assert_contains "$out" "CLAUDE_CONFIG_DIR='$CASE_DIR/seat-empty' claude --dangerously-skip-permissions" \
-    "refusal must recommend the one command that reaches both interactive steps"
-  assert_contains "$out" "Bypass Permissions confirmation" \
-    "refusal must name the second interactive step, not just the login"
-  assert_contains "$out" "config/claude-permission-mode to auto" \
-    "refusal must offer the launch mode that never meets that confirmation"
-  # That file is resolved once per home and applies to every claude launch
-  # from it, so the hint must not read as a per-seat escape hatch.
-  assert_contains "$out" "every claude launch from this home, not this seat alone" \
-    "refusal must state that the permission-mode escape hatch is home-wide, not seat-scoped"
+  assert_contains "$out" "CLAUDE_CONFIG_DIR='$CASE_DIR/seat-empty' claude" \
+    "refusal must point at logging that store in"
   assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
-  pass "a --claude-config-dir with no Claude configuration refuses before any endpoint or metadata, naming both interactive steps"
+  pass "a --claude-config-dir with no Claude configuration refuses before any endpoint or metadata"
 }
 
 test_claude_config_dir_refused_for_non_claude_harness() {
