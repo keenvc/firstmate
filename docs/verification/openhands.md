@@ -100,7 +100,7 @@ The guard asserts the firstmate-owned mechanics, so the profile's current `LLM_M
 
 ## Still unproven
 
-- A Fireworks-provider run (`fireworks_ai/accounts/fireworks/models/deepseek-v4-flash`): the adapter mechanics are provider-independent because the SDK owns the provider, but no Fireworks-backed turn has run yet, pending the profile's key.
+- A Fireworks-provider run (`fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash`): the adapter mechanics are provider-independent because the SDK owns the provider, but no Fireworks-backed turn has run yet, pending the profile's key.
 - Herdr, Zellij, cmux, and Orca placements: the launch, fold, and delivery row are backend-neutral, but only tmux is verified for this adapter.
 - Native resume: none is claimed; the resume path is a deterministic relaunch, and the conversation's durable state is the worktree.
 - Secondmate and primary use: refused by design, not merely unverified; a headless driver has no wake-protocol surface to arm.

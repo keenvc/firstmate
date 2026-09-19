@@ -20,7 +20,7 @@ Verified as a CREWMATE and SCOUT adapter only; `../../../../../bin/fm-spawn.sh` 
 | Marker | `FM_OPENHANDS_HARNESS=openhands`, a firstmate-owned launch marker in omp's shape: precedence only, trusted solely when a driver process is genuinely in the ancestry. |
 | Ancestry | Args-strength only: a `python*` process whose arguments carry the full `fm-openhands-worker.py` filename, never the openhands fragment, because the live process name is the interpreter's. |
 | Resume | No native pane resume is verified; the conversation state is the worktree, so use deterministic relaunch. |
-| Model | `--model <litellm-string>` (for example `fireworks_ai/accounts/fireworks/models/deepseek-v4-flash`); validated syntactically only, because the authoritative listing is the provider's own API and the spawn must not spend the crew's key on a name check; when omitted the driver reads `LLM_MODEL` from the profile. |
+| Model | `--model <litellm-string>` (for example `fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash`); validated syntactically only, because the authoritative listing is the provider's own API and the spawn must not spend the crew's key on a name check; when omitted the driver reads `LLM_MODEL` from the profile. |
 | Effort | No effort axis; an effort value stays in task metadata under the record-and-omit contract, and a dispatch profile that names one is refused at validation. |
 | Composer | None: the pane renders the driver's own rows, and the working row is the delivery signature below. |
 | Steering | stdin lines: every non-empty line is a follow-up message sent through the same conversation, so `fm-send` typing lands as a real user turn. |

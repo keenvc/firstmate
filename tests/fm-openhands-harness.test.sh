@@ -369,7 +369,7 @@ EOF
   printf 'openhands\n' > "$home/config/crew-harness"
   umask 077
   cat > "$home/config/openhands-llm.env" <<'EOF'
-LLM_MODEL=fireworks_ai/accounts/fireworks/models/deepseek-v4-flash
+LLM_MODEL=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash
 LLM_API_KEY=fm-fake-key
 EOF
   umask 022
@@ -404,7 +404,7 @@ test_openhands_launch_carries_the_driver_model_and_wiring() {
   rec=$(make_openhands_spawn_case launch "$id")
   read_openhands_spawn_record "$rec"
   out=$(run_openhands_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" \
-    --model fireworks_ai/accounts/fireworks/models/deepseek-v4-flash)
+    --model fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash)
   rc=$?
   expect_code 0 "$rc" "openhands spawn with a valid model should succeed"
   launch=$(cat "$CASE_DIR/launch.log")
@@ -416,7 +416,7 @@ test_openhands_launch_carries_the_driver_model_and_wiring() {
   assert_contains "$launch" "--run-log" "openhands launch did not carry its run-log flag"
   assert_contains "$launch" "$HOME_DIR/state/$id.openhands-run" "openhands launch did not pin the per-task run log"
   assert_contains "$launch" "--turn-end" "openhands launch did not carry its turn-end flag"
-  assert_contains "$launch" "--model 'fireworks_ai/accounts/fireworks/models/deepseek-v4-flash'" \
+  assert_contains "$launch" "--model 'fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash'" \
     "openhands launch did not carry the requested model"
   assert_contains "$launch" "env -u CLAUDECODE" "openhands launch did not clear the inherited launcher marker"
   assert_contains "$launch" "env -u CURSOR_AGENT" "openhands launch did not clear the cursor markers"
@@ -427,7 +427,7 @@ test_openhands_launch_carries_the_driver_model_and_wiring() {
   assert_not_contains "$launch" "__BRIEF__" "openhands launch left its brief placeholder unsubstituted"
   meta="$HOME_DIR/state/$id.meta"
   assert_grep 'harness=openhands' "$meta" "openhands meta did not record its harness"
-  assert_grep 'model=fireworks_ai/accounts/fireworks/models/deepseek-v4-flash' "$meta" "openhands meta did not record its model"
+  assert_grep 'model=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash' "$meta" "openhands meta did not record its model"
   [ -e "$HOME_DIR/state/$id.openhands-run" ] \
     || fail "openhands spawn did not truncate the run log into existence"
   [ -s "$HOME_DIR/state/$id.openhands-run" ] \
@@ -455,7 +455,7 @@ test_openhands_effort_is_recorded_but_omitted() {
   rec=$(make_openhands_spawn_case effort "$id")
   read_openhands_spawn_record "$rec"
   out=$(run_openhands_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$id" \
-    --model fireworks_ai/accounts/fireworks/models/deepseek-v4-flash --effort low)
+    --model fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash --effort low)
   rc=$?
   expect_code 0 "$rc" "openhands spawn with an unsupported effort should still succeed"
   launch=$(cat "$CASE_DIR/launch.log")
@@ -533,7 +533,7 @@ test_openhands_incomplete_llm_env_refuses_before_pane_creation() {
   rec=$(make_openhands_spawn_case emptykey "$id")
   read_openhands_spawn_record "$rec"
   umask 077
-  printf 'LLM_MODEL=fireworks_ai/accounts/fireworks/models/deepseek-v4-flash\nLLM_API_KEY=\n' \
+  printf 'LLM_MODEL=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash\nLLM_API_KEY=\n' \
     > "$HOME_DIR/config/openhands-llm.env"
   umask 022
   rc=0

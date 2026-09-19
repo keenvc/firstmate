@@ -1758,7 +1758,7 @@ fm_openhands_llm_env_ready() {  # <llm-env-path>
 }
 
 # openhands_model_validate: syntactic only. The model is a litellm provider
-# string (for example fireworks_ai/accounts/fireworks/models/deepseek-v4-flash
+# string (for example fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash
 # or anthropic/claude-opus-4-8), and the only authoritative listing is the
 # provider's own API, which this spawn must not call with the crew's key just
 # to validate a name; the driver fails loudly at run start on an unknown id.
@@ -1768,7 +1768,7 @@ openhands_model_validate() {  # <model>
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$model" in
     *[!A-Za-z0-9._/-]*|.*|*.|*/|*//*)
-      echo "error: openhands model '$model' is not a valid litellm provider/model string; use provider/model form (for example fireworks_ai/accounts/fireworks/models/deepseek-v4-flash) or omit --model" >&2
+      echo "error: openhands model '$model' is not a valid litellm provider/model string; use provider/model form (for example fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash) or omit --model" >&2
       return 1
       ;;
   esac
@@ -2041,7 +2041,7 @@ launch_template() {
   # trust dialog to suppress and no TUI to gate, so no readiness answer and
   # no effort flag exist; an effort value stays in task metadata under the
   # record-and-omit contract. __MODELFLAG__ carries the litellm model string
-  # (for example fireworks_ai/accounts/fireworks/models/deepseek-v4-flash);
+  # (for example fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash);
   # when it is absent the driver defaults to the profile's LLM_MODEL.
   openhands) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS FM_OPENHANDS_HARNESS=openhands __OPENHANDSPY__ __OPENHANDSDRIVER__ --llm-env __OPENHANDSENV__ --run-log __OPENHANDSLOG__ --turn-end __TURNEND__ __MODELFLAG__"$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   *) return 1 ;;
