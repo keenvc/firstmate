@@ -10,6 +10,12 @@ Lifecycle:
   - The LLM profile (LLM_API_KEY, LLM_MODEL) is loaded from the --llm-env
     file (active-home config/openhands-llm.env, chmod 600, never committed).
     The key is never printed, logged, or written to the run log.
+  - The SDK's own state root (profile store, sessions) lands under a
+    per-process temporary HOME, never the operator's real HOME: the store
+    has no environment override, a host running the OpenHands server
+    container can carry a root-owned ~/.openhands the SDK cannot mkdir
+    into, and a shared store would leak state across tasks. The temp HOME
+    is removed at exit; the conversation's durable state is the worktree.
   - The positional brief, when present, is the first message. Afterwards
     stdin is read line by line: every non-empty line is a follow-up message
     (the steering surface), the literal /exit or /quit exits, and EOF exits.
@@ -49,7 +55,9 @@ import argparse
 import datetime
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 WORKING_ROW = "[fm-openhands] working"
@@ -110,6 +118,32 @@ def touch(path):
     if path:
         with open(path, "a", encoding="utf-8"):
             pass
+
+
+# The SDK resolves its state root (profile store, sessions) from HOME with no
+# environment override for the profile store, and two hosts facts make the
+# operator's real HOME the wrong place for it: a host running the OpenHands
+# server container can carry a root-owned ~/.openhands the SDK cannot mkdir
+# into (the failure is a PermissionError inside Conversation construction),
+# and a shared profile store would leak state across tasks. A per-process
+# temporary HOME solves both and keeps every run deterministic; the
+# conversation's durable state is the worktree, so nothing of value is lost
+# when it is removed at exit.
+SDK_HOME = ""
+
+
+def ensure_sdk_home():
+    global SDK_HOME
+    if SDK_HOME:
+        return
+    SDK_HOME = tempfile.mkdtemp(prefix="fm-openhands-home.")
+    os.environ["HOME"] = SDK_HOME
+
+
+def cleanup_sdk_home():
+    if SDK_HOME:
+        shutil.rmtree(SDK_HOME, ignore_errors=True)
+        SDK_HOME = ""
 
 
 class StubConversation:
@@ -188,6 +222,7 @@ def main():
             )
             return 2
         os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
+        ensure_sdk_home()
         try:
             from openhands.sdk import Conversation, LLM
             from openhands.tools import get_default_agent
@@ -218,10 +253,14 @@ def main():
 
 
 if __name__ == "__main__":
+    rc = 0
     try:
-        sys.exit(main())
+        rc = main()
     except KeyboardInterrupt:
         # A run in flight has already closed its own pair; this covers an
         # interrupt at the idle stdin loop, where no run is open.
         emit(CANCELLED_ROW)
-        sys.exit(130)
+        rc = 130
+    finally:
+        cleanup_sdk_home()
+    sys.exit(rc)
