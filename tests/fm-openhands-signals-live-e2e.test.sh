@@ -35,7 +35,10 @@ pass() {
   printf 'ok - %s\n' "$1"
 }
 
-fm_live_gate opt-in FM_OPENHANDS_SIGNALS_LIVE openhands tmux
+# The gate names only real commands this guard shells out to; the SDK surface
+# is a venv, not a command, so the venv interpreter and the profile are checked
+# directly below with the same fail-loud contract.
+fm_live_gate opt-in FM_OPENHANDS_SIGNALS_LIVE tmux
 [ -n "$REAL_TMUX" ] || fail "tmux is not installed"
 [ -x "$VENV_PY" ] || fail "the OpenHands venv python is not installed at $VENV_PY"
 [ -r "$LLM_ENV" ] || fail "no readable OpenHands profile at $LLM_ENV"
