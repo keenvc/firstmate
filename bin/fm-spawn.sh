@@ -52,12 +52,14 @@
 #   into, letting two claude lanes run concurrently under different accounts
 #   without moving every claude lane at once the way setting CLAUDE_CONFIG_DIR
 #   in firstmate's own environment would. Refused when the resolved harness is
-#   not claude. Validated before any worktree or endpoint is created: <dir>
-#   must resolve to an existing directory holding a Claude config store
-#   (.claude.json), or the spawn refuses naming <dir> rather than launching a
-#   worker that would wedge. The resolved directory feeds both
-#   bin/fm-claude-trust.sh's pre-registration and the launch's own
-#   CLAUDE_CONFIG_DIR, so the two halves can never land in different stores.
+#   not claude, and on a remote secondmate, whose launch happens on another
+#   host where a local directory path names nothing. Validated before any
+#   worktree or endpoint is created: <dir> must resolve to an existing
+#   directory holding a Claude config store (.claude.json), or the spawn
+#   refuses naming <dir> rather than launching a worker that would wedge.
+#   The resolved directory feeds both bin/fm-claude-trust.sh's
+#   pre-registration and the launch's own CLAUDE_CONFIG_DIR, so the two
+#   halves can never land in different stores.
 #   Recorded in the task's own meta as claude_config_dir= (absent means the
 #   single-store default, byte-identical to before this flag existed); a
 #   --relaunch always reuses that recorded value and refuses a fresh
