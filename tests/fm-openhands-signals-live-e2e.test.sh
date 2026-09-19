@@ -79,19 +79,27 @@ capture() {
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$TARGET" Enter \
   || fail "could not submit the driver launch line"
 
-# The SDK run folds its pair open while it works. The window is generous: a
-# cold SDK start spawns the agent runtime before the first model turn.
+# The SDK run folds its pair open while it works, and the working row prints
+# exactly once at run open, BEFORE the SDK's own streaming output can scroll
+# it away - which is the delivery contract: a submit is acknowledged by
+# reading the pane at Enter time, not minutes into a turn. The window is
+# generous: a cold SDK start spawns the agent runtime before the first record.
 busy_live=
+row_live=
 for _ in $(seq 1 300); do
-  if [ "$(fm_busy_openhands_run_state "$LOG" 2>/dev/null)" = busy ]; then busy_live=1; break; fi
+  if [ "$(fm_busy_openhands_run_state "$LOG" 2>/dev/null)" = busy ]; then
+    busy_live=1
+    # Read the pane in the same poll that first saw the open pair, so the
+    # row is checked where a submit core would read it: at run open.
+    printf '%s' "$(capture)" | fm_busy_lines_match openhands && row_live=1
+    break
+  fi
   case "$(capture)" in *80235*|*80,235*) break ;; esac
   sleep 1
 done
 [ -n "$busy_live" ] || fail "the run log never folded busy while the real SDK turn ran"
 pass "the real run log folds busy while the SDK turn is in flight"
-screen=$(capture)
-printf '%s' "$screen" | fm_busy_lines_match openhands \
-  || fail "the rendered pane never matched the working delivery row"
+[ -n "$row_live" ] || fail "the working delivery row never rendered at run open"
 
 for _ in $(seq 1 600); do
   [ "$(fm_busy_openhands_run_state "$LOG" 2>/dev/null)" = settled ] && break
