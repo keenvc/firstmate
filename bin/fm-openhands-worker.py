@@ -141,6 +141,7 @@ def ensure_sdk_home():
 
 
 def cleanup_sdk_home():
+    global SDK_HOME
     if SDK_HOME:
         shutil.rmtree(SDK_HOME, ignore_errors=True)
         SDK_HOME = ""
