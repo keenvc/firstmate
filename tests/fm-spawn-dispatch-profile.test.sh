@@ -1127,6 +1127,61 @@ assert_attribution_policy() {  # <launch-command> <what>
   assert_contains "$launch" '"sessionUrl":false' "$what launch does not silence the session URL"
 }
 
+# bin/fm-bootstrap.sh's liveness sweep recovers a dead secondmate with a bare
+# `fm-spawn.sh <id> --secondmate` - no --relaunch, no flag, home and identity
+# taken from the existing record. The seat has to survive that the way the home
+# does, or the recovery moves a seated lane onto firstmate's own account and
+# erases the record, leaving a later relaunch nothing to restore.
+test_bare_secondmate_respawn_keeps_the_recorded_claude_seat() {
+  local rec id sm seat out status launch
+  id=profile-secondmate-seat-respawn-z33
+  rec=$(make_spawn_case profile-secondmate-seat-respawn claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  seat=$(make_claude_seat "$CASE_DIR/seat")
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate --claude-config-dir "$seat")
+  status=$?
+  expect_code 0 "$status" "the seated secondmate's first spawn should succeed"$'\n'"$out"
+  assert_grep "claude_config_dir=$seat" "$HOME_DIR/state/$id.meta" \
+    "the seated secondmate's first spawn did not record its seat"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" --secondmate)
+  status=$?
+  expect_code 0 "$status" "the bare recovery respawn should succeed"$'\n'"$out"
+  assert_grep "claude_config_dir=$seat" "$HOME_DIR/state/$id.meta" \
+    "the bare respawn dropped the secondmate's recorded seat from its meta"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "CLAUDE_CONFIG_DIR='$seat'" \
+    "the bare respawn launched on the single-store default instead of the recorded seat"
+  pass "a bare secondmate respawn keeps the seat recorded at creation, in its meta and its launch"
+}
+
+test_bare_secondmate_respawn_refuses_a_recorded_seat_that_vanished() {
+  local rec id sm seat out status
+  id=profile-secondmate-seat-gone-z34
+  rec=$(make_spawn_case profile-secondmate-seat-gone claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  seat=$(make_claude_seat "$CASE_DIR/seat")
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate --claude-config-dir "$seat")
+  status=$?
+  expect_code 0 "$status" "the seated secondmate's first spawn should succeed"$'\n'"$out"
+  # The operator removed the seat between the creation and the recovery.
+  rm -f "$seat/.claude.json"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" --secondmate)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a respawn whose recorded seat is unusable must refuse"$'\n'"$out"
+  assert_contains "$out" "this secondmate's recorded Claude config directory '$seat'" \
+    "the refusal should name the record the seat came from, not a flag the caller never passed"
+  [ ! -s "$LAUNCH_LOG" ] || fail "an unusable recorded seat must launch nothing (got: $(cat "$LAUNCH_LOG"))"
+  pass "a bare secondmate respawn refuses when its recorded seat is no longer usable"
+}
+
 test_claude_task_launch_carries_control_channel_authority() {
   local rec id out status launch
   id=profile-claude-control-channel-z21
@@ -1661,6 +1716,8 @@ test_claude_config_dir_not_a_directory_refuses
 test_claude_config_dir_without_config_refuses
 test_claude_config_dir_refused_for_non_claude_harness
 test_claude_config_dir_refused_for_a_remote_secondmate
+test_bare_secondmate_respawn_keeps_the_recorded_claude_seat
+test_bare_secondmate_respawn_refuses_a_recorded_seat_that_vanished
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
 test_claude_crewmate_launch_carries_the_attribution_policy

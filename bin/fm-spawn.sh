@@ -62,7 +62,10 @@
 #   single-store default, byte-identical to before this flag existed); a
 #   --relaunch always reuses that recorded value and refuses a fresh
 #   --claude-config-dir, so a relaunch can never silently move a task to a
-#   different seat.
+#   different seat. A bare `--secondmate` respawn of an existing secondmate -
+#   the shape bin/fm-bootstrap.sh's liveness sweep recovers with - reads the
+#   seat back out of that same record for the same reason, unless this spawn
+#   passes its own --claude-config-dir, which still wins.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
 #   axes chosen by firstmate at intake. They are only threaded into harnesses whose
 #   installed CLIs were verified to support that axis; unsupported axes are omitted
@@ -2155,6 +2158,21 @@ elif [ -n "$CLAUDE_SEAT_ARG" ]; then
   }
   CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_ARG" "--claude-config-dir") || exit 1
   CLAUDE_SEAT_RECORD=$CLAUDE_SEAT_DIR
+elif [ "$KIND" = secondmate ]; then
+  # bin/fm-bootstrap.sh recovers a dead secondmate with a bare
+  # `fm-spawn.sh <id> --secondmate` - no --relaunch and no flag - so the seat has
+  # to come back from this secondmate's own record the way its home already does,
+  # or the recovery would move a seated lane onto firstmate's ambient account and
+  # erase the record with it. A first-ever secondmate has no meta, so fm_meta_get
+  # yields nothing and this is a no-op.
+  CLAUDE_SEAT_RECORD=$(fm_meta_get "$STATE/$ID.meta" claude_config_dir)
+  if [ -n "$CLAUDE_SEAT_RECORD" ] && [ "$HARNESS" = claude ]; then
+    CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_RECORD" "this secondmate's recorded Claude config directory") || {
+      echo "hint: the seat is the one recorded in this secondmate's own meta; restore that directory, or pass --claude-config-dir to seat it somewhere else" >&2
+      exit 1
+    }
+    CLAUDE_SEAT_RECORD=$CLAUDE_SEAT_DIR
+  fi
 fi
 
 secondmate_registry_value() {
