@@ -47,6 +47,22 @@
 #   worktree is told once to return, and only a shell that will not go refuses.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
+#   --claude-config-dir <dir> is claude-only: it selects the Claude Code
+#   config/credential store (CLAUDE_CONFIG_DIR) this one launch's pane resolves
+#   into, letting two claude lanes run concurrently under different accounts
+#   without moving every claude lane at once the way setting CLAUDE_CONFIG_DIR
+#   in firstmate's own environment would. Refused when the resolved harness is
+#   not claude. Validated before any worktree or endpoint is created: <dir>
+#   must resolve to an existing directory holding a Claude config store
+#   (.claude.json), or the spawn refuses naming <dir> rather than launching a
+#   worker that would wedge. The resolved directory feeds both
+#   bin/fm-claude-trust.sh's pre-registration and the launch's own
+#   CLAUDE_CONFIG_DIR, so the two halves can never land in different stores.
+#   Recorded in the task's own meta as claude_config_dir= (absent means the
+#   single-store default, byte-identical to before this flag existed); a
+#   --relaunch always reuses that recorded value and refuses a fresh
+#   --claude-config-dir, so a relaunch can never silently move a task to a
+#   different seat.
 #   --model <name> and --effort <low|medium|high|xhigh|max|ultra> are concrete profile
 #   axes chosen by firstmate at intake. They are only threaded into harnesses whose
 #   installed CLIs were verified to support that axis; unsupported axes are omitted
@@ -527,6 +543,7 @@ BACKEND_ARG=
 MODE=
 YOLO=
 TRACEPARENT_ARG=
+CLAUDE_SEAT_ARG=
 HARNESS_SET=0
 MODEL_SET=0
 EFFORT_SET=0
@@ -534,6 +551,7 @@ BACKEND_SET=0
 MODE_SET=0
 YOLO_SET=0
 TRACEPARENT_SET=0
+CLAUDE_SEAT_SET=0
 RELAUNCH=0
 POS=()
 want_value=
@@ -573,6 +591,10 @@ for a in "$@"; do
     traceparent)
       TRACEPARENT_ARG=$a
       TRACEPARENT_SET=1
+      ;;
+    claude-config-dir)
+      CLAUDE_SEAT_ARG=$a
+      CLAUDE_SEAT_SET=1
       ;;
     *)
       echo "error: internal parser state for --$want_value" >&2
@@ -627,6 +649,11 @@ for a in "$@"; do
     TRACEPARENT_ARG=${a#--traceparent=}
     TRACEPARENT_SET=1
     ;;
+  --claude-config-dir) want_value=claude-config-dir ;;
+  --claude-config-dir=*)
+    CLAUDE_SEAT_ARG=${a#--claude-config-dir=}
+    CLAUDE_SEAT_SET=1
+    ;;
   *) POS+=("$a") ;;
   esac
 done
@@ -660,6 +687,10 @@ done
 }
 [ "$TRACEPARENT_SET" -eq 0 ] || [ -n "$TRACEPARENT_ARG" ] || {
   echo "error: --traceparent requires a non-empty value" >&2
+  exit 1
+}
+[ "$CLAUDE_SEAT_SET" -eq 0 ] || [ -n "$CLAUDE_SEAT_ARG" ] || {
+  echo "error: --claude-config-dir requires a non-empty value" >&2
   exit 1
 }
 # A parent-delivered carrier replaces this home's own resolution, so it is
@@ -702,6 +733,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   [ "$YOLO_SET" -eq 0 ] || {
     echo "error: --relaunch reuses the task's recorded yolo posture; --yolo cannot override it" >&2
+    exit 1
+  }
+  [ "$CLAUDE_SEAT_SET" -eq 0 ] || {
+    echo "error: --relaunch reuses the task's recorded Claude config directory; --claude-config-dir cannot override it" >&2
     exit 1
   }
 else
@@ -1303,6 +1338,7 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ -z "$MODEL" ] || shared_args+=(--model "$MODEL")
   [ -z "$EFFORT" ] || shared_args+=(--effort "$EFFORT")
   [ -z "$BACKEND_ARG" ] || shared_args+=(--backend "$BACKEND_ARG")
+  [ -z "$CLAUDE_SEAT_ARG" ] || shared_args+=(--claude-config-dir "$CLAUDE_SEAT_ARG")
   # One delivery contract applies to every pair in a batch, exactly like the shared
   # harness. Each pair still re-validates it against its own brief, so a batch
   # spanning several modes is two invocations rather than a silent mixed dispatch.
@@ -1462,6 +1498,7 @@ RAW_LAUNCH=0
 # validation teardown uses, so a malformed, ambiguous, or foreign record
 # refuses here exactly as it refuses there.
 RELAUNCH_PRIOR_HARNESS=
+RELAUNCH_PRIOR_CLAUDE_CONFIG_DIR=
 if [ "$RELAUNCH" -eq 1 ]; then
   [ "${#POS[@]}" -eq 1 ] || {
     echo "error: --relaunch takes the task id only; its project or home comes from the task's own record" >&2
@@ -1501,6 +1538,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
   RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
+  RELAUNCH_PRIOR_CLAUDE_CONFIG_DIR=$(fm_meta_get "$RELAUNCH_META" claude_config_dir)
   KIND=$(fm_meta_get "$RELAUNCH_META" kind)
   [ -n "$KIND" ] || KIND=ship
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
@@ -2054,6 +2092,48 @@ if [ "$HARNESS" = omp ]; then
 fi
 if [ "$HARNESS" = agy ]; then
   agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+fi
+
+# --claude-config-dir selects the Claude Code config/credential store
+# (CLAUDE_CONFIG_DIR) this one launch's pane resolves into. Validated here,
+# before any worktree or endpoint is created, so a bad directory refuses the
+# spawn now rather than launching a worker that fails in a way the supervisor
+# reads as a stuck agent. Only the directory's existence and shape are
+# inspected - its contents are never read or printed - because the directory
+# path is the whole interface this flag grants.
+fm_claude_seat_validate() { # <candidate-dir>
+  local raw=$1 real
+  real=$(CDPATH='' cd -P -- "$raw" 2>/dev/null && pwd -P) || {
+    echo "error: --claude-config-dir '$raw' is not an accessible directory" >&2
+    return 1
+  }
+  [ -f "$real/.claude.json" ] || {
+    echo "error: --claude-config-dir '$real' holds no usable Claude configuration (no .claude.json found); log in once with CLAUDE_CONFIG_DIR='$real' claude, then retry" >&2
+    return 1
+  }
+  printf '%s\n' "$real"
+}
+# CLAUDE_SEAT_RECORD is what this task's meta remembers as its seat, carried
+# forward on every relaunch regardless of that relaunch's own harness, so a
+# temporary switch away from claude and back never loses the assignment.
+# CLAUDE_SEAT_DIR is narrower: it is set only when THIS launch will actually
+# be a claude launch, and is what feeds the trust pre-registration and launch
+# prefix below.
+CLAUDE_SEAT_RECORD=
+CLAUDE_SEAT_DIR=
+if [ "$RELAUNCH" -eq 1 ]; then
+  CLAUDE_SEAT_RECORD=$RELAUNCH_PRIOR_CLAUDE_CONFIG_DIR
+  if [ -n "$CLAUDE_SEAT_RECORD" ] && [ "$HARNESS" = claude ]; then
+    CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_RECORD") || exit 1
+    CLAUDE_SEAT_RECORD=$CLAUDE_SEAT_DIR
+  fi
+elif [ -n "$CLAUDE_SEAT_ARG" ]; then
+  [ "$HARNESS" = claude ] || {
+    echo "error: --claude-config-dir applies only to claude spawns; this spawn resolved harness '$HARNESS'" >&2
+    exit 1
+  }
+  CLAUDE_SEAT_DIR=$(fm_claude_seat_validate "$CLAUDE_SEAT_ARG") || exit 1
+  CLAUDE_SEAT_RECORD=$CLAUDE_SEAT_DIR
 fi
 
 secondmate_registry_value() {
@@ -3714,7 +3794,19 @@ claude*)
   else
     spawn_trust_args=("$WT" "$PROJ_ABS")
   fi
-  if ! "$FM_ROOT/bin/fm-claude-trust.sh" "${spawn_trust_args[@]}" >/dev/null; then
+  # CLAUDE_SEAT_DIR (from --claude-config-dir) takes the trust registration to
+  # the exact store this launch's own CLAUDE_CONFIG_DIR prefix below also
+  # points at, never to firstmate's own ambient CLAUDE_CONFIG_DIR, so trust
+  # registration and the launched process can never land in different stores.
+  # Overridden only for this one command; firstmate's own ambient value (if
+  # any) is untouched for the rest of the spawn.
+  claude_trust_rc=0
+  if [ -n "$CLAUDE_SEAT_DIR" ]; then
+    CLAUDE_CONFIG_DIR="$CLAUDE_SEAT_DIR" "$FM_ROOT/bin/fm-claude-trust.sh" "${spawn_trust_args[@]}" >/dev/null || claude_trust_rc=$?
+  else
+    "$FM_ROOT/bin/fm-claude-trust.sh" "${spawn_trust_args[@]}" >/dev/null || claude_trust_rc=$?
+  fi
+  if [ "$claude_trust_rc" -ne 0 ]; then
     echo "error: could not pre-register Claude workspace trust for $WT; refusing to launch a claude worker that would wedge on the trust dialog; inspect window $T" >&2
     exit 1
   fi
@@ -4196,7 +4288,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx claude_config_dir", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4221,6 +4313,11 @@ preserve_relaunch_meta() {
   # default path's meta stays byte-identical (absent backend= means tmux;
   # data/fm-backend-design-d7's P1 compatibility contract).
   [ "$BACKEND" = tmux ] || echo "backend=$BACKEND"
+  # Absent claude_config_dir= means the single-store default, byte-identical
+  # to meta written before --claude-config-dir existed. Recorded whenever this
+  # task has a seat, regardless of this launch's own harness, so a relaunch
+  # that temporarily switches away from claude and back never loses it.
+  [ -z "$CLAUDE_SEAT_RECORD" ] || echo "claude_config_dir=$CLAUDE_SEAT_RECORD"
   if [ "$BACKEND" = herdr ]; then
     echo "herdr_session=$HERDR_SES"
     echo "herdr_workspace_id=$HERDR_WORKSPACE_ID"
@@ -4389,8 +4486,14 @@ esac
 # Forward firstmate's own resolved store onto the claude launch so the crewmate
 # uses the same credential/config firstmate is authenticated with. Only when set;
 # an unset value is the single-store default and needs no prefix.
-if [ "$HARNESS" = claude ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
-  LAUNCH="CLAUDE_CONFIG_DIR=$(shell_quote "$CLAUDE_CONFIG_DIR") $LAUNCH"
+# CLAUDE_SEAT_DIR (this task's own --claude-config-dir, validated above) takes
+# priority over that ambient forwarding, so an explicitly seated task always
+# lands in its own store even when firstmate's own ambient CLAUDE_CONFIG_DIR
+# names a different one - this is the one place a per-lane seat differs from
+# every other Claude lane without moving firstmate's own environment.
+CLAUDE_LAUNCH_CONFIG_DIR=${CLAUDE_SEAT_DIR:-${CLAUDE_CONFIG_DIR:-}}
+if [ "$HARNESS" = claude ] && [ -n "$CLAUDE_LAUNCH_CONFIG_DIR" ]; then
+  LAUNCH="CLAUDE_CONFIG_DIR=$(shell_quote "$CLAUDE_LAUNCH_CONFIG_DIR") $LAUNCH"
 fi
 if [ "$KIND" = secondmate ]; then
   sq_home=$(shell_quote "$PROJ_ABS")

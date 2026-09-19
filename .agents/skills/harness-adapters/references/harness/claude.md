@@ -13,6 +13,7 @@ Busy hooks verified 2026-07-28 on Claude Code 2.1.220.
 | Model | `--model <model>`; discover through the interactive `/model` picker, with alias or full-name shape documented by `claude --help`. |
 | Effort | `--effort <low\|medium\|high\|xhigh\|max>`, verified on 2.1.196. |
 | Permissions | `--dangerously-skip-permissions` by default, or `--permission-mode auto` when `config/claude-permission-mode` is `auto`; the `auto` shape verified on 2.1.269, and `../../../../../docs/configuration.md` "Claude permission mode" owns the file. |
+| Config seat | `--claude-config-dir <dir>` on `fm-spawn.sh` picks the `CLAUDE_CONFIG_DIR` this one claude spawn's pane resolves into, validated and recorded in the task's own meta and reused on relaunch, so two claude lanes can sit on different accounts at once; `fm-spawn.sh --help` owns the exact contract. |
 
 ## Workspace trust
 
@@ -28,6 +29,8 @@ For a ship or scout spawn, the external-imports flags (`hasClaudeMdExternalInclu
 When the project entry instead already carries an explicit decline (`hasClaudeMdExternalIncludesApproved===false` with `hasClaudeMdExternalIncludesWarningShown===true`), the whole registration refuses - including the trust flag - rather than manufacture consent the human never gave, so that spawn wedges on the trust dialog before it would even reach the import one.
 Both flags `false` is Claude Code's default entry for a project never asked, not a decline, and is treated like an absent flag: trust registers and the import dialog still renders.
 The why-two-entries mechanism and the consent-gating logic live in the script's own header comment, which is the one owner for that contract; the fact worth repeating here is that `../../../bin/fm-spawn.sh` refuses the spawn when the trust flag fails to land, rather than launching a worker that would wedge on that dialog.
+
+A seated spawn (`--claude-config-dir`, see "Config seat" above) passes that same directory as `CLAUDE_CONFIG_DIR` to this registration call, so trust always lands in the exact store the launched process itself reads - never firstmate's own ambient store.
 
 Never try to answer either dialog with a key.
 Firstmate's key plane carries only Enter, Escape, and C-c with no arrow navigation, so it cannot move a dialog's selection at all, and both dialogs render with the cursor on their declining option, which means a sent Enter ends the session instead of accepting.
