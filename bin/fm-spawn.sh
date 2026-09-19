@@ -814,6 +814,12 @@ spawn_remote_secondmate() {
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     return 3
   fi
+  if [ -n "$CLAUDE_SEAT_ARG" ]; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: --claude-config-dir names a Claude config directory on this machine and is not supported for remote secondmates, whose launch happens on another host" >&2
+    return 2
+  fi
   host=$(secondmate_registry_field "$DATA/secondmates.md" "$id" host)
   root=$(secondmate_registry_field "$DATA/secondmates.md" "$id" root)
   home=$(secondmate_registry_field "$DATA/secondmates.md" "$id" home)
@@ -2121,7 +2127,7 @@ fm_claude_seat_validate() { # <candidate-dir> <origin>
     echo "error: $origin '$real' holds no usable Claude configuration (no .claude.json found)" >&2
     echo "hint: prepare that store in one interactive sitting - run CLAUDE_CONFIG_DIR='$real' claude --dangerously-skip-permissions once and accept everything it shows: first the login, then that store's own Bypass Permissions confirmation" >&2
     echo "hint: logging in alone is not enough - the Bypass Permissions confirmation is raised only by --dangerously-skip-permissions, and a spawned pane cannot answer it, so a seat that has never accepted it wedges the worker" >&2
-    echo "hint: to leave that confirmation unaccepted for this seat, set config/claude-permission-mode to auto, which launches with --permission-mode auto and never asks for bypass mode" >&2
+    echo "hint: if that confirmation cannot be accepted, setting config/claude-permission-mode to auto launches with --permission-mode auto and never asks for bypass mode - but that setting is home-wide and moves every claude launch from this home, not this seat alone" >&2
     return 1
   }
   printf '%s\n' "$real"

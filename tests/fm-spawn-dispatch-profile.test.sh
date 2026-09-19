@@ -1065,6 +1065,10 @@ test_claude_config_dir_without_config_refuses() {
     "refusal must name the second interactive step, not just the login"
   assert_contains "$out" "config/claude-permission-mode to auto" \
     "refusal must offer the launch mode that never meets that confirmation"
+  # That file is resolved once per home and applies to every claude launch
+  # from it, so the hint must not read as a per-seat escape hatch.
+  assert_contains "$out" "every claude launch from this home, not this seat alone" \
+    "refusal must state that the permission-mode escape hatch is home-wide, not seat-scoped"
   assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
   pass "a --claude-config-dir with no Claude configuration refuses before any endpoint or metadata, naming both interactive steps"
 }
@@ -1082,6 +1086,43 @@ test_claude_config_dir_refused_for_non_claude_harness() {
   assert_contains "$out" "--claude-config-dir applies only to claude spawns" "refusal must name the claude-only rule"
   assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
   pass "--claude-config-dir is refused for a spawn that does not resolve to the claude harness"
+}
+
+# A remote secondmate launches on another host, where a config directory named
+# on this machine means nothing. That route leaves fm-spawn before the seat is
+# resolved, so without an early refusal the flag is accepted and dropped and
+# the lane silently runs on firstmate's own account.
+test_claude_config_dir_refused_for_a_remote_secondmate() {
+  local rec id out status seat ssh_log
+  id=profile-claude-seat-remote-z32
+  rec=$(make_spawn_case profile-claude-seat-remote claude "$id")
+  read_case_record "$rec"
+  seat=$(make_claude_seat "$CASE_DIR/seat")
+  mkdir -p "$CASE_DIR/remote-home" "$CASE_DIR/remote-root"
+  printf -- '- %s - remote lane (host: remote-host; root: %s; home: %s; scope: remote work; projects: none; added 2026-09-19)\n' \
+    "$id" "$CASE_DIR/remote-root" "$CASE_DIR/remote-home" > "$HOME_DIR/data/secondmates.md"
+  # The transport itself, so "no dispatch happened" is observable rather than
+  # inferred: any contact with the remote host would leave a line here.
+  ssh_log="$CASE_DIR/ssh.log"
+  cat > "$CASE_DIR/recording-ssh" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> '$ssh_log'
+exit 0
+SH
+  chmod +x "$CASE_DIR/recording-ssh"
+
+  export FM_SSH_BIN="$CASE_DIR/recording-ssh"
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" --secondmate --claude-config-dir "$seat")
+  status=$?
+  unset FM_SSH_BIN
+
+  [ "$status" -ne 0 ] || fail "--claude-config-dir on a remote secondmate must refuse the spawn"$'\n'"$out"
+  assert_contains "$out" "--claude-config-dir" "refusal must name the flag that cannot be honored"
+  assert_contains "$out" "remote secondmates" "refusal must name the route that cannot honor it"
+  assert_absent "$ssh_log" "the refusal must fire before any remote dispatch"
+  assert_absent "$HOME_DIR/state/$id.meta" "refusal must happen before meta is written"
+  [ ! -s "$LAUNCH_LOG" ] || fail "a refused remote seat must launch nothing (got: $(cat "$LAUNCH_LOG"))"
+  pass "--claude-config-dir is refused for a remote secondmate before any remote dispatch"
 }
 
 # The captain's attribution policy lives in the `user` settings scope, which a
@@ -1629,6 +1670,7 @@ test_claude_config_dir_missing_directory_refuses_before_endpoint_or_metadata
 test_claude_config_dir_not_a_directory_refuses
 test_claude_config_dir_without_config_refuses
 test_claude_config_dir_refused_for_non_claude_harness
+test_claude_config_dir_refused_for_a_remote_secondmate
 test_claude_task_launch_carries_control_channel_authority
 test_claude_secondmate_launch_omits_task_control_channel_authority
 test_claude_crewmate_launch_carries_the_attribution_policy
