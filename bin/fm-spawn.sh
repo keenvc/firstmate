@@ -1746,7 +1746,7 @@ resolve_openhands_python() {
 # instead. Checks names only (present and non-empty); the key value is never
 # read into a variable this script could print.
 fm_openhands_llm_env_ready() {  # <llm-env-path>
-  local path=$1 line key value model=0 api_key=0
+  local path=$1 line model=0 api_key=0
   [ -f "$path" ] && [ -r "$path" ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in

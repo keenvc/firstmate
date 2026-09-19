@@ -41,6 +41,16 @@ FM_DELIVERY_OPENHANDS_BUSY_REGEX_DEFAULT in bin/fm-composer-lib.sh):
   [fm-openhands] idle
   [fm-openhands] cancelled
 
+The pane shows firstmate rows alone. The SDK's cli_mode rendering floods its
+own stdout/stderr with rich panels (system prompt, tool schemas, token
+counters - hundreds of lines within seconds of a run opening), which would
+bury those rows far past a delivery guard's read window, so the driver
+points the SDK's output at --sdk-log (default <run-log>.sdk.log, chmod 600,
+append) and keeps the pane for its own rows: emit() writes through a saved
+copy of the pane's stdout, so a row reaches the pane no matter where fd 1
+points after the redirect. --selftest never redirects; emit falls back to
+sys.stdout there.
+
 Exit codes: 0 normal exit; 2 missing, unreadable, or incomplete --llm-env;
 3 the OpenHands SDK is not importable by this interpreter; 130 interrupted.
 
@@ -65,10 +75,35 @@ IDLE_ROW = "[fm-openhands] idle"
 CANCELLED_ROW = "[fm-openhands] cancelled"
 EXIT_COMMANDS = ("/exit", "/quit")
 
+# The saved pane stdout. The SDK's cli_mode rendering floods the pane with
+# its own panels (system prompt, tool schemas, token counters - hundreds of
+# lines within seconds of a run opening), which buries any firstmate-owned
+# row far past a delivery guard's read window. The driver therefore points
+# the SDK's stdout/stderr at a per-task log file and keeps the pane for its
+# own rows alone: emit() writes through this saved descriptor so the rows
+# reach the pane no matter where fd 1 points, and every rendered assertion
+# firstmate makes becomes deterministic. --selftest never redirects, so emit
+# falls back to sys.stdout.
+PANE_FD = -1
+
 
 def emit(row):
-    sys.stdout.write(row + "\n")
-    sys.stdout.flush()
+    line = (row + "\n").encode("utf-8", "replace")
+    if PANE_FD >= 0:
+        os.write(PANE_FD, line)
+    else:
+        sys.stdout.write(row + "\n")
+        sys.stdout.flush()
+
+
+def quiet_pane(sdk_log_path):
+    """Send the SDK's output to the log file; keep the pane for our rows."""
+    global PANE_FD
+    PANE_FD = os.dup(1)
+    log_fd = os.open(sdk_log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.dup2(log_fd, 1)
+    os.dup2(log_fd, 2)
+    os.close(log_fd)
 
 
 def now_iso():
@@ -191,6 +226,11 @@ def main():
     parser.add_argument("--llm-env", default=os.environ.get("FM_OPENHANDS_LLM_ENV", ""))
     parser.add_argument("--turn-end", default="")
     parser.add_argument("--run-log", required=True)
+    parser.add_argument(
+        "--sdk-log",
+        default="",
+        help="where the SDK's own output lands; defaults to <run-log>.sdk.log",
+    )
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument(
         "--selftest-hold",
@@ -224,14 +264,13 @@ def main():
             return 2
         os.environ.setdefault("OPENHANDS_SUPPRESS_BANNER", "1")
         ensure_sdk_home()
+        quiet_pane(args.sdk_log or (args.run_log + ".sdk.log"))
         try:
             from openhands.sdk import Conversation, LLM
             from openhands.tools import get_default_agent
         except ImportError as error:
-            sys.stderr.write(
-                "error: the OpenHands SDK is not importable by this interpreter: %s\n"
-                % error
-            )
+            # stderr now feeds the sdk log, so the pane gets the refusal too.
+            emit("error: the OpenHands SDK is not importable by this interpreter: %s" % error)
             return 3
         llm = LLM(model=model, api_key=api_key)
         agent = get_default_agent(llm=llm, cli_mode=True)

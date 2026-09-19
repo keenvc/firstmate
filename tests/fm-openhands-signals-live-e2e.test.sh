@@ -5,6 +5,9 @@
 # and the real credential profile. Opt-in because it submits real prompts
 # and spends the configured provider's tokens; it asserts the firstmate-owned
 # mechanics, so whatever LLM_MODEL the profile carries is the right model.
+# The pane carries firstmate rows alone: the driver redirects the SDK's own
+# cli_mode rendering to <run-log>.sdk.log (bin/fm-openhands-worker.py owns
+# that contract), so the SDK's answer is asserted there, not on the pane.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -53,6 +56,7 @@ git -C "$LAB/workspace" config user.name "guard" || fail "could not configure th
 git -C "$LAB/workspace" commit -q --allow-empty -m init || fail "could not seed the isolated workspace"
 WORKSPACE=$(cd "$LAB/workspace" && pwd -P) || fail "could not resolve the isolated workspace"
 LOG="$LAB/driver.openhands-run"
+SDK_LOG="$LOG.sdk.log"
 TURNEND="$LAB/driver.turn-ended"
 rm -f "$TURNEND"
 
@@ -94,7 +98,6 @@ for _ in $(seq 1 300); do
     printf '%s' "$(capture)" | fm_busy_lines_match openhands && row_live=1
     break
   fi
-  case "$(capture)" in *80235*|*80,235*) break ;; esac
   sleep 1
 done
 [ -n "$busy_live" ] || fail "the run log never folded busy while the real SDK turn ran"
@@ -108,15 +111,30 @@ done
 [ "$(fm_busy_openhands_run_state "$LOG" 2>/dev/null)" = settled ] \
   || fail "the run log never folded settled after the SDK turn"
 [ -e "$TURNEND" ] || fail "the finished run never touched the turn-end marker"
-reply=$(capture)
+# The SDK answer is asserted in the sdk log: quiet-pane keeps the pane for
+# firstmate rows alone, and the SDK's cli_mode rendering (answer included)
+# lands there. Scope to the tail so banner/tool-call noise cannot false-pass.
+reply=$(tail -c 200000 "$SDK_LOG" 2>/dev/null || true)
 case "$reply" in
   *80235*|*80,235*) pass "the real SDK worker answered its launch prompt" ;;
-  *) fail "the real SDK worker never answered its launch prompt" ;;
+  *) fail "the real SDK worker never answered its launch prompt (see $SDK_LOG)" ;;
 esac
-# The settled pane must not acknowledge a submit: scope to the visible tail
-# the same way the owners do, because the working row stays in scrollback.
-printf '%s' "$reply" | grep -v '^[[:space:]]*$' | tail -12 | fm_busy_lines_match openhands \
-  && fail "the settled driver pane still matched the working delivery row" || true
+# The settled pane must not acknowledge a submit. The working row is the
+# only literal that matches (bin/fm-composer-lib.sh's fm_busy_lines_match
+# greps its whole input), and the driver writes it as the pane's last row
+# only while a run is genuinely open; on settlement it writes idle, which
+# never matches. So the last firstmate literal in the capture decides: idle
+# or cancelled means a read here cannot be faked by the working row sitting
+# above it in scrollback.
+last_row=$(printf '%s' "$(capture)" | grep '\[fm-openhands\]' | tail -1)
+case "$last_row" in
+  '[fm-openhands] idle')
+    pass "the settled pane's last firstmate row is idle, not an acknowledgement" ;;
+  '[fm-openhands] cancelled')
+    pass "the settled pane's last firstmate row is cancelled, not an acknowledgement" ;;
+  *)
+    fail "the settled pane's last firstmate row was '$last_row'" ;;
+esac
 pass "the settled run folds idle, touches turn-end, and stops acknowledging"
 
 # Interrupt a genuinely long run: wait for the open pair, send exactly one
