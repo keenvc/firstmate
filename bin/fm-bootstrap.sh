@@ -20,7 +20,7 @@
 #                 "SECONDMATE_SYNC: secondmate <id>: skipped: <reason>",
 #                 "NUDGE_SECONDMATES: secondmate <id>: send failed: <reason>",
 #                 "BOOTSTRAP_INFO: nudged fm-<id> with '<message>'",
-#                 "SECONDMATE_LIVENESS: secondmate <id>: skipped: <reason>|respawn failed after <cause>: <reason>",
+#                 "SECONDMATE_LIVENESS: secondmate <id>: skipped: <reason>|respawn failed after <cause>: <reason>|gap: <reason>",
 #                 "SECONDMATE_HANDOFF: secondmate <id>: pending delivery: <n> item(s)",
 #                 "FMX: X mode on ..." or "FMX: X mode off ...".
 #          When a RUNNING secondmate home is fast-forwarded, its target is
@@ -48,6 +48,11 @@
 #          fm_backend_agent_state: skipped distinguishes an existing ambiguous
 #          process, an unreadable target, and an unverified backend; respawn
 #          failed names whether the endpoint was missing or agent-less.
+#          The sweep accounts for every secondmate registered in
+#          data/secondmates.md, not only those with a state/<id>.meta record: a
+#          registered secondmate with no record, or a record with no endpoint,
+#          is relaunched from the registry, and one that cannot be recovered is
+#          named with an explicit `gap:` line rather than omitted.
 #          Already-live and successfully relaunched secondmates are silent
 #          unless FM_BOOTSTRAP_VERBOSE_FACTS=1 requests BOOTSTRAP_INFO facts.
 #          A TANGLE line means the firstmate primary checkout (FM_ROOT) is stranded
@@ -156,6 +161,10 @@
 #          nothing; bin/fm-brief.sh uses it to gate scout Lavish hosting.
 set -u
 
+TYPESAFE_API_KEY_PRIVATE=${TYPESAFE_API_KEY:-}
+export -n TYPESAFE_API_KEY_PRIVATE 2>/dev/null || true
+unset TYPESAFE_API_KEY
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -169,6 +178,10 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-quota-axi-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-quota-axi-lib.sh"
+# shellcheck source=bin/fm-control-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-control-lib.sh"
+# shellcheck source=bin/fm-env-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-env-lib.sh"
 # shellcheck source=bin/fm-tangle-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-tangle-lib.sh"
 # shellcheck source=bin/fm-ff-lib.sh disable=SC1091
@@ -675,61 +688,130 @@ report_relaunch() {  # <id> <cause> <where>
   echo "BOOTSTRAP_INFO: secondmate $1 relaunched after $2 ($3)"
 }
 
+# Registered secondmate ids from data/secondmates.md, in file order. The
+# registry is the durable authority for WHICH secondmates exist; state/<id>.meta
+# is only the endpoint record for one that is currently running.
+secondmate_registered_ids() {  # <registry>
+  local reg=$1 line id
+  [ -f "$reg" ] && [ ! -L "$reg" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      '- '*) ;;
+      *) continue ;;
+    esac
+    id=${line#- }
+    id=${id%% *}
+    case "$id" in '' | *[!A-Za-z0-9._-]*) continue ;; esac
+    printf '%s\n' "$id"
+  done < "$reg"
+}
+
+# Every id the sweep must account for: registered secondmates first, then any
+# kind=secondmate endpoint record not already covered. The caller deduplicates,
+# so a running registered secondmate is probed exactly once.
+secondmate_liveness_ids() {  # <state> <registry>
+  local state=$1 registry=$2 meta id
+  secondmate_registered_ids "$registry"
+  [ -d "$state" ] || return 0
+  for meta in "$state"/*.meta; do
+    [ -f "$meta" ] || continue
+    grep -q '^kind=secondmate$' "$meta" 2>/dev/null || continue
+    id=$(basename "$meta" .meta)
+    printf '%s\n' "$id"
+  done
+}
+
 secondmate_liveness_sweep() {
-  # Idempotent secondmate liveness guarantee - SESSION START ONLY. The detailed
-  # state machine and its only recovery-authorizing states are owned by
-  # fm_backend_agent_state. A missing tmux pane is not enough: tmux must prove
-  # the window or session absent. This preserves duplicate prevention for
+  # Idempotent secondmate liveness guarantee - SESSION START ONLY. Every
+  # REGISTERED secondmate is accounted for: the walk covers data/secondmates.md
+  # plus state/<id>.meta, never only the meta records, so a secondmate whose
+  # record is missing or incomplete is recovered rather than silently passed
+  # over. The detailed state machine and its recovery-authorizing states are
+  # owned by fm_backend_agent_state. A missing tmux pane is not enough: tmux must
+  # prove the window or session absent. This preserves duplicate prevention for
   # existing ambiguous processes and every transiently unreadable target while
   # adding the missing-session path the original bare-shell and Herdr-husk sweep
   # lacked.
-  # A meta with no window remains owned by secondmate-provisioning recovery.
-  # Secondmate homes never contain kind=secondmate meta, so this is naturally a
-  # primary-only no-op there. Mid-session liveness remains explicitly out of
-  # scope and requires a separate periodic signal.
+  # A registered secondmate with no record, or a record with no endpoint, is a
+  # recoverable state handled by secondmate_liveness_recover_from_registry; one
+  # that cannot be recovered is named as an explicit `gap:` line rather than
+  # omitted.
+  # Secondmate homes never contain kind=secondmate meta AND never register
+  # secondmates, so this is naturally a primary-only no-op there. Mid-session
+  # liveness remains explicitly out of scope and requires a separate periodic
+  # signal.
   [ -d "$STATE" ] || return 0
-  local meta id remote_host label __fm_timing_stamp parallel=0
+  local meta id remote_host label parallel=0
   SECONDMATE_RESPAWNED_IDS=""
   if bootstrap_parallel_begin; then
     parallel=1
   fi
-  for meta in "$STATE"/*.meta; do
-    [ -f "$meta" ] || continue
-    grep -q '^kind=secondmate$' "$meta" 2>/dev/null || continue
-    # Identity for the timing record is read here, in the loop, so the per-meta
-    # body below keeps its single-exit-per-outcome shape.
-    id=$(basename "$meta" .meta)
-    remote_host=$(fm_meta_get "$meta" remote_host)
-    label=$id
-    [ -z "$remote_host" ] || label="$id@$remote_host"
-    if [ "$parallel" -eq 1 ]; then
-      bootstrap_parallel_spawn secondmate_liveness_one_timed "$meta" "$id" "$label"
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    meta="$STATE/$id.meta"
+    if [ -f "$meta" ]; then
+      grep -q '^kind=secondmate$' "$meta" 2>/dev/null || meta=
     else
-      secondmate_liveness_one_timed "$meta" "$id" "$label"
+      meta=
     fi
-  done
+    label=$id
+    if [ -n "$meta" ]; then
+      remote_host=$(fm_meta_get "$meta" remote_host)
+      [ -z "$remote_host" ] || label="$id@$remote_host"
+    fi
+    if [ "$parallel" -eq 1 ]; then
+      bootstrap_parallel_spawn secondmate_liveness_one_timed "$id" "$meta" "$label"
+    else
+      secondmate_liveness_one_timed "$id" "$meta" "$label"
+    fi
+  done < <(secondmate_liveness_ids "$STATE" "$DATA/secondmates.md" | awk '!seen[$0]++')
   [ "$parallel" -eq 0 ] || bootstrap_parallel_finish
   return 0
 }
 
-secondmate_liveness_one_timed() {  # <meta> <id> <label>
-  local meta=$1 id=$2 label=$3 __fm_timing_stamp
+secondmate_liveness_one_timed() {  # <id> <meta|empty> <label>
+  local id=$1 meta=$2 label=$3 __fm_timing_stamp
   __fm_timing_stamp=$(fm_timing_now_ms)
   secondmate_liveness_one "$meta" "$id"
   fm_timing_record secondmate liveness "$__fm_timing_stamp" "$label"
+}
+
+# Relaunch a registered secondmate whose endpoint record is missing or
+# incomplete, from the durable registry entry and its persistent home. Success is
+# silent by default (a BOOTSTRAP_INFO fact under FM_BOOTSTRAP_VERBOSE_FACTS); a
+# refusal is an explicit named gap so the secondmate is never quietly omitted.
+secondmate_liveness_recover_from_registry() {  # <id> <cause>
+  local id=$1 cause=$2 out reason
+  if out=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1); then
+    secondmate_note_respawned "$id"
+    report_relaunch "$id" "$cause" "registry"
+  else
+    reason=$(printf '%s\n' "$out" | awk '/error:/ { print; exit }')
+    [ -n "$reason" ] || reason=$(first_line "$out")
+    echo "SECONDMATE_LIVENESS: secondmate $id: gap: $cause and relaunch from registry failed: $reason"
+  fi
 }
 
 # One secondmate's liveness check. Split out of the sweep so each is individually
 # timed; every `return` here was a `continue` in the loop and means exactly the
 # same thing - move on to the next secondmate. Respawned ids are recorded through
 # secondmate_note_respawned so a concurrent sweep can collect them after wait.
-secondmate_liveness_one() {  # <meta> <id>
+secondmate_liveness_one() {  # <meta|empty> <id>
   local meta=$1 id=$2
   local window harness backend target agent_state out cause remote_host remote_rc readiness_reason route_out remote_backend
-  window=$(fm_meta_get "$meta" window)
-  [ -n "$window" ] || return 0
+  if [ -z "$meta" ]; then
+    secondmate_liveness_recover_from_registry "$id" "no task record"
+    return 0
+  fi
   harness=$(fm_meta_get "$meta" harness)
   remote_host=$(fm_meta_get "$meta" remote_host)
+  if [ -z "$remote_host" ]; then
+    window=$(fm_meta_get "$meta" window)
+    if [ -z "$window" ]; then
+      secondmate_liveness_recover_from_registry "$id" "task record has no recorded endpoint"
+      return 0
+    fi
+  fi
   if [ -n "$remote_host" ]; then
     remote_rc=0
     fm_remote_readiness_ensure "$SCRIPT_DIR" "$id" || remote_rc=$?
@@ -1102,7 +1184,7 @@ EOF
 }
 
 crew_dispatch_validate() {
-  local file err
+  local file err verified_harnesses typed_key typed_active=false
   file="$CONFIG/crew-dispatch.json"
   [ -f "$file" ] || return 0
   if ! command -v jq >/dev/null 2>&1; then
@@ -1113,8 +1195,29 @@ crew_dispatch_validate() {
     echo "CREW_DISPATCH: invalid config/crew-dispatch.json - malformed JSON"
     return 0
   fi
-  err=$(jq -r '
-    def verified($h): ["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","agy","muse","rovo","omp"] | index($h);
+  typed_key=$TYPESAFE_API_KEY_PRIVATE
+  [ -n "$typed_key" ] || typed_key=$(fmx_env_get TYPESAFE_API_KEY "$FM_HOME/.env")
+  [ -z "$typed_key" ] || typed_active=true
+  if $typed_active; then
+    verified_harnesses=$(fm_control_harnesses | jq -Rsc 'split("\n") | map(select(length > 0))')
+  else
+    verified_harnesses='["claude","codex","opencode","pi","pi-signed","grok","kimi","cursor","agy","muse","rovo","omp","cline"]'
+  fi
+  err=$(jq -r --argjson typed "$typed_active" --argjson verified_harnesses "$verified_harnesses" --arg provider_re "$FM_QUOTA_PROVIDER_ID_RE" '
+    def verified($h): $verified_harnesses | index($h);
+    def provider_id($p): ($p | type) == "string" and ($p | test($provider_re));
+    # providerCaps (docs/configuration.md "Crew dispatch profiles") bounds the
+    # live lanes one billing provider may carry; fm-provider-lib.sh enforces it
+    # at spawn. An invalid declaration must fail loudly here rather than be
+    # silently ignored, so every value must be a whole number of at least one
+    # and every key a provider id or the reserved `default`.
+    def provider_caps_bad:
+      (.providerCaps // null) as $c
+      | $c != null and (
+          ($c | type) != "object"
+          or ([$c | keys[] | select(. != "default") | select(test($provider_re) | not)] | length > 0)
+          or ([$c[] | select((type != "number") or (. < 1) or (. != (. | floor)))] | length > 0)
+        );
     def effort_ok($h; $m; $e):
       if $e == null then true
       elif ($e | type) != "string" then false
@@ -1123,6 +1226,7 @@ crew_dispatch_validate() {
       elif $h == "codex" then ((["low","medium","high","xhigh"] | index($e)) != null or ($e == "max" and $m == "gpt-5.6-luna"))
       elif $h == "grok" then (["low","medium","high"] | index($e))
       elif $h == "agy" then (["low","medium","high"] | index($e))
+      elif $h == "cline" then (["low","medium","high","xhigh"] | index($e))
       elif $h == "pi" or $h == "pi-signed" or $h == "omp" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "muse" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "rovo" then (["low","medium","high","max"] | index($e))
@@ -1139,7 +1243,21 @@ crew_dispatch_validate() {
         + (if has("default") then [profiles(.default)[]?] else [] end));
     def malformed_optional_fields($items):
       ($items | any(has("model") and (((.model | type) != "string") or (.model | length) == 0)))
-      or ($items | any(has("effort") and (((.effort | type) != "string") or (.effort | length) == 0)));
+      or ($items | any(has("effort") and (((.effort | type) != "string") or (.effort | length) == 0)))
+      or ($typed and ($items | any(has("provider") and (provider_id(.provider) | not))));
+    # A quota floor, on a rule or a profile: bin/fm-dispatch-resolve.sh applies
+    # it in code against one quota-axi row, so scope and min_percent must be
+    # concrete; a rule floor also names the provider whose row it reads.
+    def floor_bad($f; $need_provider):
+      ($f | type) != "object"
+      or (($f.scope | type) != "string") or (($f.scope | length) == 0)
+      or (($f.min_percent | type) != "number") or ($f.min_percent < 0) or ($f.min_percent > 100)
+      or (if $need_provider
+          then (provider_id($f.provider) | not)
+          else ($f | has("provider"))
+          end);
+    def malformed_profile_floors($items):
+      ($items | any(has("floor") and floor_bad(.floor; false)));
     def bad_efforts:
       configured_profiles
       | map({h: .harness, m: .model, e: .effort})
@@ -1150,13 +1268,20 @@ crew_dispatch_validate() {
       | unique;
     if type != "object" then "top-level value must be an object"
     elif has("rules") and (.rules | type) != "array" then "rules must be an array"
+    elif provider_caps_bad then "providerCaps must map each provider id (or default) to a positive integer"
     elif [(.rules // [])[]? | select(type != "object")] | length > 0 then "each rule must be an object"
     elif [(.rules // [])[]? | select((.when? | type) != "string" or (.when | length) == 0)] | length > 0 then "each rule needs non-empty when"
     elif [(.rules // [])[]? | select((.use? | type) != "object" and (.use? | type) != "array")] | length > 0 then "each rule needs use"
     elif [(.rules // [])[]? | select((.use? | type) == "array" and (.use | length) == 0)] | length > 0 then "each rule needs at least one use profile"
     elif [(.rules // [])[]? | profiles(.use?)[]? | select(type != "object")] | length > 0 then "each use profile must be an object"
     elif [(.rules // [])[]? | profiles(.use?)[]? | select((.harness? | type) != "string" or (.harness | length) == 0)] | length > 0 then "each use profile needs harness"
-    elif malformed_optional_fields([(.rules // [])[]? | profiles(.use?)[]?]) then "use profile model and effort must be non-empty strings when present"
+    elif malformed_optional_fields([(.rules // [])[]? | profiles(.use?)[]?]) then
+      if $typed then "use profile model and effort must be non-empty strings, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\\z when present"
+      else "use profile model and effort must be non-empty strings when present"
+      end
+    elif $typed and malformed_profile_floors([(.rules // [])[]? | profiles(.use?)[]?]) then "use profile floor needs scope and min_percent 0..100"
+    elif $typed and ([(.rules // [])[]? | select(has("approval") and .approval != "captain")] | length > 0) then "approval must be \"captain\" when present"
+    elif $typed and ([(.rules // [])[]? | select(has("floor") and floor_bad(.floor; true))] | length > 0) then "rule floor needs scope, min_percent 0..100, and provider matching ^[a-z0-9]+(-[a-z0-9]+)*\\z"
     elif [(.rules // [])[]? | select(has("select") and ((.select? | type) != "string" or (.select | length) == 0))] | length > 0 then "select must be a non-empty string"
     elif [(.rules // [])[]? | .select? // empty | select(. != "quota-balanced")] | length > 0 then
       "unknown select: " + ([ (.rules // [])[]? | .select? // empty | select(. != "quota-balanced") ] | unique | join(", "))
@@ -1164,7 +1289,11 @@ crew_dispatch_validate() {
     elif has("default") and ((.default | type) == "array" and (.default | length) == 0) then "default needs at least one profile"
     elif has("default") and ([profiles(.default)[]? | select(type != "object")] | length) > 0 then "each default profile must be an object"
     elif has("default") and ([profiles(.default)[]? | select((.harness? | type) != "string" or (.harness | length) == 0)] | length) > 0 then "each default profile needs harness"
-    elif has("default") and malformed_optional_fields([profiles(.default)[]?]) then "default profile model and effort must be non-empty strings when present"
+    elif has("default") and malformed_optional_fields([profiles(.default)[]?]) then
+      if $typed then "default profile model and effort must be non-empty strings, and provider must match ^[a-z0-9]+(-[a-z0-9]+)*\\z when present"
+      else "default profile model and effort must be non-empty strings when present"
+      end
+    elif $typed and has("default") and malformed_profile_floors([profiles(.default)[]?]) then "default profile floor needs scope and min_percent 0..100"
     else
       (configured_profiles
         | map(.harness)

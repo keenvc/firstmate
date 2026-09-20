@@ -7,11 +7,12 @@
 # abstraction"). P1 extracted the tmux command sequences that fm-send.sh,
 # fm-peek.sh, fm-watch.sh, fm-spawn.sh, and fm-teardown.sh already ran inline
 # into bin/backends/tmux.sh, with those SAME command sequences, so the default
-# (tmux) path stays byte-identical. P2 adds bin/backends/herdr.sh, an
-# EXPERIMENTAL spawn-capable backend behind `--backend herdr`/`FM_BACKEND=herdr`/
-# `config/backend`, and behind runtime auto-detection when firstmate itself is
-# running inside herdr with no explicit backend setting; see herdr-addendum.md and
-# data/fm-backend-design-d7/herdr-verification-p2.md for its empirical basis.
+# (tmux) path stays byte-identical. P2 adds bin/backends/herdr.sh, a verified
+# spawn-capable backend with its own required CI lane, behind `--backend
+# herdr`/`FM_BACKEND=herdr`/`config/backend`, and behind runtime auto-detection
+# when firstmate itself is running inside herdr with no explicit backend setting;
+# see herdr-addendum.md and data/fm-backend-design-d7/herdr-verification-p2.md for
+# its empirical basis.
 # P3 adds bin/backends/zellij.sh, also EXPERIMENTAL and spawn-capable, behind
 # `--backend zellij`/`FM_BACKEND=zellij`/`config/backend` - NOT behind runtime
 # auto-detection (report.md's Open Question #2: start with a dedicated
@@ -33,8 +34,8 @@
 # treats that as `tmux` (fm_backend_of_meta), and fm-spawn.sh does not write
 # `backend=tmux` for a default-backend task, so existing and newly spawned
 # default-path metas stay byte-identical. Only a task spawned on a non-tmux
-# spawn-capable backend, currently experimental herdr, zellij, orca, or cmux,
-# carries an explicit `backend=` line.
+# spawn-capable backend, currently herdr, zellij, orca, or cmux, carries an
+# explicit `backend=` line.
 #
 # Event-source framing (herdr-addendum "Events as the core abstraction"): a
 # backend's supervision surface is conceptually an EVENT SOURCE - it produces
@@ -56,10 +57,10 @@ FM_BACKEND_CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 
 # Verified backend adapters. Extend only after a backend gets its own
 # bin/backends/<name>.sh and empirical verification, mirroring AGENTS.md
-# section 4's harness-verification discipline. herdr is EXPERIMENTAL (P2;
-# data/fm-backend-design-d7/herdr-addendum.md) - verified against the real
-# v0.7.1/protocol-14 binary (data/fm-backend-design-d7/herdr-verification-p2.md)
-# but newer than tmux's long-proven default path. zellij is EXPERIMENTAL (P3;
+# section 4's harness-verification discipline. herdr is verified (P2;
+# data/fm-backend-design-d7/herdr-addendum.md) and has its own required CI lane,
+# with current coverage in docs/herdr-backend.md and
+# docs/verification/runtime-backends.md. zellij is EXPERIMENTAL (P3;
 # data/fm-backend-design-d7/report.md "Zellij Backend") - verified against the
 # real 0.44.0 binary (docs/zellij-backend.md). orca is EXPERIMENTAL and
 # spawn-capable; unlike tmux/herdr/zellij it is also the worktree provider.
@@ -234,10 +235,9 @@ fm_backend_detect_cmux_app_is_ancestor() {
 # per-task `--backend` flag is parsed by the caller (fm-spawn.sh) and takes
 # precedence over this resolution entirely; it is not read here. Auto-detect
 # fires only when nothing was explicitly configured, so an explicit setting
-# always wins. Selecting herdr or cmux via auto-detect prints one loud stderr
-# notice (both are experimental); auto-detecting tmux stays silent - it is
-# today's default-path behavior and callers must see zero change. The cmux
-# notice names the winning signal, so a fallback-detected cmux (bundle id or
+# always wins. Auto-detected herdr stays silent like tmux. Selecting cmux via
+# auto-detect prints one loud stderr notice because cmux remains experimental;
+# the notice names the winning signal, so a fallback-detected cmux (bundle id or
 # ancestry, after the claude wrapper stripped CMUX_WORKSPACE_ID) is visibly
 # distinct from the primary-marker case.
 fm_backend_name() {
@@ -259,9 +259,6 @@ fm_backend_name() {
   # globals survive into the notice below.
   if fm_backend_detect >/dev/null; then
     detected=$FM_BACKEND_DETECTED
-    if [ "$detected" = herdr ]; then
-      echo "NOTICE: auto-detected herdr runtime (HERDR_ENV=1) - spawning into the EXPERIMENTAL herdr backend. Set config/backend or pass --backend tmux to opt out." >&2
-    fi
     if [ "$detected" = cmux ]; then
       case "$FM_BACKEND_DETECT_SIGNAL" in
         bundle-id) marker="FALLBACK signal __CFBundleIdentifier=$FM_BACKEND_CMUX_BUNDLE_ID; CMUX_WORKSPACE_ID absent, stripped by cmux's bundled claude wrapper" ;;
@@ -300,8 +297,8 @@ fm_backend_validate_spawn() {  # <name>
 # single owner of the per-backend dependency delta, so bootstrap follows the
 # RESOLVED backend instead of demanding an inactive backend's tools. Each set is:
 #   - the session-provider CLI itself (tmux/herdr/zellij/orca/cmux);
-#   - jq, for the JSON-emitting experimental adapters (herdr, zellij, cmux) whose
-#     spawn/liveness paths parse the backend's JSON output (see each adapter's
+#   - jq, for the JSON-emitting adapters (herdr, zellij, cmux) whose spawn/liveness
+#     paths parse the backend's JSON output (see each adapter's
 #     tool check, e.g. fm_backend_herdr_tool_check);
 #   - the treehouse worktree provider for every session-provider-only backend
 #     (tmux, herdr, zellij, cmux); orca owns its own task worktree and terminal,
@@ -365,14 +362,38 @@ fm_backend_target_of_meta() {  # <meta-file>
   [ -n "$window" ] && printf '%s' "$window"
 }
 
+# fm_backend_meta_endpoint_cleared_value: the single explicit
+# `endpoint_cleared=<reason>` stamp a record may carry once its endpoint is
+# already gone (a workspace or pane closed by an earlier cleanup, or an agent
+# that died to a provider cap). Absent, empty, duplicated, or malformed returns
+# 1 so an ambiguous stamp is never mistaken for a confirmed cleared endpoint.
+fm_backend_meta_endpoint_cleared_value() {  # <meta-file>
+  local meta=$1 count value
+  count=$(grep -c '^endpoint_cleared=' "$meta" 2>/dev/null || true)
+  [ "$count" -eq 1 ] || return 1
+  value=$(grep '^endpoint_cleared=' "$meta" | cut -d= -f2-)
+  [ -n "$value" ] || return 1
+  case "$value" in *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;; esac
+  printf '%s' "$value"
+}
+
 # fm_backend_validate_task_endpoint: validate a task cleanup record entirely
 # from its durable metadata before any runtime command or cleanup mutation.
 # The validation binds the exact task id, selected backend, target, project,
 # and worktree. New non-tmux records carry endpoint_task_id because their
 # opaque runtime ids do not encode the task label. Legacy tmux records remain
 # valid only when their window name itself is exactly fm-<task-id>.
+# With --allow-cleared, a record whose window is absent but which carries one
+# explicit endpoint_cleared stamp is accepted as an agent-less cleared endpoint
+# instead of refused: there is no live endpoint left to validate structurally,
+# and the stamp is the stronger agent-less evidence (a window may be dead while
+# an agent is gone; a cleared stamp records a close already performed). The
+# cleared contract sets FM_BACKEND_VALIDATED_ENDPOINT_CLEARED to the reason and
+# leaves FM_BACKEND_VALIDATED_TARGET empty; every caller that needs to operate
+# on a live endpoint must therefore stay strict and must not pass the flag.
 # On success, sets FM_BACKEND_VALIDATED_BACKEND and
-# FM_BACKEND_VALIDATED_TARGET. On failure, prints one refusal and returns 1.
+# FM_BACKEND_VALIDATED_TARGET (and FM_BACKEND_VALIDATED_ENDPOINT_CLEARED when
+# cleared). On failure, prints one refusal and returns 1.
 fm_backend_meta_exact_value() {  # <meta-file> <key>
   local meta=$1 key=$2 count value
   count=$(grep -c "^$key=" "$meta" 2>/dev/null || true)
@@ -388,11 +409,31 @@ fm_backend_endpoint_atom_valid() {  # <value>
   esac
 }
 
-fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
-  local meta=$1 id=$2 backend_count backend window worktree project binding_count binding
+# An Orca worktree id is the composite `<orca id>::<absolute worktree path>`
+# that Orca itself returns, so the `:` and `/` characters every real value
+# carries make the simple-atom check reject it. Firstmate hands the id back to
+# Orca opaquely and resolves it through Orca before removing anything, so this
+# proves only the shape that can name one worktree: both halves of the first
+# `::` split present, and the path half absolute.
+fm_backend_orca_worktree_id_valid() {  # <value>
+  case "$1" in
+    *$'\n'*|*$'\r'*|*$'\t'*) return 1 ;;
+    *::*) ;;
+    *) return 1 ;;
+  esac
+  [ -n "${1%%::*}" ] || return 1
+  case "${1#*::}" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_backend_validate_task_endpoint() {  # <meta-file> <task-id> [--allow-cleared]
+  local meta=$1 id=$2 allow_cleared=${3:-} backend_count backend window cleared worktree project binding_count binding
   local session pane recorded_session workspace tab terminal worktree_id surface
   FM_BACKEND_VALIDATED_BACKEND=
   FM_BACKEND_VALIDATED_TARGET=
+  FM_BACKEND_VALIDATED_ENDPOINT_CLEARED=
   [ -f "$meta" ] && [ ! -L "$meta" ] || {
     echo "REFUSED: task $id has no regular endpoint metadata at $meta; preserving task state." >&2
     return 1
@@ -401,10 +442,15 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
     echo "REFUSED: task endpoint identity has an invalid task id; preserving task state." >&2
     return 1
   esac
-  window=$(fm_backend_meta_exact_value "$meta" window) || {
+  window=$(fm_backend_meta_exact_value "$meta" window) || window=
+  cleared=
+  if [ -z "$window" ] && [ "$allow_cleared" = --allow-cleared ]; then
+    cleared=$(fm_backend_meta_endpoint_cleared_value "$meta") || cleared=
+  fi
+  if [ -z "$window" ] && [ -z "$cleared" ]; then
     echo "REFUSED: task $id has a missing, empty, or ambiguous window endpoint; preserving task state." >&2
     return 1
-  }
+  fi
   worktree=$(fm_backend_meta_exact_value "$meta" worktree) || {
     echo "REFUSED: task $id has a missing, empty, or ambiguous worktree identity; preserving task state." >&2
     return 1
@@ -444,6 +490,14 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
   if [ -n "$binding" ] && [ "$binding" != "$id" ]; then
     echo "REFUSED: endpoint metadata belongs to task $binding, not $id; preserving task state." >&2
     return 1
+  fi
+
+  if [ -n "$cleared" ]; then
+    # shellcheck disable=SC2034 # Output globals are consumed by sourcing callers.
+    FM_BACKEND_VALIDATED_ENDPOINT_CLEARED=$cleared
+    FM_BACKEND_VALIDATED_BACKEND=$backend
+    FM_BACKEND_VALIDATED_TARGET=
+    return 0
   fi
 
   case "$backend" in
@@ -508,7 +562,7 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
       }
       if [ "$window" != "fm-$id" ] \
         || ! fm_backend_endpoint_atom_valid "$terminal" \
-        || ! fm_backend_endpoint_atom_valid "$worktree_id"; then
+        || ! fm_backend_orca_worktree_id_valid "$worktree_id"; then
         echo "REFUSED: Orca endpoint metadata for task $id is malformed or inconsistent; preserving task state." >&2
         return 1
       fi
@@ -709,6 +763,36 @@ fm_backend_capture() {  # <backend> <target> <lines> [expected-label]
     cmux) fm_backend_cmux_capture "$@" ;;
     *) echo "error: no capture implementation for backend '$backend'" >&2; return 1 ;;
   esac
+}
+
+# FM_BACKEND_VISIBLE_CAPTURE: backends with a verified viewport-only read, each
+# implementing fm_backend_<name>_visible_capture. This one list answers both the
+# capability question and the dispatch, so they cannot disagree. cmux is absent
+# pending live verification: its `read-screen` without `--scrollback` plausibly
+# reads only the viewport, but that has not been observed on a real cmux, and
+# the adapter's own capture opts into history with `--scrollback`. orca's
+# `terminal read --limit` is a history read with no viewport mode.
+FM_BACKEND_VISIBLE_CAPTURE="tmux herdr zellij"
+
+# fm_backend_visible_capture_supported: whether <backend> can read the visible
+# viewport WITHOUT scrollback. Callers that must not mistake a scrolled-away
+# frame for the live screen ask this first and fail closed on a no.
+fm_backend_visible_capture_supported() {  # <backend>
+  fm_backend_list_contains "$FM_BACKEND_VISIBLE_CAPTURE" "$1"
+}
+
+# fm_backend_visible_capture: the visible viewport, never scrollback. A backend
+# outside FM_BACKEND_VISIBLE_CAPTURE declines here rather than answering with a
+# history-backed capture the caller would read as the live screen.
+fm_backend_visible_capture() {  # <backend> <target> [expected-label]
+  local backend=$1
+  shift
+  fm_backend_visible_capture_supported "$backend" || {
+    echo "error: backend '$backend' has no verified viewport-bounded capture primitive" >&2
+    return 1
+  }
+  fm_backend_source "$backend" || return 1
+  "fm_backend_${backend}_visible_capture" "$@"
 }
 
 # fm_backend_send_key: one backend-supported named special key.

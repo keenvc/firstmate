@@ -24,7 +24,7 @@ Select Herdr with local `config/backend` containing `herdr`, `FM_BACKEND=herdr` 
 A remote second-mate agent is the one case with no choice: it always runs on Herdr, and [`remote-secondmates.md`](remote-secondmates.md) owns that requirement and the readiness its host must meet.
 It is also auto-detected when the primary runs natively under `HERDR_ENV=1` and is not inside tmux.
 A tmux pane nested inside Herdr resolves to tmux because the innermost multiplexer wins.
-An auto-detected Herdr spawn prints an opt-out notice.
+An auto-detected Herdr spawn stays silent, matching the verified tmux default path.
 
 Spawn stops before creating a Herdr container or acquiring a task worktree when `herdr`, `jq`, or the protocol floor is unavailable.
 No separate first-run provisioning is required.
@@ -125,6 +125,7 @@ The worker remains on the ordinary flat or Herdr-current-order path.
 
 Normal task metadata remains the sole endpoint authority after creation.
 Cleanup closes only the exact recorded task pane and never calls `workspace close`.
+A projected teardown additionally removes any panes that disposable projected workspace still holds through that same focus-preserving pane close, and it retires the journal only once the workspace itself is confirmed gone, because a recorded pane that vanished before its close would otherwise leave the workspace for a Herdr restart to restore as a live agent in the wrong directory.
 Herdr 0.7.5's explicit close moves focus to a neighbor whenever it empties a non-focused workspace, while its pane-death removal preserves the focused workspace whenever the dying workspace sits behind it or the focused workspace is last; both behaviors are fixed in Herdr 0.8.0, and the exact rules live in the adapter header of `bin/backends/herdr.sh`.
 Projected cleanup therefore runs under the same session lock, refuses to delete the tab a live foreground client is viewing, and treats a workspace-emptying close as a focus-safe removal: it verifies the close would empty the workspace, repositions the doomed workspace behind the focused one through the verified `workspace.move` transport when needed, proves the pane holds one lone idle shell, and ends that shell so Herdr removes the emptied workspace through its focus-preserving pane-death path.
 The persisted `.focused` pointer is not a live viewer: when `herdr terminal title clear` reports `no_foreground_client`, cleanup proceeds on that tab because no human is attached and skips restoration of the tab it destroys.
@@ -224,6 +225,11 @@ When the selected named server is not running, the adapter launches it without i
 Herdr passes its server startup environment to every later pane, so retaining those values could misroute panes for another Firstmate home or harness.
 An already-running server is reused without restart or environment changes.
 Explicit named-session routing and unrelated launch environment remain intact.
+
+Every synchronous Herdr CLI read or write runs under a hard per-call bound (`FM_BACKEND_HERDR_CLI_TIMEOUT`, default 10 seconds) through the repo-wide bounded runner in `bin/fm-timeout-lib.sh`, so a wedged server or a hung pane read cannot block a supervisor indefinitely or leak the shell that made the call.
+The bound kills the whole child process group and reports Herdr timeout as exit 124.
+The long-lived `herdr server` launch is the one exemption, because its purpose is to outlive the call and a bound would kill the server.
+`tests/fm-backend-herdr-probe-timeout.test.sh` pins the bound, the process reaping, and the server exemption against a TERM-ignoring fake herdr.
 
 Literal text and Enter are separate operations on `fm-send.sh`'s typed plane; ordinary local text steers instead use the durable steering inbox and send only its best-effort constant doorbell through this adapter.
 Spawn-time fixed commands may use Herdr's atomic run primitive.
