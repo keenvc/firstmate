@@ -135,7 +135,7 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|cline)
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|cline|openhands)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -228,6 +228,15 @@
 #   and scout batches. The loop lives here, in bash, so callers never hand-write a
 #   multi-task shell loop (the tool shell is zsh, which does not word-split unquoted
 #   $vars and silently breaks ad-hoc `for ... in $pairs` loops).
+# Launch delivery:
+#   Every harness and backend receives its complete launch command from a
+#   never-reused 0600 file in a 0700 home-scoped task namespace under /tmp, while
+#   the pane receives only a short source line.
+#   This keeps commands beyond the terminal's roughly 1,024-byte input boundary
+#   intact, prevents a delayed source line from being rebound by a relaunch, and
+#   prevents equal task ids in different Firstmate homes from sharing a file.
+#   Spawn refuses an unsafe pre-existing task temp root or launch namespace, and
+#   task teardown removes only the current home's launch namespace.
 # Launch environment (config/launch-env-allowlist):
 #   Absent means unchanged ambient inheritance. A present readable regular file
 #   opts every launch (ship, scout, secondmate, raw command, and relaunch) into
@@ -287,6 +296,10 @@
 #     __GEMINISETTINGS__ firstmate-owned per-task gemini settings file (busy-state hooks)
 #     __ROVOBIN__   resolved, rovo-verified executable for a rovo launch
 #     __AGYBIN__    resolved, agy-verified executable for an agy launch
+#     __OHBIN__     resolved, openhands-verified executable for an openhands launch
+#     __OHENV__     firstmate-owned per-task env file holding LLM_MODEL and LLM_API_KEY
+#     __OHHOME__    firstmate-owned per-task HOME (writable .openhands plus identity symlinks)
+#     __OHPERSIST__ firstmate-owned per-task OPENHANDS_PERSISTENCE_DIR
 # Verified per-harness turn-end hooks are installed automatically where enabled; some live outside the worktree.
 # Kimi uses one surgically installed Firstmate region in $HOME/.kimi-code/config.toml,
 # a firstmate-owned global hook and registry, and a gitignored per-task pointer.
@@ -303,8 +316,8 @@
 # plus a gitignored .fm-grok-turnend worktree pointer and a state token.
 # muse installs no hook at all - its plugin engine is off in the default build - so
 # it writes state/<id>.muse-session to bind the pane to muse's own session event
-# log; muse, gemini, agy, and cline are crewmate/scout only and are refused for
-# --secondmate.
+# log; muse, gemini, agy, cline, and openhands are crewmate/scout only and are
+# refused for --secondmate.
 # rovo installs no hook either - its eventHooks fire at tool granularity only,
 # never turn-end - so it carries no busy-source wiring at all and no turn-end
 # hook. A positional brief is dead-on-arrival (rovo loads, never works, and drops
@@ -320,6 +333,12 @@
 # busy turn - answering the dialog first if it renders anyway - before
 # reporting success (the rovo/kimi launch-then-confirm shape). Its busy state
 # is a screen-scrape fallback like grok and rovo, and it is crewmate/scout only.
+# openhands installs no hook either and publishes no identity marker; its brief
+# rides -f, credentials ride --override-with-envs, and a per-task HOME is
+# required because the SDK profile store is hardcoded under
+# Path.home()/.openhands/profiles. The spawn waits for the pinned ESC: pause
+# busy row before reporting success. It is crewmate/scout only and is refused
+# for --secondmate, like agy.
 # cursor installs no per-task hook either: it writes state/<id>.cursor-session to
 # bind the pane to cursor's own conversation transcript (projects root, the exact
 # workspace path cursor records in .workspace-trusted, and the conversations that
@@ -1666,7 +1685,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-  '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy)
+  '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | openhands)
     ARG3=${POS[1]:-}
     ;;
   *' '*)
@@ -1773,6 +1792,39 @@ agy_model_validate() {  # <agy-bin> <model>
   fi
   echo "error: agy model '$model' is not listed by 'agy models'; choose a listed id or omit --model" >&2
   return 1
+}
+
+# Read KEY=VALUE from a firstmate-owned env file without executing it.
+# Accepts optional surrounding quotes. Prints the value or returns 1.
+openhands_read_kv() {  # <file> <key>
+  local file=$1 key=$2 line val
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$key"=*)
+        val=${line#*=}
+        val=${val%$'\r'}
+        case "$val" in
+          \"*\") val=${val#\"}; val=${val%\"} ;;
+          \'*\') val=${val#\'}; val=${val%\'} ;;
+        esac
+        printf '%s' "$val"
+        return 0
+        ;;
+    esac
+  done < "$file"
+  return 1
+}
+
+openhands_prepare_home() {  # <oh-home> <real-home>
+  local oh_home=$1 real_home=$2 name
+  mkdir -p "$oh_home/.openhands" || return 1
+  for name in .ssh .gitconfig .config .local .git-credentials; do
+    if [ -e "$real_home/$name" ] && [ ! -e "$oh_home/$name" ]; then
+      ln -s "$real_home/$name" "$oh_home/$name" || return 1
+    fi
+  done
+  return 0
 }
 
 # The verified launch command per adapter. The knowledge half of each adapter
@@ -1906,6 +1958,18 @@ launch_template() {
   # agy exposes no hook surface, so busy state is a rendered-tail fallback
   # (bin/fm-busy-lib.sh) and nothing is armed below.
   agy) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS __AGYBIN__ --prompt-interactive "$(__OPINPUT__ encode launch-brief < __BRIEF__)" __MODELFLAG____EFFORTFLAG__--dangerously-skip-permissions' ;;
+  # openhands (OpenHands CLI): -f <brief> seeds and auto-submits the
+  # conversation (verified CLI 1.16.0). --always-approve auto-approves tool
+  # calls. --override-with-envs applies LLM_MODEL and LLM_API_KEY from a
+  # firstmate-owned env file so the first-run wizard never appears.
+  # --exit-without-confirmation makes /exit (and Ctrl+C) leave without the
+  # Terminate-session modal. A per-task HOME is required because the SDK
+  # profile store writes Path.home()/.openhands/profiles regardless of
+  # OPENHANDS_PERSISTENCE_DIR. Foreign markers are cleared because a live
+  # 1.16.0 TUI inherited GROK_AGENT=1 from its launcher and publishes no
+  # identity of its own. No --model/--effort flags exist; model rides
+  # LLM_MODEL and effort stays in task metadata.
+  openhands) printf '%s' 'set -a && . __OHENV__ && set +a && env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS HOME=__OHHOME__ OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=__OHPERSIST__ OPENHANDS_WORK_DIR=__WORKTREE__ __OHBIN__ --override-with-envs --always-approve --exit-without-confirmation -f __BRIEF__' ;;
   # grok (Grok Build TUI): a positional prompt starts the supervised interactive
   # session. --always-approve auto-approves every tool execution (verified: the
   # crewmate runs fully autonomously, no permission gate), which an unattended
@@ -2103,8 +2167,8 @@ esac
 # docs/supervision-protocols/ carries no agy wake protocol (agy 1.2.0).
 # cline has none either: docs/supervision-protocols/ carries no cline wake
 # protocol, and this task verified only the crewmate-side launch, busy state,
-# interrupt, and exit.
-if [ "$KIND" = secondmate ] && { [ "$HARNESS" = muse ] || [ "$HARNESS" = gemini ] || [ "$HARNESS" = agy ] || [ "$HARNESS" = cline ]; }; then
+# interrupt, and exit. openhands has none either, for the same reason.
+if [ "$KIND" = secondmate ] && { [ "$HARNESS" = muse ] || [ "$HARNESS" = gemini ] || [ "$HARNESS" = agy ] || [ "$HARNESS" = cline ] || [ "$HARNESS" = openhands ]; }; then
   echo "error: $HARNESS is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
   exit 1
 fi
@@ -2170,6 +2234,12 @@ cline)
     exit 1
   }
   ;;
+openhands)
+  OPENHANDS_BIN=$(resolve_pi_executable openhands) || {
+    echo "error: openhands executable not found on PATH; install OpenHands CLI (uv tool install openhands --python 3.12) or select a different verified harness" >&2
+    exit 1
+  }
+  ;;
 esac
 
 # config/secondmate-harness may carry optional model/effort tokens alongside the
@@ -2223,6 +2293,29 @@ if [ -n "$HARNESS" ]; then
     [ -n "$LANE_CAP_MODEL" ] || LANE_CAP_MODEL=$(fm_meta_get "$RELAUNCH_META" model)
   fi
   fm_provider_cap_refuse "$STATE" "$CONFIG" "$HARNESS" "$LANE_CAP_MODEL" "$LANE_CAP_EXCLUDE" || exit 1
+fi
+if [ "$HARNESS" = openhands ]; then
+  if [ -z "$MODEL" ] || [ "$MODEL" = default ]; then
+    if [ -n "${LLM_MODEL:-}" ]; then
+      MODEL=$LLM_MODEL
+    else
+      echo "error: openhands requires --model (a LiteLLM id) or LLM_MODEL in the environment" >&2
+      exit 1
+    fi
+  fi
+  OPENHANDS_API_KEY=${LLM_API_KEY:-}
+  if [ -z "$OPENHANDS_API_KEY" ]; then
+    OPENHANDS_API_KEY=$(openhands_read_kv "$FM_HOME/config/openhands-llm.env" LLM_API_KEY) || true
+  fi
+  if [ -z "$OPENHANDS_API_KEY" ]; then
+    echo "error: openhands requires LLM_API_KEY in the environment or $FM_HOME/config/openhands-llm.env" >&2
+    exit 1
+  fi
+  OPENHANDS_OPERATOR_HOME=${HOME:-}
+  [ -n "$OPENHANDS_OPERATOR_HOME" ] || {
+    echo "error: openhands spawn needs HOME so it can symlink operator identity into the per-task home" >&2
+    exit 1
+  }
 fi
 
 secondmate_registry_value() {
@@ -3822,6 +3915,34 @@ agy_spawn_fail() {  # <detail>
   rovo_endpoint_cleanup
 }
 
+openhands_capture() {
+  fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true
+}
+
+openhands_pane_is_working() {  # <plain-pane-capture>
+  case "$(fm_busy_classify "$BACKEND" "$T" openhands "$ID" "$STATE" "$1")" in
+    busy*) return 0 ;;
+  esac
+  return 1
+}
+
+openhands_wait_for_working() {
+  local pane i=0 max=${FM_OPENHANDS_READY_POLLS:-60} interval=${FM_OPENHANDS_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(openhands_capture)
+    openhands_pane_is_working "$pane" && return 0
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+openhands_spawn_fail() {  # <detail>
+  printf 'failed: %s\n' "$1" >> "$STATE/$ID.status"
+  echo "error: $1; inspect window $T" >&2
+  rovo_endpoint_cleanup
+}
+
 if [ "$RELAUNCH" -eq 1 ]; then
   # No worktree is acquired: the recorded one is reused as-is. What must be
   # proven instead is that the adopted endpoint's shell is actually sitting in
@@ -3994,7 +4115,20 @@ esac
 # Nested (not a bare /tmp/fm-<id>/gotmp) so other per-task temp can live alongside
 # later, and teardown cleans one deterministic path. GOTMPDIR (not TMPDIR) is the
 # targeted knob: TMPDIR is too broad (affects every program's temp, not just Go's).
+# The root is private (0700) because its path is predictable under a shared
+# /tmp: a root that already exists is reused only as a real directory owned by
+# this user and writable by nobody else, then tightened, so no other local user
+# can plant or swap a file in it. The staged launch command lives in a sibling
+# directory namespaced by home identity, not in this shared per-id root.
 TASK_TMP="/tmp/fm-$ID"
+if ! (umask 077 && mkdir "$TASK_TMP") 2>/dev/null; then
+  if [ -L "$TASK_TMP" ] || [ ! -d "$TASK_TMP" ] || [ ! -O "$TASK_TMP" ] ||
+    [ -n "$(find "$TASK_TMP" -prune \( -perm -g=w -o -perm -o=w \) -print 2>/dev/null)" ] ||
+    ! chmod 700 "$TASK_TMP"; then
+    echo "error: task temp root $TASK_TMP already exists and is not a private directory owned by this user; refusing to stage the launch command there; inspect and remove it, then retry" >&2
+    exit 1
+  fi
+fi
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook where enabled: a file that touches
@@ -4643,6 +4777,33 @@ sq_ompext=$(shell_quote "$STATE/$ID.omp-ext.ts")
 sq_ompcfg=$(shell_quote "${OMP_WORKER_CFG:-$FM_ROOT/.omp/fm-worker-overlay.yml}")
 sq_opinput=$(shell_quote "$FM_ROOT/bin/fm-operational-input.sh")
 sq_worktree=$(shell_quote "$WT")
+if [ "$HARNESS" = openhands ]; then
+  OPENHANDS_HOME_DIR=$STATE/$ID.openhands-home
+  OPENHANDS_PERSIST_DIR=$STATE/$ID.openhands
+  OPENHANDS_ENV_FILE=$STATE/$ID.openhands-env
+  openhands_prepare_home "$OPENHANDS_HOME_DIR" "$OPENHANDS_OPERATOR_HOME" || {
+    echo "error: could not prepare the per-task openhands home at $OPENHANDS_HOME_DIR" >&2
+    exit 1
+  }
+  mkdir -p "$OPENHANDS_PERSIST_DIR" || {
+    echo "error: could not create the per-task openhands persistence directory at $OPENHANDS_PERSIST_DIR" >&2
+    exit 1
+  }
+  umask_old=$(umask)
+  umask 077
+  {
+    printf 'LLM_API_KEY=%s\n' "$(shell_quote "$OPENHANDS_API_KEY")"
+    printf 'LLM_MODEL=%s\n' "$(shell_quote "$MODEL")"
+  } > "$OPENHANDS_ENV_FILE" || {
+    umask "$umask_old"
+    echo "error: could not write the per-task openhands env file at $OPENHANDS_ENV_FILE" >&2
+    exit 1
+  }
+  umask "$umask_old"
+  LAUNCH=${LAUNCH//__OHENV__/"$(shell_quote "$OPENHANDS_ENV_FILE")"}
+  LAUNCH=${LAUNCH//__OHHOME__/"$(shell_quote "$OPENHANDS_HOME_DIR")"}
+  LAUNCH=${LAUNCH//__OHPERSIST__/"$(shell_quote "$OPENHANDS_PERSIST_DIR")"}
+fi
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
@@ -4670,10 +4831,11 @@ gemini) LAUNCH=${LAUNCH//__GEMINISETTINGS__/"$(shell_quote "$STATE_REAL/$ID.gemi
 omp) LAUNCH=${LAUNCH//__OMPBIN__/"$(shell_quote "$OMP_BIN")"} ;;
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
 cline) LAUNCH=${LAUNCH//__CLINEBIN__/"$(shell_quote "$CLINE_BIN")"} ;;
+openhands) LAUNCH=${LAUNCH//__OHBIN__/"$(shell_quote "$OPENHANDS_BIN")"} ;;
 esac
 LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | cline)
+claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | cline | openhands)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac
@@ -4819,8 +4981,55 @@ if [ "$LAUNCH_ENV_ENABLED" = 1 ]; then
   fi
   LAUNCH="$LAUNCH_ENV_PREFIX /bin/sh -c $(shell_quote "$LAUNCH")"
 fi
+# Implement the launch-delivery contract in this script's header. The full
+# home-identity hash isolates equal task ids across homes, and the spawn token in
+# the final filename keeps a buffered source line bound to this incarnation.
+spawn_launch_home_token() {
+  local home=$1 root hash
+  root=$(cd "$home" 2>/dev/null && pwd -P) || root=$home
+  if command -v shasum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$root" | shasum -a 256 | awk '{print $1}')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$root" | sha256sum | awk '{print $1}')
+  else
+    return 1
+  fi
+  case "$hash" in
+    *[!0-9a-fA-F]*|'') return 1 ;;
+  esac
+  printf '%s' "$hash"
+}
+LAUNCH_HOME_TOKEN=$(spawn_launch_home_token "$FM_HOME") || LAUNCH_HOME_TOKEN=
+if [ -z "$LAUNCH_HOME_TOKEN" ]; then
+  echo "error: could not derive a home identity for the staged launch file" >&2
+  exit 1
+fi
+case "$SPAWN_GEN" in
+  *[!A-Za-z0-9.]*|'') echo "error: spawn incarnation token is not a usable launch-file nonce" >&2; exit 1 ;;
+esac
+LAUNCH_DIR="/tmp/fm-$ID+$LAUNCH_HOME_TOKEN"
+if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
+  if [ -L "$LAUNCH_DIR" ] || [ ! -d "$LAUNCH_DIR" ] || [ ! -O "$LAUNCH_DIR" ] ||
+    [ -n "$(find "$LAUNCH_DIR" -prune \( -perm -g=w -o -perm -o=w \) -print 2>/dev/null)" ] ||
+    ! chmod 700 "$LAUNCH_DIR"; then
+    echo "error: task launch directory $LAUNCH_DIR already exists and is not a private directory owned by this user; refusing to stage the launch command there; inspect and remove it, then retry" >&2
+    exit 1
+  fi
+fi
+LAUNCH_FILE="$LAUNCH_DIR/launch.$SPAWN_GEN.sh"
+LAUNCH_STAGE="$LAUNCH_DIR/.launch.$SPAWN_GEN.tmp"
+if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
+  echo "error: task launch file $LAUNCH_FILE already exists; refusing to replace it" >&2
+  exit 1
+fi
+if ! (umask 077 && printf '%s\n' "$LAUNCH" >"$LAUNCH_STAGE" &&
+  chmod 0600 "$LAUNCH_STAGE" && mv -f "$LAUNCH_STAGE" "$LAUNCH_FILE"); then
+  rm -f "$LAUNCH_STAGE"
+  echo "error: could not stage the launch command at $LAUNCH_FILE" >&2
+  exit 1
+fi
 sleep 0.3
-spawn_send_literal "$T" "$LAUNCH"
+spawn_send_literal "$T" ". $(shell_quote "$LAUNCH_FILE")"
 sleep 0.3
 if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -4911,6 +5120,12 @@ if [ "$HARNESS" = cline ]; then
   fi
   if ! cline_wait_for_delivery; then
     cline_spawn_fail "cline brief pointer delivery was not confirmed in window $T"
+    exit 1
+  fi
+fi
+if [ "$HARNESS" = openhands ]; then
+  if ! openhands_wait_for_working; then
+    openhands_spawn_fail "openhands did not start processing its brief in window $T"
     exit 1
   fi
 fi

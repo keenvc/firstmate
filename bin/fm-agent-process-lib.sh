@@ -50,6 +50,10 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
     # name is exactly `.cline` (verified, cline 3.0.62). Anchored, never
     # *cline*, so an unrelated command cannot be misread as this harness.
     .cline|cline) printf 'agent' ;;
+    # openhands is anchored for the same reason: its live process name is the
+    # bare word `openhands` (verified, CLI 1.16.0), and a glob would claim a
+    # path or argument containing `.openhands`.
+    openhands) printf 'agent' ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'shell' ;;
     *)
       if fm_harness_path_name "$path" >/dev/null || fm_harness_path_name "$argv0" >/dev/null; then

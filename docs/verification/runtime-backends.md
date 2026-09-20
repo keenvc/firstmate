@@ -2146,3 +2146,14 @@ The real modal OpenCode painted for the stub's quota error, captured from the pa
 ```
 
 `tests/fm-crew-state.test.sh` pins the logic portably over a synthetic pane transcript, including the divergence cases where only one family, or ordinary worker prose, never reads `quota`.
+
+## OpenHands CLI
+
+Crewmate and scout adapter only, verified 2026-09-20 with OpenHands CLI 1.16.0 / SDK v1.21.0 on Linux through tmux.
+The dedicated record at [`docs/verification/openhands.md`](openhands.md) owns the dated commands, pane captures, and remaining gaps.
+Refresh with:
+
+```sh
+bin/fm-test-run.sh tests/fm-openhands-harness.test.sh
+FM_OPENHANDS_SIGNALS_LIVE=1 bin/fm-test-run.sh tests/fm-openhands-signals-live-e2e.test.sh
+```

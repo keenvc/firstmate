@@ -339,7 +339,7 @@ fm_composer_strip_ghost() {
 # tmux agy endpoint reaches the submit core with no recorded harness, and its
 # bare `>` composer verdict is `unknown`, so the busy footer is the only
 # turn-started acknowledgement that path can read.
-FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working(\.\.\.|…)|Ctrl\+c:cancel|ctrl\+c to stop|esc[[:space:]]+to[[:space:]]+cancel'
+FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working(\.\.\.|…)|Ctrl\+c:cancel|ctrl\+c to stop|esc[[:space:]]+to[[:space:]]+cancel|ESC: pause'
 FM_DELIVERY_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'
 FM_DELIVERY_CODEX_BUSY_REGEX_DEFAULT='esc to interrupt'
 FM_DELIVERY_OPENCODE_BUSY_REGEX_DEFAULT='esc interrupt'
@@ -387,6 +387,12 @@ FM_DELIVERY_AGY_BUSY_REGEX_DEFAULT='esc[[:space:]]+to[[:space:]]+cancel'
 # finished turn cannot fake an acknowledgement. Delivery guard only; recorded
 # worker state comes from the cline-hook fold in bin/fm-busy-lib.sh.
 FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT='\(esc to cancel\)'
+# openhands (OpenHands CLI) pins `Working (<n>s • ESC: pause)` above the
+# composer while a turn runs (verified live, CLI 1.16.0). The token is
+# `ESC: pause`, not the word `Working`, because Pi already owns that word.
+# Delivery guard only; recorded worker state comes from the openhands-regex
+# fold in bin/fm-busy-lib.sh.
+FM_DELIVERY_OPENHANDS_BUSY_REGEX_DEFAULT='ESC: pause'
 FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT='^[[:space:]]*(🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)[[:space:]]+·[[:space:]]+'
 
 fm_busy_lines_match() {  # [harness]
@@ -404,6 +410,7 @@ fm_busy_lines_match() {  # [harness]
       grok) regex=$FM_DELIVERY_GROK_BUSY_REGEX_DEFAULT ;;
       agy) regex=$FM_DELIVERY_AGY_BUSY_REGEX_DEFAULT ;;
       cline) regex=$FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT ;;
+      openhands) regex=$FM_DELIVERY_OPENHANDS_BUSY_REGEX_DEFAULT ;;
       kimi) regex=$FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT ;;
       cursor) regex=$FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT ;;
       '') regex=$FM_DELIVERY_BUSY_REGEX_DEFAULT ;;
@@ -439,8 +446,10 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # welcome placeholder `What can I do for you?` in a fresh session (verified live,
 # cline 3.0.62); both are dim/muted placeholders in an otherwise-empty bordered
 # composer and both must read `empty`, or a first cline spawn's readiness gate
-# would time out on a fresh profile.
-FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^What can I do for you\?$'
+# would time out on a fresh profile. openhands renders `Type your message,
+# @mention a file, or / for commands` as its idle placeholder (verified live,
+# CLI 1.16.0).
+FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^What can I do for you\?$|^Type your message, @mention a file'
 
 # Opencode draws a mode/model footer line INSIDE its left-bar composer
 # ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed
