@@ -135,7 +135,7 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy)
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|cline)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -303,7 +303,8 @@
 # plus a gitignored .fm-grok-turnend worktree pointer and a state token.
 # muse installs no hook at all - its plugin engine is off in the default build - so
 # it writes state/<id>.muse-session to bind the pane to muse's own session event
-# log; muse, gemini, and agy are crewmate/scout only and are refused for --secondmate.
+# log; muse, gemini, agy, and cline are crewmate/scout only and are refused for
+# --secondmate.
 # rovo installs no hook either - its eventHooks fire at tool granularity only,
 # never turn-end - so it carries no busy-source wiring at all and no turn-end
 # hook. A positional brief is dead-on-arrival (rovo loads, never works, and drops
@@ -2020,6 +2021,23 @@ launch_template() {
   # when a supported effort is requested, since a second --config-override
   # would silently discard the first (confirmed live).
   rovo) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS __ROVOBIN__ run --yolo __MODELFLAG____ROVOCONFIGOVERRIDE__' ;;
+  # cline (Cline CLI 3.0.62, an OpenTUI terminal app) launches its interactive
+  # TUI bare with `-i` and receives its brief only after the readiness gate
+  # below - the kimi/rovo launch-then-send shape. A positional prompt on `-i`
+  # is NOT reliable: cline's one-time "Introducing Cline Desktop" first-run
+  # splash consumes the first submitted line, so a brief carried on the launch
+  # command can be silently swallowed. --auto-approve true is cline's documented
+  # default and is passed explicitly so an operator's own --auto-approve false
+  # default can never park the unattended worker. -c pins the exact worktree so
+  # cline discovers the per-task .cline/hooks wiring written below and cannot
+  # drift to another workspace. --model takes the full `<provider>/<model>` id
+  # (`cline-pass/deepseek-v4-flash`); cline derives the provider from that
+  # prefix, so no separate -P is passed. --thinking accepts
+  # none|low|medium|high|xhigh. The foreign primary markers are cleared so an
+  # inherited CLAUDECODE cannot outrank cline's ancestry in a process that only
+  # reads the environment. Busy state and turn-end ride the workspace hook files
+  # written below, not the launch command.
+  cline) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS __CLINEBIN__ -i -c __WORKTREE__ --auto-approve true __MODELFLAG____EFFORTFLAG__' ;;
   *) return 1 ;;
   esac
 }
@@ -2083,7 +2101,10 @@ esac
 # secondmate whose supervision cycle could never be armed.
 # agy has none either: it exposes no hook surface for primary supervision and
 # docs/supervision-protocols/ carries no agy wake protocol (agy 1.2.0).
-if [ "$KIND" = secondmate ] && { [ "$HARNESS" = muse ] || [ "$HARNESS" = gemini ] || [ "$HARNESS" = agy ]; }; then
+# cline has none either: docs/supervision-protocols/ carries no cline wake
+# protocol, and this task verified only the crewmate-side launch, busy state,
+# interrupt, and exit.
+if [ "$KIND" = secondmate ] && { [ "$HARNESS" = muse ] || [ "$HARNESS" = gemini ] || [ "$HARNESS" = agy ] || [ "$HARNESS" = cline ]; }; then
   echo "error: $HARNESS is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
   exit 1
 fi
@@ -2140,6 +2161,12 @@ omp)
 agy)
   AGY_BIN=$(resolve_pi_executable agy) || {
     echo "error: agy executable not found on PATH; install Antigravity CLI or select a different verified harness" >&2
+    exit 1
+  }
+  ;;
+cline)
+  CLINE_BIN=$(command -v cline 2>/dev/null) || {
+    echo "error: cline executable not found on PATH; install Cline CLI or select a different verified harness" >&2
     exit 1
   }
   ;;
@@ -2318,7 +2345,7 @@ model_flag_for_harness() {
   local harness=$1 model=$2
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy)
+  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | cline)
     printf -- '--model %s ' "$(shell_quote "$model")"
     ;;
   esac
@@ -2359,6 +2386,14 @@ effort_flag_for_harness() {
     # omitted rather than passed as known-bad values (record-and-omit).
     case "$effort" in
     low | medium | high) printf -- '--effort %s ' "$(shell_quote "$effort")" ;;
+    esac
+    ;;
+  cline)
+    # cline --thinking validates exactly none|low|medium|high|xhigh; the shared
+    # vocabulary maps straight across, and max (above cline's ceiling) is
+    # omitted under the record-and-omit contract.
+    case "$effort" in
+    low | medium | high | xhigh) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
     esac
     ;;
   pi | pi-signed)
@@ -3655,6 +3690,82 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null || true
 }
 
+# cline launches bare and receives its brief pointer only after a readiness
+# gate, then a delivery-confirmation gate - the kimi/rovo launch-then-send
+# shape, forced by cline's first-run "Introducing Cline Desktop" splash, which
+# consumes the first submitted line. Both gates route composer-emptiness through
+# the shared classifier (fm_backend_composer_state) so they read the same shape
+# every steer guard does. Delivery is confirmed from the recorded busy state
+# opened by the workspace TaskStart hook (bin/fm-busy-lib.sh, source cline-hook)
+# rather than a rendered spinner, and falls back to the pinned `(esc to cancel)`
+# token for a pane whose hook has not landed yet.
+cline_capture() {
+  fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true
+}
+
+cline_composer_is_empty() {
+  [ "$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)" = empty ]
+}
+
+# cline's one-time splash renders on a fresh profile and eats the first
+# submitted line. Any key but Enter closes it; Escape is delivered once so the
+# readiness loop can then see the real composer.
+CLINE_SPLASH_DISMISSED=0
+
+cline_wait_for_ready() {
+  local pane i=0 max=${FM_CLINE_READY_POLLS:-60} interval=${FM_CLINE_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(cline_capture)
+    if printf '%s\n' "$pane" | grep -Fq 'Introducing Cline Desktop' ||
+      printf '%s\n' "$pane" | grep -Fq 'Press Enter to open'; then
+      if [ "$CLINE_SPLASH_DISMISSED" -eq 0 ]; then
+        fm_backend_send_key "$BACKEND" "$T" Escape >/dev/null 2>&1 || true
+        CLINE_SPLASH_DISMISSED=1
+      fi
+    elif printf '%s\n' "$pane" | grep -Fq 'Auto-approve'; then
+      # cline's own status row proves the TUI is up. Composer-emptiness is NOT
+      # used as the lead readiness signal: cline renders its idle placeholder
+      # (`Ask anything...`, or the fresh-session `What can I do for you?`) as a
+      # muted truecolor grey (~135.5 luma) just ABOVE the fleet-wide ghost-luma
+      # ceiling of 128, so the shared classifier reads an idle cline composer
+      # `pending` on the styled tmux/herdr captures. That is the same known gap
+      # rovo documents (docs/verification/rovo.md); solving it fleet-wide would
+      # require moving the shared ceiling into codex's starfield band. The status
+      # row is cline-specific, stable, and present exactly when the TUI is ready.
+      return 0
+    elif cline_composer_is_empty; then
+      return 0
+    fi
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+cline_delivery_is_confirmed() { # <plain-pane-capture>
+  local pane=$1 verdict
+  verdict=$(fm_busy_classify "$BACKEND" "$T" cline "$ID" "$STATE" "$pane" 2>/dev/null || true)
+  case "$verdict" in busy\ *) return 0 ;; esac
+  printf '%s\n' "$pane" | grep -qE "$FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT"
+}
+
+cline_wait_for_delivery() {
+  local pane i=0 max=${FM_CLINE_DELIVERY_POLLS:-40} interval=${FM_CLINE_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(cline_capture)
+    cline_delivery_is_confirmed "$pane" && return 0
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+cline_spawn_fail() { # <detail>
+  printf 'failed: %s\n' "$1" >>"$STATE/$ID.status"
+  echo "error: $1; inspect window $T" >&2
+  rovo_endpoint_cleanup
+}
+
 # agy carries its brief on the launch command, so it needs no delivery gate,
 # but a worktree agy does not trust parks the TUI on the folder-trust dialog
 # and an unanswered dialog sends the turn into agy's scratch directory instead
@@ -3951,6 +4062,18 @@ if [ "$KIND" != secondmate ]; then
       [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
     fi
     ;;
+  cline*)
+    # cline launches BARE and receives its brief only after the readiness gate
+    # below, so the launch itself is NOT a submitted turn. Seed the record idle;
+    # the TaskStart hook flips it busy when the brief pointer is actually
+    # submitted. Only the plain `cline` adapter (or a raw command whose basename
+    # begins with it) is armed here; a cline worker is crewmate/scout only.
+    BUSY_GEN=$("$FM_ROOT/bin/fm-busy-event.sh" arm "$STATE_REAL" "$ID" --state idle --source fm-spawn --event launch) || {
+      echo "error: failed to arm the busy-state contract for $ID" >&2
+      exit 1
+    }
+    [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
+    ;;
   kimi*)
     # Standalone Kimi stays unknown until fm_busy_kimi_verified opens on a
     # live-verified installed version (bin/fm-busy-lib.sh owns the gate and
@@ -4018,6 +4141,28 @@ EOF
 {"hooks":{"BeforeAgent":[{"hooks":[{"type":"command","command":"$g_before"}]}],"AfterAgent":[{"hooks":[{"type":"command","command":"$g_after"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"$g_sessionend"}]}]}}
 EOF
     fi
+    ;;
+  cline*)
+    # Semantic busy-state and turn-end hooks for cline (bin/fm-busy-lib.sh,
+    # source cline-hook). cline discovers hook config files from the workspace's
+    # .cline/hooks directory at session start, so the wiring is a set of
+    # executable files written before launch. TaskStart opens a turn;
+    # TaskComplete (normal end), TaskCancel (abort), TaskError (agent error), and
+    # SessionShutdown (process exit) all close it, so no abnormal end can leave
+    # a stale busy record. TaskComplete also touches the turn-ended NOTIFICATION
+    # for the watcher. Every hook tolerates a refused event (|| true) so a
+    # stale-gen writer can never break cline's own lifecycle. exclude_path keeps
+    # the wiring out of git's view.
+    mkdir -p "$WT/.cline/hooks"
+    busy_cmd_prefix="$(shell_quote "$FM_ROOT/bin/fm-busy-event.sh") apply $(shell_quote "$STATE_REAL") $(shell_quote "$ID")"
+    busy_suffix="--gen $(shell_quote "$BUSY_GEN") --source cline-hook"
+    printf '#!/bin/sh\n%s\n' "$busy_cmd_prefix busy $busy_suffix --event task-start >/dev/null 2>&1 || true" >"$WT/.cline/hooks/TaskStart"
+    printf '#!/bin/sh\ntouch %s; %s\n' "$(shell_quote "$TURNEND")" "$busy_cmd_prefix idle $busy_suffix --event task-complete >/dev/null 2>&1 || true" >"$WT/.cline/hooks/TaskComplete"
+    printf '#!/bin/sh\n%s\n' "$busy_cmd_prefix idle $busy_suffix --event task-cancel >/dev/null 2>&1 || true" >"$WT/.cline/hooks/TaskCancel"
+    printf '#!/bin/sh\n%s\n' "$busy_cmd_prefix idle $busy_suffix --event task-error >/dev/null 2>&1 || true" >"$WT/.cline/hooks/TaskError"
+    printf '#!/bin/sh\n%s\n' "$busy_cmd_prefix idle $busy_suffix --event session-shutdown >/dev/null 2>&1 || true" >"$WT/.cline/hooks/SessionShutdown"
+    chmod +x "$WT/.cline/hooks/TaskStart" "$WT/.cline/hooks/TaskComplete" "$WT/.cline/hooks/TaskCancel" "$WT/.cline/hooks/TaskError" "$WT/.cline/hooks/SessionShutdown"
+    exclude_path '.cline/'
     ;;
   opencode*)
     mkdir -p "$WT/.opencode/plugins"
@@ -4524,10 +4669,11 @@ cursor) LAUNCH=${LAUNCH//__CURSORBIN__/"$(shell_quote "$CURSOR_BIN")"} ;;
 gemini) LAUNCH=${LAUNCH//__GEMINISETTINGS__/"$(shell_quote "$STATE_REAL/$ID.gemini-settings.json")"} ;;
 omp) LAUNCH=${LAUNCH//__OMPBIN__/"$(shell_quote "$OMP_BIN")"} ;;
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
+cline) LAUNCH=${LAUNCH//__CLINEBIN__/"$(shell_quote "$CLINE_BIN")"} ;;
 esac
 LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy)
+claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | cline)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac
@@ -4738,6 +4884,33 @@ if [ "$HARNESS" = agy ]; then
     else
       agy_spawn_fail "agy never showed its folder-trust dialog on an unregistered worktree in window $T, so the brief could not be confirmed to run there"
     fi
+    exit 1
+  fi
+fi
+if [ "$HARNESS" = cline ]; then
+  if ! cline_wait_for_ready; then
+    cline_spawn_fail "cline did not show a verified ready signal before brief delivery in window $T"
+    exit 1
+  fi
+  CLINE_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+  # Type once and submit once, then confirm delivery from cline's recorded busy
+  # state (cline_wait_for_delivery). The shared fm_backend_send_text_submit
+  # cannot be used here: it expects the composer to leave `pending`, and an idle
+  # cline composer reads `pending` by design (the muted-placeholder gap above),
+  # so it would retry Enter and could queue extra submissions. One literal send
+  # plus one Enter is the whole interaction; the workspace TaskStart hook then
+  # opens the busy record the delivery gate reads.
+  if ! spawn_send_literal "$T" "$CLINE_POINTER"; then
+    cline_spawn_fail "cline brief pointer could not be submitted into window $T"
+    exit 1
+  fi
+  sleep 0.3
+  if ! spawn_send_key "$T" Enter; then
+    cline_spawn_fail "cline brief pointer could not be submitted into window $T"
+    exit 1
+  fi
+  if ! cline_wait_for_delivery; then
+    cline_spawn_fail "cline brief pointer delivery was not confirmed in window $T"
     exit 1
   fi
 fi

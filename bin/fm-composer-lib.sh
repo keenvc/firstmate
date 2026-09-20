@@ -378,6 +378,15 @@ FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT='ctrl\+c to stop'
 # acknowledgement. Delivery guard only; recorded worker state comes from the
 # agy-regex fold in bin/fm-busy-lib.sh.
 FM_DELIVERY_AGY_BUSY_REGEX_DEFAULT='esc[[:space:]]+to[[:space:]]+cancel'
+# cline (Cline CLI) renders an in-transcript busy row while a turn runs: a
+# braille spinner, `Thinking...`, and the `(esc to cancel)` token (verified
+# live, cline 3.0.62). Its idle composer is the `Ask anything...` placeholder
+# and its bottom status row does NOT change between busy and idle, so this
+# in-transcript token is the delivery guard's only busy signature. When the
+# turn ends the row is rewritten as `Thinking:` with the token gone, so a
+# finished turn cannot fake an acknowledgement. Delivery guard only; recorded
+# worker state comes from the cline-hook fold in bin/fm-busy-lib.sh.
+FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT='\(esc to cancel\)'
 FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT='^[[:space:]]*(🌑|🌒|🌓|🌔|🌕|🌖|🌗|🌘)[[:space:]]+·[[:space:]]+'
 
 fm_busy_lines_match() {  # [harness]
@@ -394,6 +403,7 @@ fm_busy_lines_match() {  # [harness]
       omp) regex=$FM_DELIVERY_OMP_BUSY_REGEX_DEFAULT ;;
       grok) regex=$FM_DELIVERY_GROK_BUSY_REGEX_DEFAULT ;;
       agy) regex=$FM_DELIVERY_AGY_BUSY_REGEX_DEFAULT ;;
+      cline) regex=$FM_DELIVERY_CLINE_BUSY_REGEX_DEFAULT ;;
       kimi) regex=$FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT ;;
       cursor) regex=$FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT ;;
       '') regex=$FM_DELIVERY_BUSY_REGEX_DEFAULT ;;
@@ -425,7 +435,12 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # `Add a follow-up` once a turn has completed (verified live on cursor-agent
 # 2026.08.11-e8db854). FM_COMPOSER_IDLE_RE overrides for an unverified harness;
 # matching is case-insensitive.
-FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$'
+# cline renders `Ask anything...` in a session that already has turns and the
+# welcome placeholder `What can I do for you?` in a fresh session (verified live,
+# cline 3.0.62); both are dim/muted placeholders in an otherwise-empty bordered
+# composer and both must read `empty`, or a first cline spawn's readiness gate
+# would time out on a fresh profile.
+FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^What can I do for you\?$'
 
 # Opencode draws a mode/model footer line INSIDE its left-bar composer
 # ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed
