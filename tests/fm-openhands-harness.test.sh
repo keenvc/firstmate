@@ -207,7 +207,7 @@ fake_screen() {
     ready)
       printf 'Loaded: 7 tools\n\n╭────────────────────────────────╮\n│ Type your message, @mention a file, or / for commands │\n╰────────────────────────────────╯\n'
       ;;
-    busy)
+    busy|stale)
       printf 'Loaded: 7 tools\n\n⠋ Working (1s • ESC: pause)\nType your message, @mention a file, or / for commands\n'
       ;;
     stuck)
@@ -240,14 +240,16 @@ case "${1:-}" in
       case "$literal" in
         *'Read the brief at '*)
           printf '%s\n' "$literal" >> "$FM_FAKE_POINTER_LOG"
-          if [ "${FM_FAKE_OH_STUCK:-0}" = 0 ]; then
-            printf 'busy\n' > "$FM_FAKE_OH_STATE"
-          fi
+          case "${FM_FAKE_OH_STUCK:-0}" in
+            0|3) printf 'busy\n' > "$FM_FAKE_OH_STATE" ;;
+          esac
           ;;
         *--override-with-envs*)
           printf '%s\n' "$literal" >> "$FM_FAKE_LAUNCH_LOG"
           if [ "${FM_FAKE_OH_STUCK:-0}" = 1 ]; then
             printf 'stuck\n' > "$FM_FAKE_OH_STATE"
+          elif [ "${FM_FAKE_OH_STUCK:-0}" = 3 ]; then
+            printf 'stale\n' > "$FM_FAKE_OH_STATE"
           else
             printf 'ready\n' > "$FM_FAKE_OH_STATE"
           fi
@@ -452,6 +454,20 @@ test_openhands_idle_composer_without_submit_never_goes_busy() {
   pass "fm-spawn: openhands busy gate fails a ready composer that never shows ESC: pause"
 }
 
+test_openhands_stale_busy_token_still_gets_the_pointer() {
+  local id rec out rc
+  id="oh-stale-z8-$$"
+  rec=$(make_openhands_spawn_case stale "$id")
+  read_openhands_spawn_record "$rec"
+  rc=0
+  out=$(FM_FAKE_OH_STUCK=3 run_openhands_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" \
+    "$FAKEBIN_DIR" "$id" --model fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash) || rc=$?
+  expect_code 0 "$rc" "openhands spawn over a stale ESC: pause capture should succeed: $out"
+  assert_contains "$(cat "$CASE_DIR/pointer.log")" "Read the brief at " \
+    "a stale ESC: pause in the capture must not skip the brief pointer"
+  pass "fm-spawn: openhands always sends the brief pointer even when the capture shows a stale ESC: pause"
+}
+
 test_openhands_ancestry_detects_the_native_command_name
 test_openhands_ancestry_rejects_unrelated_mentions
 test_openhands_python_script_path_is_args_strength
@@ -468,3 +484,4 @@ test_openhands_secondmate_is_refused
 test_openhands_spawn_arms_no_busy_wiring
 test_openhands_stuck_pane_fails_the_readiness_gate
 test_openhands_idle_composer_without_submit_never_goes_busy
+test_openhands_stale_busy_token_still_gets_the_pointer

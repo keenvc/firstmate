@@ -3910,10 +3910,7 @@ openhands_pane_is_working() {  # <plain-pane-capture>
 }
 
 # The idle composer placeholder is the verified ready signal (CLI 1.16.0).
-# A pane that is already working also counts as ready so a relaunch that
-# somehow already has a turn in flight is not blocked on the placeholder.
 openhands_pane_is_ready() {  # <plain-pane-capture>
-  openhands_pane_is_working "$1" && return 0
   case "$1" in
     *'Type your message'*) return 0 ;;
   esac
@@ -5076,18 +5073,15 @@ if [ "$HARNESS" = openhands ]; then
     openhands_spawn_fail "openhands did not show a ready composer before brief delivery in window $T"
     exit 1
   fi
-  OPENHANDS_PANE=$(openhands_capture)
-  if ! openhands_pane_is_working "$OPENHANDS_PANE"; then
-    OPENHANDS_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
-    if ! spawn_send_literal "$T" "$OPENHANDS_POINTER"; then
-      openhands_spawn_fail "openhands brief pointer could not be typed into window $T"
-      exit 1
-    fi
-    sleep 0.3
-    if ! spawn_send_key "$T" Enter; then
-      openhands_spawn_fail "openhands brief pointer could not be submitted into window $T"
-      exit 1
-    fi
+  OPENHANDS_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+  if ! spawn_send_literal "$T" "$OPENHANDS_POINTER"; then
+    openhands_spawn_fail "openhands brief pointer could not be typed into window $T"
+    exit 1
+  fi
+  sleep 0.3
+  if ! spawn_send_key "$T" Enter; then
+    openhands_spawn_fail "openhands brief pointer could not be submitted into window $T"
+    exit 1
   fi
   if ! openhands_wait_for_working; then
     openhands_spawn_fail "openhands did not start processing its brief in window $T"
