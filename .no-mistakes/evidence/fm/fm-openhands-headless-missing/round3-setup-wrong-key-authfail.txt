@@ -1,0 +1,18 @@
+# Round 3 setup mistake (not a product failure): throwaway home was seeded with a non-Fireworks sk- key from ~/.config/openhands/llm.env.
+# Pointer was still typed and submitted (the '> Read the brief...' line), and the model call then failed auth as expected.
+spawned oh-live-r3 harness=openhands kind=scout window=lab:fm-oh-live-r3 worktree=/home/azureuser/.treehouse/ohproj-c70a7e/1/ohproj
+rc=0
+  Initialized conversation 7d6fb59aeaa742ceb7235d21b4367abf
+  What do you want to build?
+  1. Ask questions, edit files, or run commands.
+  2. Use @ to look up a file in the folder structure
+  3. Type /help for help, /feedback to leave anonymous feedback, or / to scroll through available commands
+  ▶ Loaded: 64 skills
+  > Read the brief at /tmp/fm-oh-lab5/home/data/oh-live-r3/launch-brief.md and follow it exactly.
+  ▶ Loaded: 7 tools, system prompt
+  ▶ Conversation Error: Conversation Error Code: AuthenticationError  Detail: litellm.Authe...
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Type your message, @mention a file, or / for commands                                                                                                                                                                  │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/ohproj-c70a7e/1/ohproj                                                                             ctx N/A • $ 0.00 (↑ 0 ↓ 0 cache N/A)
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                                    ▏^p palette

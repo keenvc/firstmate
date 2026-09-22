@@ -1,0 +1,62 @@
+# Live fm-spawn.sh --harness openhands with ONE-LINE FIX applied to a scratch export (openhands removed from the generic env -u prefix list, bin/fm-spawn.sh:4804)
+## fix diff
+< claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | openhands)
+> claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy)
+## spawn output
+spawned oh-live-spawn-2 harness=openhands kind=scout window=lab:fm-oh-live-spawn-2 worktree=/tmp/fm-oh-spawn-lab/wt
+rc=0
+## model in per-task env file
+LLM_MODEL='fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash'
+## state/oh-live-spawn-2.meta
+window=lab:fm-oh-live-spawn-2
+endpoint_task_id=oh-live-spawn-2
+worktree=/tmp/fm-oh-spawn-lab/wt
+project=/tmp/fm-oh-spawn-lab/project
+harness=openhands
+kind=scout
+tasktmp=/tmp/fm-oh-live-spawn-2
+model=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash
+effort=default
+spawn_gen=s1790065669.58903.8022
+## worker-produced file (brief asked for it)
+openhands spawn processed its brief
+## openhands worker pane
+                                                             |_|
+                                                                     OpenHands CLI v1.16.0
+  All set up!
+  Initialized conversation c042848b308441b8a9dbbbc68b118813                                                                                                   ▅
+  What do you want to build?
+  1. Ask questions, edit files, or run commands.
+  2. Use @ to look up a file in the folder structure
+  3. Type /help for help, /feedback to leave anonymous feedback, or / to scroll through available commands
+  ▶ Loaded: 64 skills
+  > Read the brief at /tmp/fm-oh-spawn-lab/home/data/oh-live-spawn-2/launch-brief.md and follow it exactly.
+  ▶ Loaded: 7 tools, system prompt
+  ▶ file_editor: {"command": "view", "path": "/tmp/fm-oh-spawn-lab/home/data/oh-live-spawn-2/launch-brief.md"}: Reading
+  /tmp/fm-oh-spawn-lab/home/data/oh-live-spawn-2/launch-brief.md ✓
+  ▶ Read steering inbox and list worktree: $ cat /tmp/fm-oh-spawn-lab/home/state/oh-live-spawn-2.inbox 2>/dev/nu... ✓
+  ▶ Create LIVE_PROOF.txt with exact line: $ printf 'openhands spawn processed its brief\n' > /tmp/fm-oh-spawn-l... ✓
+  File created successfully.
+  • Path: /tmp/fm-oh-spawn-lab/wt/LIVE_PROOF.txt
+  • Content: exactly openhands spawn processed its brief followed by a newline (verified with cat -A).
+  • No commit, push, or other changes were made.
+  Steering inbox /tmp/fm-oh-spawn-lab/home/state/oh-live-spawn-2.inbox was read (it existed but was empty). Task complete.
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Type your message, @mention a file, or / for commands                                                                                                      │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /tmp/fm-oh-spawn-lab/wt                       ctx 14.17K / 1.05M • $ 0.0038 (↑ 55.24K ↓ 507 cache 74%)
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  es▏^p palette
+## first busy capture during spawn
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /tmp/fm-oh-spawn-lab/wt                                           ctx N/A • $ 0.00 (↑ 0 ↓ 0 cache N/A)
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  es▏^p palette
+=== t=12
+  1. Ask questions, edit files, or run commands.
+  2. Use @ to look up a file in the folder structure
+  3. Type /help for help, /feedback to leave anonymous feedback, or / to scroll through available commands
+  ▶ Loaded: 64 skills
+  > Read the brief at /tmp/fm-oh-spawn-lab/home/data/oh-live-spawn-2/launch-brief.md and follow it exactly.
+  ▶ Loaded: 7 tools, system prompt
+ ⠹ Working (0s • ESC: pause)
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Type your message, @mention a file, or / for commands                                                                                                      │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

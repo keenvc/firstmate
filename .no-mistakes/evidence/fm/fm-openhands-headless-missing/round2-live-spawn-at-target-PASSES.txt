@@ -1,0 +1,79 @@
+# Round 2: live fm-spawn.sh --harness openhands at target commit 0f7d5ae (private tmux socket fm-oh-lab3, throwaway FM_HOME=/tmp/fm-oh-lab3/home)
+## spawn stdout/stderr
+spawned oh-live-t3 harness=openhands kind=scout window=lab:fm-oh-live-t3 worktree=/home/azureuser/.treehouse/project-6c7b22/1/project
+rc=0
+
+## generated launch script (API key lives in env file, not shown)
+export COMPACT_ADVISER_DISABLE=1; set -a && . '/tmp/fm-oh-lab3/home/state/oh-live-t3.openhands-env' && set +a && env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS HOME='/tmp/fm-oh-lab3/home/state/oh-live-t3.openhands-home' OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR='/tmp/fm-oh-lab3/home/state/oh-live-t3.openhands' OPENHANDS_WORK_DIR='/home/azureuser/.treehouse/project-6c7b22/1/project' '/home/azureuser/.local/bin/openhands' --override-with-envs --always-approve --exit-without-confirmation
+
+## model in per-task env file
+LLM_MODEL='fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash'
+
+## state/oh-live-t3.meta
+window=lab:fm-oh-live-t3
+endpoint_task_id=oh-live-t3
+worktree=/home/azureuser/.treehouse/project-6c7b22/1/project
+project=/tmp/fm-oh-lab3/project
+harness=openhands
+kind=scout
+tasktmp=/tmp/fm-oh-live-t3
+model=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash
+effort=default
+spawn_gen=s1790065952.320386.23421
+
+## worker-produced file (brief asked for it): /home/azureuser/.treehouse/project-6c7b22/1/project/LIVE_PROOF.txt
+openhands spawn processed its brief at target
+
+## first busy captures observed during the spawn
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/project-6c7b22/1/project                                                       ctx N/A • $ 0.00 (↑ 0 ↓ 0 cache N/A)
+
+
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                ▏^p palette
+=== t=1790065961
+ ⠙ Working (0s • ESC: pause)
+--
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/project-6c7b22/1/project                                                       ctx N/A • $ 0.00 (↑ 0 ↓ 0 cache N/A)
+
+
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                ▏^p palette
+=== t=1790065962
+ ⠸ Working (0s • ESC: pause)
+--
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/project-6c7b22/1/project                                                       ctx N/A • $ 0.00 (↑ 0 ↓ 0 cache N/A)
+
+
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                ▏^p palette
+=== t=1790065963
+ ⠴ Working (1s • ESC: pause)
+
+## openhands worker pane after the turn
+                                                                            ___                    _   _                 _
+                                                                           /  _ \ _ __   ___ _ __ | | | | __ _ _ __   __| |___
+                                                                           | | | | '_ \ / _ \ '_ \| |_| |/ _` | '_ \ / _` / __|
+                                                                           | |_| | |_) |  __/ | | |  _  | (_| | | | | (_| \__ \
+                                                                           \___ /| .__/ \___|_| |_|_| |_|\__,_|_| |_|\__,_|___/
+                                                                                 |_|
+                                                                                         OpenHands CLI v1.16.0
+  All set up!
+  Initialized conversation 21158a8e971d449fa7e6f3d88dda2397
+  What do you want to build?
+  1. Ask questions, edit files, or run commands.
+  2. Use @ to look up a file in the folder structure
+  3. Type /help for help, /feedback to leave anonymous feedback, or / to scroll through available commands
+  ▶ Loaded: 64 skills
+  > Read the brief at /tmp/fm-oh-lab3/home/data/oh-live-t3/launch-brief.md and follow it exactly.
+  ▶ Loaded: 7 tools, system prompt
+  ▶ Read the launch brief file: $ cat /tmp/fm-oh-lab3/home/data/oh-live-t3/launch-brief.md ✓
+  ▶ Read steering inbox messages: $ cat /tmp/fm-oh-lab3/home/state/oh-live-t3.inbox 2>&1; echo "---EXIT... ✓
+  ▶ List state dir and worktree: $ ls -la /tmp/fm-oh-lab3/home/state/ 2>&1; echo "---"; ls -la /home/a... ✓
+  ▶ Create LIVE_PROOF.txt and verify: $ printf 'openhands spawn processed its brief at target\n' > /home/az... ✓
+  Done. Created /home/azureuser/.treehouse/project-6c7b22/1/project/LIVE_PROOF.txt containing exactly the line openhands spawn processed its brief at target (single trailing newline). Nothing was
+  committed or pushed — git status shows it as untracked, as instructed. Stopping.
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Type your message, @mention a file, or / for commands                                                                                                                                              │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/project-6c7b22/1/project                                    ctx 14.71K / 1.05M • $ 0.0043 (↑ 70.2K ↓ 834 cache 78%)
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                ▏^p palette

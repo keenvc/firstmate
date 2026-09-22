@@ -1,0 +1,22 @@
+FM_TEST_BEGIN 2026-09-22T08:20:07Z tests/fm-openhands-harness.test.sh family=unclassified expected_gate_skip=none
+ok - fm-harness.sh: ancestry detects a natively-named openhands command
+ok - fm-harness.sh: ancestry rejects unrelated openhands mentions
+ok - fm-harness.sh: python script-path fallback detects openhands
+ok - fm-harness.sh: no inherited launcher marker claims the openhands identity
+ok - fm-control-lib: openhands mechanics are Escape once, no clear key, and /exit
+ok - fm-busy-lib: only the pinned ESC: pause token carries the openhands busy verdict
+ok - fm-composer-lib: openhands delivery signatures never cross harnesses
+ok - fm-busy-lib: openhands classifies busy on its marker and unknown without it
+ok - bin/fm-agent-process-lib.sh: openhands is an agent, fragments are not
+ok - fm-spawn: openhands launch keeps the TUI, submits a brief pointer, and uses a per-task HOME
+ok - fm-spawn: missing LLM_API_KEY refuses before pane creation
+ok - fm-spawn: a missing openhands executable refuses before pane creation
+ok - fm-spawn: openhands cannot be launched as a secondmate
+ok - fm-spawn: openhands arms no busy wiring
+ok - fm-spawn: openhands readiness gate fails a pane that never shows the idle composer
+ok - fm-spawn: openhands busy gate fails a ready composer that never shows ESC: pause
+ok - fm-spawn: openhands always sends the brief pointer even when the capture shows a stale ESC: pause
+FM_TEST_END 2026-09-22T08:20:23Z tests/fm-openhands-harness.test.sh exit=0 duration_ms=16107 gate_skip=false
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=16166
+FM_TEST_SUMMARY_FAMILY family=unclassified count=1 duration_ms=16107 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-openhands-harness.test.sh duration_ms=16107

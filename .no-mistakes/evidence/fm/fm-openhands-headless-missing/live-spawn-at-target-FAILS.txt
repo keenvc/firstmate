@@ -1,0 +1,17 @@
+# Live fm-spawn.sh --harness openhands at target commit 3a6e7ad (private tmux socket fm-oh-spawn-lab, throwaway FM_HOME)
+## spawn stdout/stderr
+error: openhands did not show a ready composer before brief delivery in window lab:fm-oh-live-spawn-1; inspect window lab:fm-oh-live-spawn-1
+rc=1
+
+## generated launch script (API key lives in the env file, not shown)
+export COMPACT_ADVISER_DISABLE=1; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI set -a && . '/tmp/fm-oh-spawn-lab/home/state/oh-live-spawn-1.openhands-env' && set +a && env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS HOME='/tmp/fm-oh-spawn-lab/home/state/oh-live-spawn-1.openhands-home' OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR='/tmp/fm-oh-spawn-lab/home/state/oh-live-spawn-1.openhands' OPENHANDS_WORK_DIR='/tmp/fm-oh-spawn-lab/wt' '/home/azureuser/.local/bin/openhands' --override-with-envs --always-approve --exit-without-confirmation
+
+## worker pane capture (last poll before the spawn killed the window)
+=== t=33
+lab$ treehouse get
+lab$ export GOTMPDIR=/tmp/fm-oh-live-spawn-1/gotmp
+lab$ export COMPACT_ADVISER_DISABLE=1
+lab$ export FM_TASK_ID=oh-live-spawn-1
+lab$ . '/tmp/fm-oh-live-spawn-1+29771b94f68f27a816fa592f9fc13ab8d122a47fbfb16fb37accbfab0a6a5b94/launch.s1790065606.4175890.7731.sh'
+env: ‘set’: No such file or directory
+lab$

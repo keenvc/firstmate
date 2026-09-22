@@ -1,0 +1,4 @@
+# Live: fm-spawn.sh --harness openhands --model <deepseek-v4p1-flash> with no LLM_API_KEY (env unset, fresh throwaway home with no config/openhands-llm.env)
+error: openhands requires LLM_API_KEY in the environment or /tmp/fm-oh-lab5/home2/config/openhands-llm.env
+rc=1
+tmux windows before=2 after=2

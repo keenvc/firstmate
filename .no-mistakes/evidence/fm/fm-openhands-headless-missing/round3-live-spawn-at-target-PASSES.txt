@@ -1,0 +1,116 @@
+# Round 3: live fm-spawn.sh --harness openhands at target commit 1dc460a (private tmux socket fm-oh-lab5, throwaway FM_HOME=/tmp/fm-oh-lab5/home, Fireworks key copied into the throwaway home's config/openhands-llm.env)
+## spawn stdout/stderr
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+spawned oh-live-r4 harness=openhands kind=scout window=lab:fm-oh-live-r4 worktree=/home/azureuser/.treehouse/ohproj-c70a7e/2/ohproj
+rc=0
+
+## generated launch script (API key lives in env file, not shown)
+home-summary.json
+oh-live-r3.meta
+oh-live-r3.openhands
+oh-live-r3.openhands-env
+oh-live-r3.openhands-home
+oh-live-r4.meta
+oh-live-r4.openhands
+oh-live-r4.openhands-env
+oh-live-r4.openhands-home
+
+## model in per-task env file
+LLM_MODEL='fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash'
+
+## state/oh-live-r4.meta
+window=lab:fm-oh-live-r4
+endpoint_task_id=oh-live-r4
+worktree=/home/azureuser/.treehouse/ohproj-c70a7e/2/ohproj
+project=/tmp/fm-oh-lab5/home/projects/ohproj
+harness=openhands
+kind=scout
+tasktmp=/tmp/fm-oh-live-r4
+model=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash
+effort=default
+spawn_gen=s1790066416.885146.29038
+decisions_reviewed=1
+decision_keys=
+
+## worker-produced file (brief asked for it): /home/azureuser/.treehouse/ohproj-c70a7e/2/ohproj/LIVE_PROOF_R4.txt
+openhands processed its brief at 1dc460a
+
+## first busy captures observed during the spawn (pointer submitted, turn in flight)
+=== t=1790066426.812017763
+  > Read the brief at /tmp/fm-oh-lab5/home/data/oh-live-r4/launch-brief.md and follow it exactly.
+ ⠹ Working (0s • ESC: pause)
+=== t=1790066427.328079749
+  > Read the brief at /tmp/fm-oh-lab5/home/data/oh-live-r4/launch-brief.md and follow it exactly.
+ ⠧ Working (0s • ESC: pause)
+
+## openhands worker pane during the turn
+  ▶ Loaded: 64 skills
+  > Read the brief at /tmp/fm-oh-lab5/home/data/oh-live-r4/launch-brief.md and follow it exactly.
+  ▶ Loaded: 7 tools, system prompt
+  ▶ file_editor: {"command": "view", "path": "/tmp/fm-oh-lab5/home/data/oh-live-r4/launch-brief.md"}: Reading /tmp/fm-oh-lab5/home/data/oh-live-r4/launch-brief.md ✓
+  ▶ Inspect worktree, inbox, and time: $ pwd; git status --short --branch; ls -la; ls /tmp/fm-oh-lab5/home/s... ✓
+  ▶ Create LIVE_PROOF_R4.txt proof file: $ printf 'openhands processed its brief at 1dc460a\n' > /home/azureus... ✓
+  ▶ file_editor: {"command": "view", "path": "/home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M342RYF15VT9DQVAQ0SMHSFF/.agents/skills/captain-hold-lifecycle/SKILL.md"}: Reading
+  /home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M342RYF15VT9DQVAQ0SMHSFF/.agents/skills/captain-hold-lifecycle/SKILL.md ✓
+  ▶ Get HEAD, branch, and state dirs: $ git -C /home/azureuser/.treehouse/ohproj-c70a7e/2/ohproj rev-parse ... ✓
+  ▶ Explore fm home and meta: $ cd /home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M342RYF15V... ✓
+  ▶ Run captain-hold completion gate with none: $ cd /home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M342RYF15V... ✓
+  ▶ Inspect fm home layout: $ ls -la /tmp/fm-oh-lab5/home/; echo "---"; cat /tmp/fm-oh-lab5/home/... ✓
+  ▶ Read task metadata files: $ cd /tmp/fm-oh-lab5/home/state; echo "=== openhands ==="; cat oh-liv... ✓
+  ▶ Read home config and projects: $ cd /tmp/fm-oh-lab5/home; ls config; echo "=== config contents ===";... ✓
+  ▶ Run completion gate with origin: $ cd /home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M342RYF15V... ✓
+ ⠋ Working (24s • ESC: pause)
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Type your message, @mention a file, or / for commands                                                                                                                                                                  │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────▌                                                           ╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/ohproj-c70a7e/2/ohproj                                                       ▌ Pausing conversation
+                                                                                                                                                              ▌ Pausing conversation, this make take a few seconds...
+                                                                                                                                                              ▌
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                                    ▏^p palette
+
+## after a single Escape
+ ⠧ Working (24s • ESC: pause)
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Type your message, @mention a file, or / for commands                                                                                                                                                                  │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────▌                                                           ╯
+ [Ctrl+L for multi-line • Ctrl+X for custom editor] • /home/azureuser/.treehouse/ohproj-c70a7e/2/ohproj                                                       ▌ Pausing conversation
+                                                                                                                                                              ▌ Pausing conversation, this make take a few seconds...
+                                                                                                                                                              ▌
+ ^a Select all  ^x Open external editor  ^l Toggle single/multi-line input  ^j Submit multi-line input  ^q Quit the application  ^o Toggle Cells  esc Pause the conversation                                    ▏^p palette
+openhands child still alive after Escape:
+888562 treehouse get
+
+## live process tree of the task pane (launch line ran through bash; no 'env: set' failure)
+treehouse,888562 get
+  |-bash,888970
+  |   `-openhands,891823 /home/azureuser/.local/bin/openhands --override-with-envs--always-approv
+openhands argv: /home/azureuser/.local/share/uv/tools/openhands/bin/python /home/azureuser/.local/bin/openhands --override-with-envs --always-approve --exit-without-confirmation 
+openhands alive after single Escape: yes
+
+## after /exit
+openhands alive: yes
+(note: the first Enter after typing /exit was absorbed by the slash-command popup; a second Enter submitted it)
+openhands alive after submitted /exit: no
+
+## worker also wrote its scout report: /tmp/fm-oh-lab5/home/data/oh-live-r4/report.md (head)
+# oh-live-r4 SCOUT report: openhands route proof
+
+## Task
+Captain's intent: prove the openhands route works by writing a proof file in the worktree.
+
+Firstmate spec: create a file named `LIVE_PROOF_R4.txt` at the root of the worktree containing exactly the line:
+
+```
+openhands processed its brief at 1dc460a
+```
+
+Do nothing else and do not commit. Deliverable is this written report, not a PR.
+
+## What I did
+
