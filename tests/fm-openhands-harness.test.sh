@@ -8,9 +8,10 @@
 #   2. The anchored match must never claim unrelated commands containing the
 #      fragment, and a structural openhands ancestor now outranks a retained
 #      CLAUDECODE.
-#   3. The launch carries the brief via -f with --override-with-envs,
-#      --always-approve, and --exit-without-confirmation; model rides LLM_MODEL
-#      in a firstmate-owned env file, not a --model flag.
+#   3. The launch is the TUI without -f/--task/--headless, with
+#      --override-with-envs, --always-approve, and --exit-without-confirmation;
+#      model rides LLM_MODEL in a firstmate-owned env file, not a --model flag.
+#      Spawn waits for the idle composer, then submits a brief pointer plus Enter.
 #   4. Missing LLM_API_KEY and a missing binary refuse before pane creation.
 #   5. openhands is a crewmate/scout adapter only: a secondmate launch is
 #      refused, and nothing is armed as busy wiring because no writer could
@@ -203,6 +204,9 @@ printf '%s\n' "$*" >> "$FM_FAKE_TMUX_CALL_LOG"
 state=$(cat "$FM_FAKE_OH_STATE" 2>/dev/null || true)
 fake_screen() {
   case "$state" in
+    ready)
+      printf 'Loaded: 7 tools\n\n╭────────────────────────────────╮\n│ Type your message, @mention a file, or / for commands │\n╰────────────────────────────────╯\n'
+      ;;
     busy)
       printf 'Loaded: 7 tools\n\n⠋ Working (1s • ESC: pause)\nType your message, @mention a file, or / for commands\n'
       ;;
@@ -234,12 +238,18 @@ case "${1:-}" in
         ". '"*"'") staged=${literal#". '"}; staged=${staged%"'"}; [ ! -f "$staged" ] || literal=$(cat "$staged") ;;
       esac
       case "$literal" in
-        *--override-with-envs*|*openhands*)
+        *'Read the brief at '*)
+          printf '%s\n' "$literal" >> "$FM_FAKE_POINTER_LOG"
+          if [ "${FM_FAKE_OH_STUCK:-0}" = 0 ]; then
+            printf 'busy\n' > "$FM_FAKE_OH_STATE"
+          fi
+          ;;
+        *--override-with-envs*)
           printf '%s\n' "$literal" >> "$FM_FAKE_LAUNCH_LOG"
           if [ "${FM_FAKE_OH_STUCK:-0}" = 1 ]; then
             printf 'stuck\n' > "$FM_FAKE_OH_STATE"
           else
-            printf 'busy\n' > "$FM_FAKE_OH_STATE"
+            printf 'ready\n' > "$FM_FAKE_OH_STATE"
           fi
           ;;
       esac
@@ -285,6 +295,7 @@ EOF
   fm_git_worktree "$proj" "$wt" "wt-$name"
   touch "$home/state/.last-watcher-beat"
   : > "$case_dir/launch.log"
+  : > "$case_dir/pointer.log"
   : > "$case_dir/tmux-calls.log"
   : > "$case_dir/oh.state"
   printf '%s\n' "$case_dir|$home|$proj|$wt|$fakebin"
@@ -308,6 +319,7 @@ run_openhands_spawn() {
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wt" TMUX="fake,1,0" \
     FM_FAKE_LAUNCH_LOG="$case_dir/launch.log" \
+    FM_FAKE_POINTER_LOG="$case_dir/pointer.log" \
     FM_FAKE_TMUX_CALL_LOG="$case_dir/tmux-calls.log" \
     FM_FAKE_OH_STATE="$case_dir/oh.state" \
     FM_FAKE_OH_STUCK="${FM_FAKE_OH_STUCK:-0}" \
@@ -317,7 +329,7 @@ run_openhands_spawn() {
 }
 
 test_openhands_launch_carries_the_brief_with_env_model_and_autonomy() {
-  local id rec out rc launch envfile
+  local id rec out rc launch pointer envfile
   id="oh-launch-z1-$$"
   rec=$(make_openhands_spawn_case launch "$id")
   read_openhands_spawn_record "$rec"
@@ -326,13 +338,17 @@ test_openhands_launch_carries_the_brief_with_env_model_and_autonomy() {
   rc=$?
   expect_code 0 "$rc" "openhands spawn with a model and API key should succeed"
   launch=$(cat "$CASE_DIR/launch.log")
+  pointer=$(cat "$CASE_DIR/pointer.log")
   assert_contains "$launch" "$FAKEBIN_DIR/openhands" "openhands launch did not pin the resolved absolute binary"
   assert_contains "$launch" "--override-with-envs" "openhands launch omitted --override-with-envs"
   assert_contains "$launch" "--always-approve" "openhands launch omitted --always-approve"
   assert_contains "$launch" "--exit-without-confirmation" "openhands launch omitted --exit-without-confirmation"
-  assert_contains "$launch" " -f " "openhands launch did not carry the brief via -f"
+  assert_not_contains "$launch" " -f " "openhands launch must not seed the composer with -f"
+  assert_not_contains "$launch" "--headless" "openhands launch must keep the TUI rather than --headless"
+  assert_not_contains "$launch" "--task" "openhands launch must not seed the composer with --task"
   assert_not_contains "$launch" "--model" "openhands launch must not pass a --model flag"
   assert_not_contains "$launch" "test-openhands-key" "the API key must not appear on the launch argv"
+  assert_contains "$pointer" "Read the brief at " "openhands spawn did not submit the brief pointer after the TUI was ready"
   envfile="$HOME_DIR/state/$id.openhands-env"
   [ -f "$envfile" ] || fail "spawn did not write the per-task openhands env file"
   grep -q "LLM_MODEL=" "$envfile" || fail "the env file omitted LLM_MODEL"
@@ -341,7 +357,7 @@ test_openhands_launch_carries_the_brief_with_env_model_and_autonomy() {
     || fail "the spawn reported success before the pane reached a busy turn"
   [ -d "$HOME_DIR/state/$id.openhands-home" ] \
     || fail "spawn did not create the per-task openhands HOME"
-  pass "fm-spawn: openhands launch carries -f, autonomy, env model, and a per-task HOME"
+  pass "fm-spawn: openhands launch keeps the TUI, submits a brief pointer, and uses a per-task HOME"
 }
 
 test_openhands_missing_api_key_refuses_before_pane_creation() {
@@ -414,10 +430,26 @@ test_openhands_stuck_pane_fails_the_readiness_gate() {
   rc=0
   out=$(FM_FAKE_OH_STUCK=1 run_openhands_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" \
     "$FAKEBIN_DIR" "$id" --model fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash) || rc=$?
-  [ "$rc" -ne 0 ] || fail "a pane that never turns busy should fail the spawn"
-  assert_contains "$out" "did not start processing its brief" \
+  [ "$rc" -ne 0 ] || fail "a pane that never turns ready should fail the spawn"
+  assert_contains "$out" "did not show a ready composer before brief delivery" \
     "stuck-pane diagnostic lacked its concrete reason"
-  pass "fm-spawn: openhands readiness gate fails a pane that never shows ESC: pause"
+  pass "fm-spawn: openhands readiness gate fails a pane that never shows the idle composer"
+}
+
+test_openhands_idle_composer_without_submit_never_goes_busy() {
+  local id rec out rc
+  id="oh-nosubmit-z7-$$"
+  rec=$(make_openhands_spawn_case nosubmit "$id")
+  read_openhands_spawn_record "$rec"
+  rc=0
+  out=$(FM_FAKE_OH_STUCK=2 run_openhands_spawn "$CASE_DIR" "$HOME_DIR" "$PROJ_DIR" "$WT_DIR" \
+    "$FAKEBIN_DIR" "$id" --model fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash) || rc=$?
+  [ "$rc" -ne 0 ] || fail "a ready composer that never starts a turn should fail the spawn"
+  assert_contains "$out" "did not start processing its brief" \
+    "idle-composer diagnostic lacked its concrete reason"
+  assert_contains "$(cat "$CASE_DIR/pointer.log")" "Read the brief at " \
+    "the spawn must still submit the brief pointer before failing the busy gate"
+  pass "fm-spawn: openhands busy gate fails a ready composer that never shows ESC: pause"
 }
 
 test_openhands_ancestry_detects_the_native_command_name
@@ -435,3 +467,4 @@ test_openhands_missing_binary_refuses_before_pane_creation
 test_openhands_secondmate_is_refused
 test_openhands_spawn_arms_no_busy_wiring
 test_openhands_stuck_pane_fails_the_readiness_gate
+test_openhands_idle_composer_without_submit_never_goes_busy

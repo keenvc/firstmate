@@ -7,7 +7,7 @@ The skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../../.age
 
 | Field | Value |
 |---|---|
-| Date | 2026-09-20 |
+| Date | 2026-09-22 |
 | Version | OpenHands CLI 1.16.0 / SDK v1.21.0 |
 | Binary | worktree-local `uv tool install openhands --python 3.12`; `ps -o comm=` reports `openhands` |
 | Backend | tmux, in an isolated private socket; the live default session was unchanged |
@@ -17,7 +17,7 @@ The skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../../.age
 
 ```sh
 $ ps -o comm=,args= -p <openhands-pid>
-openhands    /.../python /.../openhands --override-with-envs --always-approve --exit-without-confirmation -t ...
+openhands    /.../python /.../openhands --override-with-envs --always-approve --exit-without-confirmation
 ```
 
 A live TUI carries `GROK_AGENT=1` when launched from a Grok pane and no `OPENHANDS_*` identity variable of its own.
@@ -29,13 +29,17 @@ A live TUI carries `GROK_AGENT=1` when launched from a Grok pane and no `OPENHAN
 ```sh
 HOME=<throwaway> OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=<throwaway>/.openhands \
   OPENHANDS_WORK_DIR=<worktree> \
-  openhands --override-with-envs --always-approve --exit-without-confirmation \
-  -t 'Add 12345 and 67890. Reply with exactly the sum and nothing else. Do not use tools.'
+  openhands --override-with-envs --always-approve --exit-without-confirmation
 ```
 
-The TUI auto-submitted the `-t` task, loaded tools, and replied `80235` with no extra Enter.
-`--always-approve` ran a shell action without a confirmation modal.
-A headless run of the same model with `--json` returned `OPENHANDS_LIVE_PROBE_OK` as the assistant text.
+`-f` and `-t` are documented as seeding the composer (`openhands --help` on CLI 1.16.0).
+On an isolated tmux PTY they can also post a queued SendMessage and start a turn without Enter.
+Spawn does not rely on that: it launches the TUI without `-f`, `--task`, or `--headless`, waits for `Type your message, @mention a file, or / for commands`, then types `Read the brief at <launch-brief>` and Enter.
+That submit started a Fireworks DeepSeek 4.1 Flash turn, matched `ESC: pause`, answered `80235`, and a pointer-driven brief appended `done: openhands live ok` through a shell tool.
+`--always-approve` ran that shell action without a confirmation modal.
+
+`--headless` with `-f`/`-t` does process a file unattended.
+That path is unused: it has no TUI for `ESC: pause` busy detection, steering, Escape interrupt, or `/exit`, and it exits when the first turn ends.
 
 The same launch with the operator `HOME` and a root-owned `~/.openhands` crashed:
 

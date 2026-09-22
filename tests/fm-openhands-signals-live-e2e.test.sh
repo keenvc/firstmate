@@ -57,20 +57,37 @@ OH_HOME="$LAB/home"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-composer-lib.sh"
 
-"$REAL_TMUX" -L "$SOCKET" new-session -d -s "$SESSION" -n control -c "$WORKSPACE" \
+"$REAL_TMUX" -L "$SOCKET" new-session -d -s "$SESSION" -n control -c "$WORKSPACE" -x 120 -y 36 \
   || fail "could not start the isolated tmux server"
 "$REAL_TMUX" -L "$SOCKET" new-window -d -t "$SESSION:" -n oh -c "$WORKSPACE" \
   || fail "could not open the isolated openhands window"
 
 capture() {
-  "$REAL_TMUX" -L "$SOCKET" capture-pane -p -t "$TARGET" -S -100 2>/dev/null || true
+  "$REAL_TMUX" -L "$SOCKET" capture-pane -p -t "$TARGET" -S -200 2>/dev/null || true
 }
 
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$TARGET" -l \
-  "HOME=\"$OH_HOME\" OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=\"$OH_HOME/.openhands\" OPENHANDS_WORK_DIR=\"$WORKSPACE\" $OH_BIN --override-with-envs --always-approve --exit-without-confirmation -t \"Add 12345 and 67890. Reply with exactly the sum and nothing else. Do not use tools.\"" \
+  "HOME=\"$OH_HOME\" OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=\"$OH_HOME/.openhands\" OPENHANDS_WORK_DIR=\"$WORKSPACE\" $OH_BIN --override-with-envs --always-approve --exit-without-confirmation" \
   || fail "could not type the openhands launch line"
 "$REAL_TMUX" -L "$SOCKET" send-keys -t "$TARGET" Enter \
   || fail "could not submit the openhands launch line"
+
+ready=
+for _ in $(seq 1 60); do
+  screen=$(capture)
+  case "$screen" in *'Type your message'*) ready=1; break ;; esac
+  sleep 0.5
+done
+[ -n "$ready" ] || fail "the real openhands TUI never showed its idle composer"
+pass "the real openhands TUI reached an idle composer without -f/--task/--headless"
+
+sleep 0.4
+"$REAL_TMUX" -L "$SOCKET" send-keys -t "$TARGET" -l \
+  "Add 12345 and 67890. Reply with exactly the sum and nothing else. Do not use tools." \
+  || fail "could not type the brief pointer"
+sleep 0.4
+"$REAL_TMUX" -L "$SOCKET" send-keys -t "$TARGET" Enter \
+  || fail "could not submit the brief pointer"
 
 busy_live=
 for _ in $(seq 1 90); do
@@ -89,8 +106,8 @@ for _ in $(seq 1 90); do
 done
 reply=$(capture)
 case "$reply" in
-  *80235*|*80,235*) pass "the real openhands worker processed its launch prompt" ;;
-  *) fail "the real openhands worker never answered its launch prompt" ;;
+  *80235*|*80,235*) pass "the real openhands worker processed the submitted brief" ;;
+  *) fail "the real openhands worker never answered the submitted brief" ;;
 esac
 
 pane_pid=$("$REAL_TMUX" -L "$SOCKET" display-message -p -t "$TARGET" '#{pane_pid}')

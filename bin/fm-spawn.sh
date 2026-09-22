@@ -346,12 +346,16 @@
 # busy turn - answering the dialog first if it renders anyway - before
 # reporting success (the rovo/kimi launch-then-confirm shape). Its busy state
 # is a screen-scrape fallback like grok and rovo, and it is crewmate/scout only.
-# openhands installs no hook either and publishes no identity marker; its brief
-# rides -f, credentials ride --override-with-envs, and a per-task HOME is
-# required because the SDK profile store is hardcoded under
-# Path.home()/.openhands/profiles. The spawn waits for the pinned ESC: pause
-# busy row before reporting success. It is crewmate/scout only and is refused
-# for --secondmate, like agy.
+# openhands installs no hook either and publishes no identity marker.
+# Credentials ride --override-with-envs and a per-task HOME is required because
+# the SDK profile store is hardcoded under Path.home()/.openhands/profiles.
+# `-f`/`-t` are documented as composer seeds, so the spawn launches the TUI
+# bare, waits for the idle composer, then submits a brief pointer plus Enter
+# (the kimi/rovo launch-then-send shape). `--headless` is unused: it has no
+# TUI for ESC: pause busy detection, fm-send steering, Escape interrupt, or
+# /exit, and it exits when the first turn ends. The spawn waits for the pinned
+# ESC: pause busy row before reporting success. It is crewmate/scout only and
+# is refused for --secondmate, like agy.
 # cursor installs no per-task hook either: it writes state/<id>.cursor-session to
 # bind the pane to cursor's own conversation transcript (projects root, the exact
 # workspace path cursor records in .workspace-trusted, and the conversations that
@@ -1983,18 +1987,22 @@ launch_template() {
   # agy exposes no hook surface, so busy state is a rendered-tail fallback
   # (bin/fm-busy-lib.sh) and nothing is armed below.
   agy) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS __AGYBIN__ --prompt-interactive "$(__OPINPUT__ encode launch-brief < __BRIEF__)" __MODELFLAG____EFFORTFLAG__--dangerously-skip-permissions' ;;
-  # openhands (OpenHands CLI): -f <brief> seeds and auto-submits the
-  # conversation (verified CLI 1.16.0). --always-approve auto-approves tool
-  # calls. --override-with-envs applies LLM_MODEL and LLM_API_KEY from a
-  # firstmate-owned env file so the first-run wizard never appears.
-  # --exit-without-confirmation makes /exit (and Ctrl+C) leave without the
-  # Terminate-session modal. A per-task HOME is required because the SDK
-  # profile store writes Path.home()/.openhands/profiles regardless of
-  # OPENHANDS_PERSISTENCE_DIR. Foreign markers are cleared because a live
-  # 1.16.0 TUI inherited GROK_AGENT=1 from its launcher and publishes no
-  # identity of its own. No --model/--effort flags exist; model rides
-  # LLM_MODEL and effort stays in task metadata.
-  openhands) printf '%s' 'set -a && . __OHENV__ && set +a && env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS HOME=__OHHOME__ OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=__OHPERSIST__ OPENHANDS_WORK_DIR=__WORKTREE__ __OHBIN__ --override-with-envs --always-approve --exit-without-confirmation -f __BRIEF__' ;;
+  # openhands (OpenHands CLI): launch the TUI without -f/--task/--headless.
+  # `-f`/`-t` are documented as composer seeds (CLI 1.16.0 --help); spawn does
+  # not rely on them to start a turn. --headless would process a file
+  # unattended but drops the TUI used for ESC: pause busy detection, fm-send
+  # steering, Escape interrupt, and /exit, and exits when the first turn ends.
+  # --always-approve auto-approves tool calls. --override-with-envs applies
+  # LLM_MODEL and LLM_API_KEY from a firstmate-owned env file so the first-run
+  # wizard never appears. --exit-without-confirmation makes /exit (and Ctrl+C)
+  # leave without the Terminate-session modal. A per-task HOME is required
+  # because the SDK profile store writes Path.home()/.openhands/profiles
+  # regardless of OPENHANDS_PERSISTENCE_DIR. Foreign markers are cleared
+  # because a live 1.16.0 TUI inherited GROK_AGENT=1 from its launcher and
+  # publishes no identity of its own. No --model/--effort flags exist; model
+  # rides LLM_MODEL and effort stays in task metadata. Brief delivery is the
+  # kimi/rovo launch-then-send shape after the idle composer appears.
+  openhands) printf '%s' 'set -a && . __OHENV__ && set +a && env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u GEMINI_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS HOME=__OHHOME__ OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=__OHPERSIST__ OPENHANDS_WORK_DIR=__WORKTREE__ __OHBIN__ --override-with-envs --always-approve --exit-without-confirmation' ;;
   # grok (Grok Build TUI): a positional prompt starts the supervised interactive
   # session. --always-approve auto-approves every tool execution (verified: the
   # crewmate runs fully autonomously, no permission gate), which an unattended
@@ -3901,6 +3909,28 @@ openhands_pane_is_working() {  # <plain-pane-capture>
   return 1
 }
 
+# The idle composer placeholder is the verified ready signal (CLI 1.16.0).
+# A pane that is already working also counts as ready so a relaunch that
+# somehow already has a turn in flight is not blocked on the placeholder.
+openhands_pane_is_ready() {  # <plain-pane-capture>
+  openhands_pane_is_working "$1" && return 0
+  case "$1" in
+    *'Type your message'*) return 0 ;;
+  esac
+  return 1
+}
+
+openhands_wait_for_ready() {
+  local pane i=0 max=${FM_OPENHANDS_READY_POLLS:-60} interval=${FM_OPENHANDS_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(openhands_capture)
+    openhands_pane_is_ready "$pane" && return 0
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
 openhands_wait_for_working() {
   local pane i=0 max=${FM_OPENHANDS_READY_POLLS:-60} interval=${FM_OPENHANDS_POLL_INTERVAL:-0.5}
   while [ "$i" -lt "$max" ]; do
@@ -5042,6 +5072,23 @@ if [ "$HARNESS" = agy ]; then
   fi
 fi
 if [ "$HARNESS" = openhands ]; then
+  if ! openhands_wait_for_ready; then
+    openhands_spawn_fail "openhands did not show a ready composer before brief delivery in window $T"
+    exit 1
+  fi
+  OPENHANDS_PANE=$(openhands_capture)
+  if ! openhands_pane_is_working "$OPENHANDS_PANE"; then
+    OPENHANDS_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
+    if ! spawn_send_literal "$T" "$OPENHANDS_POINTER"; then
+      openhands_spawn_fail "openhands brief pointer could not be typed into window $T"
+      exit 1
+    fi
+    sleep 0.3
+    if ! spawn_send_key "$T" Enter; then
+      openhands_spawn_fail "openhands brief pointer could not be submitted into window $T"
+      exit 1
+    fi
+  fi
   if ! openhands_wait_for_working; then
     openhands_spawn_fail "openhands did not start processing its brief in window $T"
     exit 1
