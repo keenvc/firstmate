@@ -246,7 +246,11 @@ case "${1:-}" in
           ;;
         *--override-with-envs*)
           printf '%s\n' "$literal" >> "$FM_FAKE_LAUNCH_LOG"
-          if [ "${FM_FAKE_OH_STUCK:-0}" = 1 ]; then
+          # Run the launch line through a shell as the pane would, so a
+          # composition that never reaches the openhands binary stays unready.
+          if ! bash -c "$literal" >/dev/null 2>&1 || [ ! -s "$FM_FAKE_OH_EXEC_LOG" ]; then
+            printf 'dead\n' > "$FM_FAKE_OH_STATE"
+          elif [ "${FM_FAKE_OH_STUCK:-0}" = 1 ]; then
             printf 'stuck\n' > "$FM_FAKE_OH_STATE"
           elif [ "${FM_FAKE_OH_STUCK:-0}" = 3 ]; then
             printf 'stale\n' > "$FM_FAKE_OH_STATE"
@@ -266,8 +270,7 @@ SH
   chmod +x "$fakebin/tmux"
   cat > "$fakebin/openhands" <<'SH'
 #!/usr/bin/env bash
-echo "fake openhands must never execute" >&2
-exit 9
+printf 'HOME=%s LLM_MODEL=%s args=%s\n' "$HOME" "${LLM_MODEL:-}" "$*" >> "$FM_FAKE_OH_EXEC_LOG"
 SH
   chmod +x "$fakebin/openhands"
   fm_fake_exit0 "$fakebin" treehouse gh-axi gh
@@ -300,6 +303,7 @@ EOF
   : > "$case_dir/pointer.log"
   : > "$case_dir/tmux-calls.log"
   : > "$case_dir/oh.state"
+  : > "$case_dir/oh-exec.log"
   printf '%s\n' "$case_dir|$home|$proj|$wt|$fakebin"
 }
 
@@ -324,6 +328,7 @@ run_openhands_spawn() {
     FM_FAKE_POINTER_LOG="$case_dir/pointer.log" \
     FM_FAKE_TMUX_CALL_LOG="$case_dir/tmux-calls.log" \
     FM_FAKE_OH_STATE="$case_dir/oh.state" \
+    FM_FAKE_OH_EXEC_LOG="$case_dir/oh-exec.log" \
     FM_FAKE_OH_STUCK="${FM_FAKE_OH_STUCK:-0}" \
     FM_OPENHANDS_READY_POLLS=4 FM_OPENHANDS_POLL_INTERVAL=0 \
     PATH="$fakebin:$BASE_PATH" \
@@ -350,6 +355,9 @@ test_openhands_launch_carries_the_brief_with_env_model_and_autonomy() {
   assert_not_contains "$launch" "--task" "openhands launch must not seed the composer with --task"
   assert_not_contains "$launch" "--model" "openhands launch must not pass a --model flag"
   assert_not_contains "$launch" "test-openhands-key" "the API key must not appear on the launch argv"
+  assert_contains "$(cat "$CASE_DIR/oh-exec.log")" \
+    "LLM_MODEL=fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash args=--override-with-envs" \
+    "the launch line run through a shell never started openhands with the env-file model"
   assert_contains "$pointer" "Read the brief at " "openhands spawn did not submit the brief pointer after the TUI was ready"
   envfile="$HOME_DIR/state/$id.openhands-env"
   [ -f "$envfile" ] || fail "spawn did not write the per-task openhands env file"

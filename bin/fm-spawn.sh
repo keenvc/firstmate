@@ -4801,7 +4801,7 @@ openhands) LAUNCH=${LAUNCH//__OHBIN__/"$(shell_quote "$OPENHANDS_BIN")"} ;;
 esac
 LAUNCH=${LAUNCH//__WORKTREE__/$sq_worktree}
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | openhands)
+claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac
