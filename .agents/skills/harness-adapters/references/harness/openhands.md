@@ -1,6 +1,6 @@
 # OpenHands CLI
 
-OpenHands's `openhands` TUI, verified end to end on 2026-09-20 with OpenHands CLI 1.16.0 (SDK v1.21.0) on Linux through tmux.
+OpenHands's `openhands` TUI on OpenHands CLI 1.16.0 (SDK v1.21.0), Linux, through tmux: verified end to end on 2026-09-20, with brief delivery re-verified on 2026-09-22.
 Verified as a CREWMATE and SCOUT adapter only; `../../../../../bin/fm-spawn.sh` refuses a secondmate launch on it because `../../../../../docs/supervision-protocols/` carries no openhands wake protocol.
 `../../../../../docs/verification/openhands.md` owns how every fact below was established and what is still unproven.
 
@@ -9,7 +9,7 @@ Verified as a CREWMATE and SCOUT adapter only; `../../../../../bin/fm-spawn.sh` 
 | Fact | Value |
 |---|---|
 | Binary | Absolute `openhands` from `PATH`, refused if absent. The installed CLI is a Python entrypoint; `ps -o comm=` on Linux still reports the live process name `openhands` (verified, CLI 1.16.0). |
-| Launch | Foreign markers cleared, a writable `HOME` and `OPENHANDS_PERSISTENCE_DIR` so the profile store is not the operator's possibly root-owned `~/.openhands`, `OPENHANDS_WORK_DIR` pinned to the worktree, `LLM_MODEL` and `LLM_API_KEY` supplied through a firstmate-owned env file, then `openhands --override-with-envs --always-approve --exit-without-confirmation`. `-f`/`-t` are documented as composer seeds; spawn does not rely on them. It waits for the idle composer, then submits `Read the brief at <launch-brief>` plus Enter. `--headless` is unused: it has no TUI for `ESC: pause` busy detection, steering, Escape interrupt, or `/exit`, and it exits when the first turn ends. |
+| Launch | Foreign markers cleared, a writable `HOME` and `OPENHANDS_PERSISTENCE_DIR` so the profile store is not the operator's possibly root-owned `~/.openhands`, `OPENHANDS_WORK_DIR` pinned to the worktree, `LLM_MODEL` and `LLM_API_KEY` supplied through a firstmate-owned env file, then `openhands --override-with-envs --always-approve --exit-without-confirmation`. `-f`/`-t` are documented as composer seeds; spawn does not rely on them. It waits for the idle composer, then submits `Read the brief at <launch-brief> and follow it exactly.` plus Enter, and reports success only once `ESC: pause` shows the turn started. `--headless` is unused: it has no TUI for `ESC: pause` busy detection, steering, Escape interrupt, or `/exit`, and it exits when the first turn ends. |
 | Busy state | No firstmate-owned hook writer, so nothing is armed and no record is seeded. `fm_busy_openhands_tail_busy` matches the pinned `ESC: pause` token in the working status line. |
 | Rendered tail | A busy turn pins `Working (<n>s • ESC: pause)` above the composer, with a braille spinner. Idle replaces that row with a blank status line. `Working` alone is not a signal (Pi already owns that word). |
 | Turn end | No turn-end hook or notification touch exists; completion arrives through the worker status protocol. |

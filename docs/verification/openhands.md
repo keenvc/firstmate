@@ -34,7 +34,7 @@ HOME=<throwaway> OPENHANDS_SUPPRESS_BANNER=1 OPENHANDS_PERSISTENCE_DIR=<throwawa
 
 `-f` and `-t` are documented as seeding the composer (`openhands --help` on CLI 1.16.0).
 On an isolated tmux PTY they can also post a queued SendMessage and start a turn without Enter.
-Spawn does not rely on that: it launches the TUI without `-f`, `--task`, or `--headless`, waits for `Type your message, @mention a file, or / for commands`, then types `Read the brief at <launch-brief>` and Enter.
+Spawn does not rely on that: it launches the TUI without `-f`, `--task`, or `--headless`, waits for `Type your message, @mention a file, or / for commands`, then types `Read the brief at <launch-brief> and follow it exactly.` and Enter.
 That submit started a Fireworks DeepSeek 4.1 Flash turn, matched `ESC: pause`, answered `80235`, and a pointer-driven brief appended `done: openhands live ok` through a shell tool.
 `--always-approve` ran that shell action without a confirmation modal.
 

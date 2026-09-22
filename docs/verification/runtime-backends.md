@@ -2178,7 +2178,7 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 ## OpenHands CLI
 
-Crewmate and scout adapter only, verified 2026-09-20 with OpenHands CLI 1.16.0 / SDK v1.21.0 on Linux through tmux.
+Crewmate and scout adapter only, verified 2026-09-20 (brief delivery re-verified 2026-09-22) with OpenHands CLI 1.16.0 / SDK v1.21.0 on Linux through tmux.
 The dedicated record at [`docs/verification/openhands.md`](openhands.md) owns the dated commands, pane captures, and remaining gaps.
 Refresh with:
 
