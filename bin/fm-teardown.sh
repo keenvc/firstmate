@@ -63,6 +63,10 @@
 # up a merged PR whose head branch matches the worktree's branch, fetching its head
 # via refs/pull/<n>/head when the branch itself was deleted. So a missing pr= never
 # by itself causes a false refusal of landed work.
+# When the task record already carries a merge-poll merge notification for that
+# pr=, or a no-mistakes pr_head= for the same URL, teardown treats the PR as
+# merged without a live forge read and proves landing from the default-branch
+# content check and, for a recorded pr_head=, from containment in that object.
 # A gh lookup error falls back to the content check; if that is also inconclusive,
 # teardown refuses rather than risk discarding unlanded work.
 # Uncommitted changes are never landed.
@@ -87,6 +91,13 @@
 # this home or any locally registered Firstmate home may name the same live path
 # in its worktree= or home=. One live path with two task records is the reuse
 # collision itself, whichever record is stale.
+# When the scan finds another task record naming the same live slot, teardown
+# does not always refuse: a finished task whose endpoint is confidently gone
+# while the other record is still live, the slot claim names that other task, or
+# the slot checkout and newer record belong to the other task, retires only this
+# task's record and skips every slot step, exactly like a reassigned slot. When
+# both records could still be live, or the evidence does not pick a single owner,
+# the refusal stays.
 # That scan alone cannot prove THIS record is the current owner, because the task
 # that took the slot next may leave no record it can reach - its own worker may
 # have exited and its record been cleaned up, or it may live in a home this
@@ -173,8 +184,24 @@
 #   recorded and named in the teardown line; the flag never relaxes the
 #   unlanded-work refusal, which --force alone can authorize. A legacy- stamp
 #   an abandoned attempt left behind never counts as a published incarnation:
-#   the record still reads as a legacy record, so the endpoint gate runs again
-#   and the retry still needs --legacy-record.
+#   the record still reads as a legacy record, so a recorded endpoint runs the
+#   endpoint gate again and the retry still needs --legacy-record. The safe
+#   windowless exception below retries its retained stamp without the flag.
+#   A tmux record with no window names no live endpoint, so there is nothing
+#   for that classifier to inspect and nothing to kill. Combined with a
+#   missing spawn_gen, that leftover would otherwise deadlock: automatic
+#   teardown refuses for want of spawn_gen, and --legacy-record then refuses
+#   for want of a window. When backlog incarnation validation applies, such a
+#   leftover (no window, no spawn_gen or only a retained legacy stamp, no
+#   backend other than tmux, no Orca terminal= or other backend's <backend>_*
+#   endpoint identity, and every other identity field passing the shared
+#   endpoint validator as if it named the task's own window) is accepted as a
+#   missing-endpoint legacy record with or without --legacy-record; the shared
+#   endpoint validator is skipped so it cannot be read as the current window,
+#   kill is skipped, and a still-present worktree still faces the ordinary
+#   landed-work checks. Every other windowless record, including one with a
+#   spawn_gen, a non-tmux backend, or an ambiguous field, still faces the
+#   validator and refuses.
 # An explicit endpoint_cleared=<reason> stamp on a record with no window= line
 # is accepted as stronger agent-less evidence than a dead window: it records a
 # close already performed, so teardown proceeds with no flag and no --force,
@@ -278,6 +305,51 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 SECONDMATE_REG="$DATA/secondmates.md"
 SUB_HOME_MARKER=".fm-secondmate-home"
 SUB_HOME_PARENT_MARKER=".fm-secondmate-parent"
+# A missing `.` target is not a teardown result. Stock Bash 3.2 can abort it
+# into an EXIT trap whose status is 0, and a newer Bash can print the
+# diagnostic and continue into cleanup. Refuse by name before sourcing.
+teardown_require_source() {  # <path>
+  if [ ! -f "$1" ] || [ ! -r "$1" ]; then
+    echo "error: teardown refused: required source $(basename "$1") is missing or unreadable; nothing was changed" >&2
+    exit 1
+  fi
+}
+
+teardown_require_backend_prerequisites() {  # <backend> <task-id>
+  local backend=$1 task_id=$2
+  if ! fm_backend_source "$backend"; then
+    echo "error: teardown refused: required $backend source is missing or unreadable for $task_id; nothing was changed" >&2
+    return 1
+  fi
+}
+for _teardown_source in \
+  fm-tasks-axi-lib.sh \
+  fm-backlog-transition-lib.sh \
+  fm-timeout-lib.sh \
+  fm-backend.sh \
+  fm-control-lib.sh \
+  fm-lock-lib.sh \
+  fm-classify-lib.sh \
+  fm-gate-refuse-lib.sh \
+  fm-pr-lib.sh \
+  fm-public-followup-lib.sh \
+  fm-x-lib.sh \
+  fm-env-lib.sh \
+  fm-secondmate-registry-lib.sh \
+  fm-secondmate-parent-lib.sh \
+  fm-pending-reply-lib.sh \
+  fm-operational-input.sh \
+  fm-marker-lib.sh \
+  fm-tmux-lib.sh \
+  fm-composer-lib.sh \
+  fm-cursor-lib.sh \
+  fm-nm-run-lib.sh \
+  fm-wake-lib.sh \
+  fm-lease-lib.sh
+do
+  teardown_require_source "$SCRIPT_DIR/$_teardown_source"
+done
+unset _teardown_source
 # shellcheck source=bin/fm-tasks-axi-lib.sh
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
@@ -372,6 +444,7 @@ if [ -f "$META" ] && [ ! -L "$META" ]; then
 fi
 CONTROL_LOCK="$STATE/.control-$ID.lock"
 CONTROL_LOCK_HELD=0
+SM_LIVENESS_LOCK=
 META_LOCK=
 META_LOCK_HELD=0
 DESCENDANT_LOCK_PATHS=()
@@ -404,6 +477,10 @@ teardown_release_locks() {
   if [ "$META_LOCK_HELD" = 1 ]; then
     fm_lock_release "$META_LOCK" || true
     META_LOCK_HELD=0
+  fi
+  if [ -n "${SM_LIVENESS_LOCK:-}" ]; then
+    fm_lock_release "$SM_LIVENESS_LOCK" || true
+    SM_LIVENESS_LOCK=
   fi
   if [ "$CONTROL_LOCK_HELD" = 1 ]; then
     fm_lock_release "$CONTROL_LOCK" || true
@@ -449,6 +526,17 @@ TEARDOWN_ENDPOINT_CLEARED=
 if [ -z "$(fm_backend_meta_exact_value "$META" window 2>/dev/null || true)" ]; then
   TEARDOWN_ENDPOINT_CLEARED=$(fm_backend_meta_endpoint_cleared_value "$META" 2>/dev/null || true)
 fi
+# A secondmate's endpoint-liveness episodes (bin/fm-secondmate-liveness-lib.sh)
+# serialize on this lock; retirement holds it to the end so no probe or relaunch
+# can act on the route mid-teardown, and its relaunch ledger and park marker are
+# removed with the route instead of surviving for a reused id.
+if [ "$TEARDOWN_META_KIND" = secondmate ]; then
+  fm_lock_try_acquire "$STATE/.secondmate-liveness-$ID.lock" || {
+    echo "error: a secondmate liveness check is in progress for $ID; nothing was changed - retry teardown" >&2
+    exit 1
+  }
+  SM_LIVENESS_LOCK="$STATE/.secondmate-liveness-$ID.lock"
+fi
 TEARDOWN_CLEANUP_RECOVERY=$(fm_meta_get "$META" cleanup_recovery)
 TEARDOWN_META_SPAWN_GEN=
 TEARDOWN_LEGACY_PENDING=0
@@ -458,6 +546,34 @@ TEARDOWN_LEGACY_RETAINED_STAMP=
 TEARDOWN_LEGACY_PRESTAMP_SIZE=0
 TEARDOWN_BACKLOG_APPLIES=0
 TEARDOWN_BACKLOG_SKIP_REASON=
+TEARDOWN_WINDOWLESS=0
+TEARDOWN_WINDOWLESS_SHAPE=0
+TEARDOWN_WINDOW_COUNT=$(LC_ALL=C grep -c '^window=' "$META" 2>/dev/null || true)
+TEARDOWN_BACKEND_COUNT=$(LC_ALL=C grep -c '^backend=' "$META" 2>/dev/null || true)
+case "$TEARDOWN_WINDOW_COUNT:$(fm_meta_get "$META" window)" in
+  0:|1:)
+    case "$TEARDOWN_BACKEND_COUNT:$(fm_meta_get "$META" backend)" in
+      0:|1:tmux)
+        TEARDOWN_FOREIGN_ENDPOINT_KEYS='^terminal='
+        for TEARDOWN_FOREIGN_BACKEND in $FM_BACKEND_KNOWN; do
+          [ "$TEARDOWN_FOREIGN_BACKEND" = tmux ] \
+            || TEARDOWN_FOREIGN_ENDPOINT_KEYS="$TEARDOWN_FOREIGN_ENDPOINT_KEYS|^${TEARDOWN_FOREIGN_BACKEND}_"
+        done
+        if ! LC_ALL=C grep -Eq "$TEARDOWN_FOREIGN_ENDPOINT_KEYS" "$META" 2>/dev/null; then
+          TEARDOWN_SHAPE_META=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-teardown-shape.XXXXXX") || exit 1
+          { LC_ALL=C grep -v '^window=' "$META" || true; printf 'window=leftover:fm-%s\n' "$ID"; } \
+            > "$TEARDOWN_SHAPE_META"
+          if fm_backend_validate_task_endpoint "$TEARDOWN_SHAPE_META" "$ID" 2>/dev/null; then
+            TEARDOWN_WINDOWLESS_SHAPE=1
+          fi
+          rm -f "$TEARDOWN_SHAPE_META"
+        fi
+        ;;
+    esac
+    ;;
+esac
+# An explicit endpoint_cleared stamp outranks the inferred windowless shape.
+[ -z "$TEARDOWN_ENDPOINT_CLEARED" ] || TEARDOWN_WINDOWLESS_SHAPE=0
 if [ "$TEARDOWN_CLEANUP_RECOVERY" != orca ]; then
   if fm_backlog_transition_applies "$CONFIG" "$DATA" "$TEARDOWN_META_KIND"; then
     TEARDOWN_BACKLOG_APPLIES=1
@@ -473,11 +589,22 @@ fi
 if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   if ! fm_backlog_meta_spawn_gen "$META" "$STATE"; then
     TEARDOWN_LEGACY_GEN_COUNT=$(LC_ALL=C awk -F= '$1 == "spawn_gen" { count++ } END { print count + 0 }' "$META" 2>/dev/null || printf '0\n')
-    if [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ] \
-       && { [ "$LEGACY_RECORD_GIVEN" = 1 ] || [ -n "$TEARDOWN_ENDPOINT_CLEARED" ]; }; then
-      # A record that predates the incarnation field, or one whose endpoint was
-      # already cleared: acceptance is gated later, once the recorded endpoint is
-      # known cleared or confirmed dead or agent-less, before any cleanup decision.
+    if [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ] && [ -n "$TEARDOWN_ENDPOINT_CLEARED" ]; then
+      # A record whose endpoint was already cleared: acceptance is gated later,
+      # once the cleared stamp is re-affirmed, before any cleanup decision.
+      TEARDOWN_LEGACY_PENDING=1
+    elif [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ] && [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
+      # A tmux record with no window names no live endpoint, so there is no
+      # incarnation for spawn_gen to identify and nothing for --legacy-record
+      # to classify. Accept it as a missing-endpoint leftover, with or without
+      # the flag; a still-present worktree still faces the ordinary landed-work
+      # checks below.
+      TEARDOWN_WINDOWLESS=1
+      TEARDOWN_LEGACY_PENDING=1
+    elif [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ] && [ "$LEGACY_RECORD_GIVEN" = 1 ]; then
+      # A record that predates the incarnation field: acceptance is gated later,
+      # once the recorded endpoint is known, so its state can be confirmed dead
+      # or agent-less before any cleanup decision is made.
       TEARDOWN_LEGACY_PENDING=1
     elif [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ]; then
       echo "error: task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR); refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
@@ -496,7 +623,9 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
         # legacy record it was, and is treated as one: the dead-or-agent-less
         # endpoint gate runs again on the retry instead of being skipped by
         # the abandoned attempt's own stamp.
-        if [ "$LEGACY_RECORD_GIVEN" != 1 ]; then
+        if [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
+          TEARDOWN_WINDOWLESS=1
+        elif [ "$LEGACY_RECORD_GIVEN" != 1 ]; then
           echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
           exit 1
         fi
@@ -947,9 +1076,11 @@ remote_secondmate_teardown() {
   tmp="$SECONDMATE_REG.tmp.$$"
   grep -vE "^- $ID( |$)" "$SECONDMATE_REG" > "$tmp" || true
   mv -f -- "$tmp" "$SECONDMATE_REG"
+  [ ! -e "$CONFIG/fleet-ledger" ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-fleet-ledger.sh" cleaned_up "$ID" || true
   status_retire_presentation_task "$STATE" "$ID" || return 1
   fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record" "$STATE" || return 1
-  rm -f -- "$STATE/$ID.turn-ended" "$STATE/$ID.progress"
+  rm -f -- "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
+    "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID"
   printf 'teardown %s complete (remote %s:%s)\n' "$ID" "$remote_host" "$remote_home"
   return 0
 }
@@ -985,16 +1116,31 @@ fi
 # This is the first cleanup authorization check. It is metadata-only and must
 # complete before fm-guard, a backend command, file removal, branch deletion,
 # worktree return, registry change, or process termination can run.
-fm_backend_validate_task_endpoint "$META" "$ID" --allow-cleared || exit 1
-BACKEND=$FM_BACKEND_VALIDATED_BACKEND
-T=$FM_BACKEND_VALIDATED_TARGET
-TEARDOWN_ENDPOINT_CLEARED=$FM_BACKEND_VALIDATED_ENDPOINT_CLEARED
-TEARDOWN_WINDOW_DISPLAY=$T
-[ -z "$TEARDOWN_ENDPOINT_CLEARED" ] || TEARDOWN_WINDOW_DISPLAY="cleared:$TEARDOWN_ENDPOINT_CLEARED"
+# A windowless record names no endpoint: the shared validator would refuse it
+# (and must keep refusing it for control/kill callers), so teardown skips the
+# validator rather than probing or closing an ambient current window. An
+# explicit endpoint_cleared stamp is the one windowless record the validator
+# accepts, and only through --allow-cleared.
 WT=$(fm_meta_get "$META" worktree)
 PROJ=$(fm_meta_get "$META" project)
 T_ORCA=
-if [ "$BACKEND" = orca ] && [ -z "$TEARDOWN_ENDPOINT_CLEARED" ]; then T_ORCA=$T; fi
+if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
+  BACKEND=tmux
+  T=
+  TEARDOWN_ENDPOINT_CLEARED=
+else
+  fm_backend_validate_task_endpoint "$META" "$ID" --allow-cleared || exit 1
+  BACKEND=$FM_BACKEND_VALIDATED_BACKEND
+  T=$FM_BACKEND_VALIDATED_TARGET
+  TEARDOWN_ENDPOINT_CLEARED=$FM_BACKEND_VALIDATED_ENDPOINT_CLEARED
+  if [ "$BACKEND" = orca ] && [ -z "$TEARDOWN_ENDPOINT_CLEARED" ]; then T_ORCA=$T; fi
+fi
+TEARDOWN_WINDOW_DISPLAY=${T:-none}
+[ -z "$TEARDOWN_ENDPOINT_CLEARED" ] || TEARDOWN_WINDOW_DISPLAY="cleared:$TEARDOWN_ENDPOINT_CLEARED"
+# The recorded backend, including every sibling its adapter sources, has to
+# be readable before the first destructive step. --force does not override
+# this. A forced descendant is proved in validate_firstmate_home_children_removal.
+teardown_require_backend_prerequisites "$BACKEND" "$ID" || exit 1
 if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
   "$FM_ROOT/bin/fm-guard.sh" || true
 fi
@@ -1031,9 +1177,11 @@ fi
 MODE=$(grep '^mode=' "$META" | cut -d= -f2- || true)
 [ -n "$MODE" ] || MODE=no-mistakes
 
-# A record accepted as a legacy incarnation (no spawn_gen, --legacy-record
-# given) may be torn down only when its recorded endpoint is confidently gone
-# or agent-less; only the recovery-grade classifier's dead and missing license
+# A record accepted as a legacy incarnation (no spawn_gen, and either
+# --legacy-record given or the record is windowless) may be torn down only
+# when its recorded endpoint is confidently gone or agent-less. Windowless
+# leftovers name no endpoint and are treated as missing. For a recorded
+# window, only the recovery-grade classifier's dead and missing license
 # that, and every ambiguous, unreadable, or unverified endpoint state refuses
 # while the record is still intact. Acceptance resolves the incarnation token
 # here; the record itself is stamped only once every landed-work refusal has
@@ -1044,6 +1192,8 @@ if [ "$TEARDOWN_LEGACY_PENDING" = 1 ]; then
     # The record's own explicit cleared stamp is stronger agent-less evidence
     # than a dead window, so no endpoint probe is needed or possible.
     TEARDOWN_LEGACY_ENDPOINT=cleared
+  elif [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
+    TEARDOWN_LEGACY_ENDPOINT=missing
   else
     TEARDOWN_LEGACY_ENDPOINT=$(fm_backend_agent_state "$BACKEND" "$T")
     case "$TEARDOWN_LEGACY_ENDPOINT" in
@@ -1468,8 +1618,45 @@ content_in_default() {
 # current local work is contained in the PR head, OR the content is already in the
 # default branch (fallback, which also covers the no-PR and gh-error paths). False
 # only for genuinely unlanded work.
+teardown_pr_recorded_merge_notified() {
+  [ -n "$PR_URL" ] || return 1
+  fm_pr_url_parse "$PR_URL" || return 1
+  fm_pr_poll_merge_already_notified "$STATE" "$ID" \
+    "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER"
+}
+
+teardown_pr_recorded_forge_head() {
+  case "$MODE" in
+    no-mistakes|'') ;;
+    *) return 1 ;;
+  esac
+  local recorded_pr recorded_head
+  recorded_pr=$(fm_meta_get "$META" pr)
+  recorded_head=$(fm_meta_get "$META" pr_head)
+  [ -n "$recorded_pr" ] && [ "$recorded_pr" = "$PR_URL" ] \
+    && fm_pr_head_valid "$recorded_head"
+}
+
+teardown_recorded_pr_proves_landed() {
+  local branch=$1 pr_head current
+  if teardown_pr_recorded_merge_notified || teardown_pr_recorded_forge_head; then
+    content_in_default && return 0
+    if teardown_pr_recorded_forge_head; then
+      pr_head=$(fm_meta_get "$META" pr_head)
+      current=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) || return 1
+      if git -C "$WT" merge-base --is-ancestor "$current" "$pr_head" 2>/dev/null; then
+        return 0
+      fi
+      unpushed_patches_are_in_pr_head "$pr_head" && return 0
+    fi
+    return 1
+  fi
+  return 1
+}
+
 work_is_landed() {
   local branch=$1
+  teardown_recorded_pr_proves_landed "$branch" && return 0
   pr_is_merged "$branch" && return 0
   content_in_default
 }
@@ -1880,7 +2067,7 @@ task_status_is_terminal_run() {  # <axi-status-output> <run-id>
   [ "$run_id" = "$expected_id" ] || return 1
   outcome=$(fm_nm_strip_quotes "$(fm_nm_field "$out" outcome)")
   case "$outcome" in
-    cancelled|failed|passed|checks-passed) return 0 ;;
+    cancelled|failed|passed|checks-passed|passed-with-override|passed-with-skips) return 0 ;;
   esac
   return 1
 }
@@ -2183,6 +2370,11 @@ teardown_live_slot_path() {
   canonical_existing_dir "$WT"
 }
 
+TEARDOWN_SLOT_REASSIGNED_RC=3
+TEARDOWN_SLOT_REASSIGNED=0
+TEARDOWN_SLOT_REASSIGNED_TO=
+TEARDOWN_SLOT_REASSIGNED_HOME=
+
 collect_local_firstmate_states() {
   local record_state=$1 root home reg line child known existing i=0
   local -a homes
@@ -2229,21 +2421,97 @@ collect_local_firstmate_states() {
   done
 }
 
+teardown_meta_agent_state() {  # <meta> <id>
+  local meta=$1 id=$2
+  if ! fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null; then
+    printf 'missing'
+    return 0
+  fi
+  fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET"
+}
+
+teardown_slot_checkout_branch() {  # <slot>
+  git -C "$slot" symbolic-ref -q --short HEAD 2>/dev/null || true
+}
+
+# When <record_id> is tearing down and <peer_meta> names the same slot, return 0
+# only when evidence shows the slot belongs to <peer_id> and this record is stale.
+teardown_duplicate_slot_peer_owns_slot() {  # <record_meta> <record_id> <peer_meta> <peer_id> <slot>
+  local record_meta=$1 record_id=$2 peer_meta=$3 peer_id=$4 slot=$5
+  local record_state peer_state slot_branch record_branch peer_branch peer_home
+
+  fm_treehouse_slot_owner_state "$slot" "$record_id"
+  case "$FM_TREEHOUSE_SLOT_OWNER" in
+    other)
+      [ "$FM_TREEHOUSE_SLOT_OWNER_ID" = "$peer_id" ] || return 1
+      TEARDOWN_SLOT_REASSIGNED_TO=$peer_id
+      TEARDOWN_SLOT_REASSIGNED_HOME=$FM_TREEHOUSE_SLOT_OWNER_HOME
+      return 0
+      ;;
+    unsafe) return 1 ;;
+  esac
+
+  record_state=$(teardown_meta_agent_state "$record_meta" "$record_id")
+  case "$record_state" in
+    dead|missing) ;;
+    *) return 1 ;;
+  esac
+
+  peer_state=$(teardown_meta_agent_state "$peer_meta" "$peer_id")
+  case "$peer_state" in
+    alive) ;;
+    *) return 1 ;;
+  esac
+
+  slot_branch=$(teardown_slot_checkout_branch "$slot")
+  record_branch=$(fm_meta_get "$record_meta" branch)
+  peer_branch=$(fm_meta_get "$peer_meta" branch)
+  if [ -n "$slot_branch" ] && [ -n "$peer_branch" ] \
+    && [ "$slot_branch" = "$peer_branch" ]; then
+    if [ -z "$record_branch" ] || [ "$record_branch" != "$peer_branch" ]; then
+      TEARDOWN_SLOT_REASSIGNED_TO=$peer_id
+      peer_home=$(fm_meta_get "$peer_meta" home)
+      TEARDOWN_SLOT_REASSIGNED_HOME=$peer_home
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+teardown_mark_slot_reassigned_to_peer() {
+  local record_id=$1 peer_id=$2 slot=$3 peer_home=$4
+  echo "warning: task $record_id's recorded worktree $slot is also named by task $peer_id's record, but the slot checkout, slot claim, and live endpoints show $peer_id owns that pool slot now; $record_id's own cleanup runs and the slot is left untouched." >&2
+  TEARDOWN_SLOT_REASSIGNED=1
+  TEARDOWN_SLOT_REASSIGNED_TO=$peer_id
+  TEARDOWN_SLOT_REASSIGNED_HOME=$peer_home
+}
+
 require_exclusive_worktree_slot_record() {
   local record_meta=$1 record_id=$2 record_state=$3 worktree=$4
-  local slot state_dir other other_id field other_path other_slot
+  local slot state_dir other other_id field other_path other_slot peer_home
   slot=$(canonical_existing_dir "$worktree") || return 0
   collect_local_firstmate_states "$record_state" || return 1
   for state_dir in "${TREEHOUSE_OWNER_STATES[@]}"; do
     for other in "$state_dir"/*.meta; do
       [ -f "$other" ] && [ ! -L "$other" ] || continue
-      [ "$other" != "$record_meta" ] || continue
+      # Identity, not spelling: the same record reached through a differently
+      # resolved state dir (e.g. a symlinked $FM_HOME) is still this record. A
+      # differently named hardlink is another task's record, so the name must
+      # match too.
+      [ "${other##*/}" = "${record_meta##*/}" ] && [ "$other" -ef "$record_meta" ] && continue
       other_id=$(basename "$other" .meta)
       for field in worktree home; do
         other_path=$(fm_meta_get "$other" "$field")
         [ -n "$other_path" ] || continue
         other_slot=$(canonical_existing_dir "$other_path") || continue
         [ "$other_slot" = "$slot" ] || continue
+        if teardown_duplicate_slot_peer_owns_slot \
+          "$record_meta" "$record_id" "$other" "$other_id" "$slot"; then
+          peer_home=$TEARDOWN_SLOT_REASSIGNED_HOME
+          teardown_mark_slot_reassigned_to_peer "$record_id" "$other_id" "$slot" "$peer_home"
+          return "$TEARDOWN_SLOT_REASSIGNED_RC"
+        fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
         echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
@@ -2254,9 +2522,14 @@ require_exclusive_worktree_slot_record() {
 }
 
 require_exclusive_task_worktree_slot() {
-  local slot
+  local slot rc=0
   slot=$(teardown_live_slot_path) || return 0
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot"
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    "$TEARDOWN_SLOT_REASSIGNED_RC") return 0 ;;
+    *) return "$rc" ;;
+  esac
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
@@ -2282,7 +2555,6 @@ require_exclusive_task_worktree_slot() {
 # existed, or already returned to the pool, carries none, and refusing those
 # would strand every task in flight across the change for no evidence at all.
 # Those keep exactly the record-scan protection they had before.
-TEARDOWN_SLOT_REASSIGNED_RC=3
 require_owned_worktree_slot_record() {  # <task-id> <worktree>
   local record_id=$1 worktree=$2 marker
   fm_treehouse_slot_owner_state "$worktree" "$record_id"
@@ -2302,9 +2574,6 @@ require_owned_worktree_slot_record() {  # <task-id> <worktree>
 # The one ownership determination for this task's recorded slot. Every later
 # step that would read or touch $WT consults teardown_owns_worktree, so a
 # reassigned slot is skipped consistently rather than by each step's own guess.
-TEARDOWN_SLOT_REASSIGNED=0
-TEARDOWN_SLOT_REASSIGNED_TO=
-TEARDOWN_SLOT_REASSIGNED_HOME=
 require_owned_task_worktree_slot() {
   local slot rc=0
   slot=$(teardown_live_slot_path) || return 0
@@ -2524,6 +2793,9 @@ remove_firstmate_home() {
     restore_firstmate_home_process_events "$abs_home_path" "$label" "$process_event_backup" || return $?
     return 1
   fi
+  # Read-only strip dirs sit at state/<id>.git-hooks, and a remote secondmate's
+  # own one under state/parent-route/, so search the whole state tree.
+  find "$abs_home_path/state" -type d -name '*.git-hooks' -exec chmod u+w {} + 2>/dev/null || true
   if firstmate_home_has_treehouse_slot "$abs_home_path"; then
     command -v treehouse >/dev/null 2>&1 || {
       echo "error: treehouse command not found; cannot return $label $abs_home_path" >&2
@@ -2842,7 +3114,12 @@ preflight_descendant_treehouse_slots() {
       continue
     fi
     fm_backend_validate_task_endpoint "$meta" "$task_id" --allow-cleared || return 1
-    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
+    owner_rc=0
+    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || owner_rc=$?
+    case "$owner_rc" in
+      0|"$TEARDOWN_SLOT_REASSIGNED_RC") ;;
+      *) return 1 ;;
+    esac
     owner_rc=0
     require_owned_worktree_slot_record "$task_id" "$worktree" || owner_rc=$?
     case "$owner_rc" in
@@ -2865,6 +3142,7 @@ validate_firstmate_home_children_removal() {
     child_kind=$(meta_value "$child_meta" kind)
     [ -n "$child_kind" ] || child_kind=ship
     child_backend=$(fm_backend_of_meta "$child_meta")
+    teardown_require_backend_prerequisites "$child_backend" "$child_id" || return 1
     if [ "$child_kind" = secondmate ]; then
       child_home=$(meta_value "$child_meta" home)
       [ -n "$child_home" ] || child_home=$child_wt
@@ -2910,10 +3188,7 @@ FMEOF
 
 teardown_herdr_require_prerequisites() {  # <task-id>
   local task_id=$1 prerequisite
-  if ! fm_backend_source herdr; then
-    echo "error: herdr teardown prerequisites are unavailable for $task_id; nothing was changed - restore the adapter and rerun teardown" >&2
-    return 1
-  fi
+  teardown_require_backend_prerequisites herdr "$task_id" || return 1
   for prerequisite in \
     fm_backend_herdr_parse_target \
     fm_backend_herdr_pane_presence_state \
@@ -3164,13 +3439,17 @@ cleanup_firstmate_home_children() {
     fi
     retire_busy_state "$sub_state" "$child_id" "$child_busy_gen" || return 1
     status_retire_presentation_task "$sub_state" "$child_id" || return 1
+    fm_wake_queue_prune_task "$sub_state" "$child_id" "$child_t" 2>/dev/null || true
     fm_backlog_atomic_transition remove "$sub_state/$child_id.meta" "task record" "$sub_state" || return 1
     rm -f "$sub_state/$child_id.turn-ended" "$sub_state/$child_id.progress" \
       "$sub_state/$child_id.pi-ext.ts" "$sub_state/$child_id.omp-ext.ts" \
       "$sub_state/$child_id.grok-turnend-token" "$sub_state/$child_id.kimi-turnend-token" \
       "$sub_state/$child_id.muse-session" "$sub_state/$child_id.muse-session-current" \
       "$sub_state/$child_id.cursor-session" "$sub_state/$child_id.reconcile-nudged" \
+      "$sub_state/$child_id.devin-config.json" \
       "$sub_state/.$child_id.branch-outcome-index"
+    chmod u+w "$sub_state/$child_id.git-hooks" 2>/dev/null || true
+    rm -rf "$sub_state/$child_id.git-hooks"
   done
 }
 
@@ -3529,7 +3808,7 @@ elif [ "$BACKEND" = herdr ]; then
   else
     echo "warning: herdr session presentation lock path is unavailable; skipping the pane close rather than closing unlocked" >&2
   fi
-elif [ "$BACKEND" != orca ]; then
+elif [ "$BACKEND" != orca ] && [ "$TEARDOWN_WINDOWLESS" != 1 ]; then
   fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" \
     || endpoint_close_refusal "$ID" "$BACKEND" "$T" 1 || exit 1
 fi
@@ -3627,20 +3906,28 @@ if [ -n "$LAUNCH_HOME_TOKEN" ]; then
 fi
 remove_pr_poll_artifacts "$STATE" "$ID" || exit 1
 retire_busy_state "$STATE" "$ID" "$BUSY_GEN" || exit 1
+# Opt-in fleet activity ledger (docs/fleet-ledger.md), before the status log is
+# retired so its last lines are captured; off costs one file test.
+[ ! -e "$CONFIG/fleet-ledger" ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-fleet-ledger.sh" cleaned_up "$ID" || true
 status_retire_presentation_task "$STATE" "$ID" || exit 1
+fm_wake_queue_prune_task "$STATE" "$ID" "$T" 2>/dev/null || true
 rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
   "$STATE/$ID.pi-ext.ts" "$STATE/$ID.omp-ext.ts" "$STATE/$ID.grok-turnend-token" \
   "$STATE/$ID.kimi-turnend-token" "$STATE/$ID.muse-session" \
   "$STATE/$ID.muse-session-current" "$STATE/$ID.cursor-session" \
   "$STATE/$ID.control-relaunch" "$STATE/$ID.control-relaunch.meta-prior" \
   "$STATE/$ID.control-relaunch.brief-prior" "$STATE/$ID.control-relaunch.note" \
-  "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" \
+  "$STATE/$ID.reconcile-nudged" "$STATE/$ID.gemini-settings.json" "$STATE/$ID.devin-config.json" \
   "$STATE/$ID.openhands-env" \
-  "$STATE/.$ID.branch-outcome-index"
+  "$STATE/.$ID.branch-outcome-index" \
+  "$STATE/.secondmate-relaunch-$ID" "$STATE/.secondmate-relaunch-bound-$ID"
 # The steering inbox (bin/fm-task-inbox-lib.sh) is runtime state for the
 # retired endpoint; teardown only runs after landing is confirmed, so any
 # leftover unhandled steer here is moot rather than unlanded work.
-rm -rf "$STATE/$ID.inbox" "$STATE/$ID.openhands" "$STATE/$ID.openhands-home"
+# state/<id>.git-hooks is the spawn-owned commit-msg strip directory, left
+# read-only by its installer.
+chmod u+w "$STATE/$ID.git-hooks" 2>/dev/null || true
+rm -rf "$STATE/$ID.inbox" "$STATE/$ID.git-hooks" "$STATE/$ID.openhands" "$STATE/$ID.openhands-home"
 # The record is gone, so the backlog must not still show this task in flight
 # when teardown reports success. Still under this task's meta lock, so a steer
 # racing the same id stays serialized exactly as it was before. A captain-held

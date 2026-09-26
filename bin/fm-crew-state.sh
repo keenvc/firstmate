@@ -10,6 +10,8 @@
 # current state from a tail of the log: it reads the authoritative source (a
 # no-mistakes run-step attributed under bin/fm-nm-run-lib.sh's contract, else
 # the pane busy-signature) and reconciles the possibly-stale log against it.
+# A ship `done:` is current-state done only when bin/fm-dod-lib.sh accepts the
+# named head as reachable outside the worker's disposable copy; otherwise blocked.
 #
 # The determinism lives entirely here - run-step / pane / log reads, fixed
 # mapping logic, and terminal passed-run PR detail from bounded evidence only,
@@ -94,10 +96,17 @@
 #      The run-step is AUTHORITATIVE: running/fixing -> working, ci -> working
 #      (the id-addressed detail read carries step words the overview does not),
 #      awaiting_approval/fix_review -> parked (with gate findings), terminal
-#      passed/checks-passed -> done, failed/cancelled -> failed. EXCEPT: while
+#      passed/checks-passed/passed-with-override/passed-with-skips -> done,
+#      failed/cancelled -> failed. passed-with-override is a passing outcome
+#      carrying an explicitly approved Test or CI exception (no-mistakes' own
+#      vocabulary), read identically to a clean passed. passed-with-skips is
+#      also a passing outcome (publication or CI verification was
+#      automatically skipped, no-mistakes' own vocabulary), read as done but
+#      with that skip kept visible in the detail, unlike a clean passed.
+#      EXCEPT: while
 #      the active step is ci, `axi status` alone cannot tell "still waiting on
 #      checks" from "checks green, waiting on merge" (see nm_ci_checks_state) -
-#      a ci-step log-tail check overrides working -> done once checks read
+#      a check of the full ci-step log overrides working -> done once checks read
 #      green, so a green PR is never silently read as still-validating. And a
 #      terminal FAILED run whose only failure is the ci monitor step, after
 #      every substantive step completed and the ci log's last marker reads
@@ -169,6 +178,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-pr-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-dod-lib.sh
+. "$SCRIPT_DIR/fm-dod-lib.sh"
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -225,6 +236,17 @@ fi
 # a crew with no active run and an idle pane that declared a known external wait
 # reports `paused` distinctly, so a supervisor reading this sees a declared pause
 # and its reason rather than a wedge-suspect idle.
+# A ship `done:` is not current-state done while bin/fm-dod-lib.sh refuses the
+# named-head reachability gate: that claim is blocked so a disposable copy is
+# not treated as finished-and-safe.
+emit_ship_status_done() {  # [extra-detail]
+  local extra=${1:-} reason
+  if reason=$(fm_dod_accept_ship_done "$KIND" "$(meta_value mode)" "$WT" "$(meta_value project)" "$LOG_LINE" "$STATE" "$ID" "$META"); then
+    emit "done" status-log "$(status_line_note "$LOG_LINE")${extra:+${SEP}$extra}"
+  fi
+  emit blocked status-log "$reason"
+}
+
 map_log_state() {  # <line>
   if status_is_paused "$1"; then
     echo paused
@@ -303,14 +325,17 @@ pane_readable() {  # <target>
 # its isolated rendered-tail fallback; a herdr crew's native `busy` is accepted
 # when no record exists, but its native `idle` is NOT, because agent.get
 # reports generation state (idle while a crew blocks on its own long-running
-# foreground tool call) rather than turn state. A `quota` verdict is a busy
-# record reclassified by the rendered provider-wall signal, which the contract
-# owner captures itself when the caller passes no tail.
+# foreground tool call) rather than turn state. The tail is captured
+# unconditionally (not just for Grok) so this authoritative read also sees
+# fm_busy_lib's launch-prompt backstop: without it, a launch parked on a
+# recognized interactive prompt would report `working` here while the
+# watcher's own poll (which always captures a tail) already classifies it
+# unknown - the exact split issue #1792 describes for a different cause.
+# A `quota` verdict is a busy record reclassified by the rendered
+# provider-wall signal read from that same tail.
 crew_busy_verdict() {  # <target>
-  local tail40=''
-  case "$HARNESS" in
-    grok*) tail40=$(fm_backend_capture "$TASK_BACKEND" "$1" 40 "$EXPECTED_LABEL" 2>/dev/null) || tail40='' ;;
-  esac
+  local tail40
+  tail40=$(fm_backend_capture "$TASK_BACKEND" "$1" 40 "$EXPECTED_LABEL" 2>/dev/null) || tail40=''
   fm_busy_classify "$TASK_BACKEND" "$1" "$HARNESS" "$ID" "$STATE" "$tail40"
 }
 
@@ -357,6 +382,24 @@ mr_read_record_bounded() {  # <host> <path> <number>
     fm_pr_gitlab_read_record "$2" "$3" "$4" || exit 1
     printf "state=%s\nmerged=%s\n" "$FM_PR_RECORD_STATE" "$FM_PR_RECORD_MERGED"
   ' _ "$SCRIPT_DIR/fm-pr-lib.sh" "$1" "$2" "$3" 2>/dev/null); then
+    return 1
+  fi
+  state=$(printf '%s\n' "$record" | sed -n 's/^state=//p' | head -1)
+  merged=$(printf '%s\n' "$record" | sed -n 's/^merged=//p' | head -1)
+  [ -n "$state" ] || return 1
+  [ "$merged" = true ] || [ "$merged" = false ] || return 1
+  FM_PR_RECORD_STATE=$state
+  FM_PR_RECORD_MERGED=$merged
+}
+
+change_read_record_bounded() {  # <host> <number>
+  local record state merged
+  # shellcheck disable=SC2016  # The inner script expands after bash -c receives positional args.
+  if ! record=$(fm_run_timed 5 bash -c '
+    . "$1"
+    fm_pr_gerrit_read_record "$2" "$3" || exit 1
+    printf "state=%s\nmerged=%s\n" "$FM_PR_RECORD_STATE" "$FM_PR_RECORD_MERGED"
+  ' _ "$SCRIPT_DIR/fm-pr-lib.sh" "$1" "$2" 2>/dev/null); then
     return 1
   fi
   state=$(printf '%s\n' "$record" | sed -n 's/^state=//p' | head -1)
@@ -435,6 +478,23 @@ passed_pr_detail() {
         *)           printf 'run passed: PR state %s' "$state_lc" ;;
       esac
       ;;
+    gerrit)
+      if ! change_read_record_bounded "$host" "$number"; then
+        printf 'run passed: PR state unknown (unreadable)'
+        return
+      fi
+      if [ "$FM_PR_RECORD_MERGED" = true ]; then
+        printf 'run passed: PR merged'
+        return
+      fi
+      # Gerrit spells an open change NEW and a closed one ABANDONED.
+      state_lc=$(printf '%s' "$FM_PR_RECORD_STATE" | tr '[:upper:]' '[:lower:]')
+      case "$state_lc" in
+        new)       printf 'run passed: PR open' ;;
+        abandoned) printf 'run passed: PR closed' ;;
+        *)         printf 'run passed: PR state %s' "$state_lc" ;;
+      esac
+      ;;
     *)
       printf 'run passed: PR state unknown (unreadable: %s)' "$url"
       ;;
@@ -497,12 +557,87 @@ nm_gate_findings_count() {
   case "$rest" in ''|*[!0-9]*) return 0 ;; esac
   printf '%s' "$rest"
 }
+# 0 when the gate's own findings table holds at least one row whose `action`
+# column is exactly `ask-user` - the pipeline's own record that this gate's
+# answer is owed by a HUMAN, not by the crewmate (the gate's shape -
+# awaiting_approval, fix_review, awaiting_agent - is reported parked in every
+# case and does not by itself say who owes the answer; only a findings row whose
+# `action` column is exactly `ask-user` does).
+#
+# Read POSITIONALLY, the way nm_gate_step_row above reads its row: locate the
+# `findings[N]{...}` header, take the index of the `action` column from it, walk
+# each of the N rows that follow to that index, and compare for EQUALITY. A
+# substring search over the run payload cannot make this distinction - the
+# trailing `description` column is free text that routinely quotes finding
+# actions, and the payload also carries the branch name and step names, so a
+# gate owed the crewmate's own answer would match just as readily as one owed a
+# human. Column order is read from the header rather than assumed, so a table
+# that grows a column keeps answering correctly. Both the header match and the
+# row scan require the BRACE, so the count, the index and the rows all come from
+# the same block: an earlier unbraced `findings[N]:` line from a resolved round
+# must not supply the rows while the braced gate table supplies the index, which
+# would read the wrong block's rows at the right block's offset
+# (tests/fm-crew-state.test.sh's unbraced-precursor case pins it).
+#
+# Reading the index out of the header and then walking RAW COMMAS to it is only
+# positional in name: the walk is sound only while every column before `action`
+# is comma-free, and the producer does not quote commas inside `description`
+# (tests/fm-crew-state.test.sh's own fixture proves it). A header ordering that
+# puts free text before `action` would therefore let a row's description mint
+# the marker - silently, with no error - which is the same class of hole the
+# positional derivation exists to close, arriving by a different route. So the
+# columns preceding `action` are checked against a WHITELIST of names this table
+# is known to carry as short comma-free scalars, and anything else refuses:
+# a whitelist rather than a blacklist of free-text names, because an unknown
+# column must read as unsafe rather than as safe. When the table's shape is not
+# provably safe the correct answer is the noisy one - a crewmate that went quiet
+# before answering its own gate is the failure that must never be silenced.
+# Residual bound, which no unquoted positional parse of this table escapes: a
+# comma inside a whitelisted field's own value (a path with a comma in it, say)
+# still shifts the walk.
+nm_gate_awaits_human_decision() {
+  local header count cols idx i name field rows row rest
+  header=$(printf '%s\n' "$RUN_OUT" | grep -E '^[[:space:]]*findings\[[0-9]+\]\{[^}]*\}:' | head -1)
+  [ -n "$header" ] || return 1
+  count=$(printf '%s' "$header" | sed -n 's/^[[:space:]]*findings\[\([0-9][0-9]*\)\].*/\1/p')
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$count" -gt 0 ] || return 1
+  cols=$(printf '%s' "$header" | sed -n 's/^[^{]*{\([^}]*\)}.*/\1/p')
+  [ -n "$cols" ] || return 1
+  idx=0
+  i=0
+  while [ -n "$cols" ]; do
+    i=$((i + 1))
+    name=$(strip_quotes "$(trim "${cols%%,*}")")
+    if [ "$name" = action ]; then idx=$i; break; fi
+    case "$name" in
+      id|severity|file|line) ;;
+      *) return 1 ;;
+    esac
+    case "$cols" in *,*) cols=${cols#*,} ;; *) cols='' ;; esac
+  done
+  [ "$idx" -gt 0 ] || return 1
+  rows=$(printf '%s\n' "$RUN_OUT" \
+    | awk -v n="$count" 'f { print; if (++c >= n) exit; next } /^[[:space:]]*findings\[[0-9]+\]\{/ { f = 1 }')
+  while IFS= read -r row; do
+    case "$row" in *,*) ;; *) continue ;; esac
+    rest=$row
+    i=1
+    while [ "$i" -lt "$idx" ]; do
+      case "$rest" in *,*) rest=${rest#*,} ;; *) rest=''; break ;; esac
+      i=$((i + 1))
+    done
+    [ -n "$rest" ] || continue
+    field=$(strip_quotes "$(trim "${rest%%,*}")")
+    [ "$field" = ask-user ] && return 0
+  done <<EOF
+$rows
+EOF
+  return 1
+}
 log_reports_ci_ready() {
   [ "$LOG_VERB" = "done" ] || return 1
-  case "$(status_line_note "$LOG_LINE")" in
-    *PR*"checks green"*|*"checks green"*PR*) return 0 ;;
-    *) return 1 ;;
-  esac
+  fm_dod_note_reports_ci_ready "$(status_line_note "$LOG_LINE")"
 }
 
 # 0 when a status-log line reports positive daemon socket failure rather than a
@@ -706,22 +841,28 @@ nm_effective_ci_step_status() {
 # monitoring until merged or closed" or "no CI checks reported - still
 # monitoring until merged or closed" (verified against 360+ real run logs under
 # ~/.no-mistakes/logs/*/ci.log on the installed v1.32.2 binary, including the
-# actual PR #252 run). Reads the ci step's log tail via `axi logs` and scans it
-# for the MOST RECENT recognized marker (the log is append-only/chronological,
+# actual PR #252 run). Reads the ci step's log via `axi logs --full` and scans
+# it for the MOST RECENT recognized marker (the log is append-only/chronological,
 # so the last match is current): green with nothing red after it means CI is
 # green right now, still only waiting on merge/close.
+# "base branch advanced (..), re-arming CI monitor timeout" is deliberately NOT
+# a marker: the monitor logs a checks state only when that state changes, and a
+# base advance re-arms only its idle timeout without clearing readiness, so the
+# green marker before it is still current (no-mistakes' own ci-log parser
+# ignores the line the same way, v1.32.2 through v1.79.0). Reading it as
+# not-ready held a green PR at working for as long as main kept advancing.
 nm_ci_checks_state() {
-  local run_id log_tail marker
+  local run_id ci_log marker
   run_id=$(strip_quotes "$(nm_field id)")
   [ -n "$run_id" ] || { printf 'unknown'; return; }
-  log_tail=$(nm_run axi logs --step ci --run "$run_id") || true
-  [ -n "$log_tail" ] || { printf 'unknown'; return; }
-  marker=$(printf '%s\n' "$log_tail" \
-    | grep -E 'CI checks passed|no CI checks reported - still monitoring|no CI checks reported yet|checks failed|issues detected|CI checks running|base branch advanced.*re-arming CI monitor timeout' \
+  ci_log=$(nm_run axi logs --step ci --run "$run_id" --full) || true
+  [ -n "$ci_log" ] || { printf 'unknown'; return; }
+  marker=$(printf '%s\n' "$ci_log" \
+    | grep -E 'CI checks passed|no CI checks reported - still monitoring|no CI checks reported yet|checks failed|issues detected|CI checks running' \
     | tail -1)
   case "$marker" in
     *"checks passed"*|*"no CI checks reported - still monitoring"*) printf 'green' ;;
-    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*|*"base branch advanced"*"re-arming CI monitor timeout"*) printf 'not-ready' ;;
+    *"no CI checks reported yet"*|*"checks failed"*|*"issues detected"*|*"CI checks running"*) printf 'not-ready' ;;
     *) printf 'unknown' ;;
   esac
 }
@@ -790,7 +931,7 @@ if [ "$KIND" = ship ] && [ -n "$CREW_BRANCH" ] && command -v no-mistakes >/dev/n
     overview_ok=1
     run_overview=$(fm_nm_run_checked "$WT" "$NM_TIMEOUT" axi) || overview_ok=0
     [ -n "$run_overview" ] || emit unknown run-step "run inventory unavailable; run id: $(strip_quotes "$(nm_field id)")"
-    run_choice=$(fm_nm_select_run "$CREW_BRANCH" "$run_overview" "$WT")
+    run_choice=$(fm_nm_select_run "$CREW_BRANCH" "$run_overview" "$WT" "$NM_TIMEOUT")
     [ "$overview_ok" = 1 ] || emit unknown run-step "run inventory unreadable; run ids: $(strip_quotes "$(nm_field id)"), ${run_choice##*|}"
     case "$run_choice" in
       unknown\|*)
@@ -937,7 +1078,8 @@ if [ "$HAVE_RUN" = 1 ]; then
 
     if [ -n "$outcome" ]; then
       case "$outcome" in
-        passed)        RUN_STATE="done"; RUN_DETAIL=$(passed_pr_detail) ;;
+        passed|passed-with-override) RUN_STATE="done"; RUN_DETAIL=$(passed_pr_detail) ;;
+        passed-with-skips) RUN_STATE="done"; RUN_DETAIL="$(passed_pr_detail) (publication/CI verification skipped)" ;;
         checks-passed) RUN_STATE="done"; RUN_DETAIL="checks green: PR ready for review" ;;
         failed)
           if nm_reclassify_failed_run_as_held_green; then :; else
@@ -958,8 +1100,11 @@ if [ "$HAVE_RUN" = 1 ]; then
       RUN_DETAIL="parked at $gate"
       fcount=$(nm_gate_findings_count)
       [ -n "$fcount" ] && RUN_DETAIL="$RUN_DETAIL: $fcount finding(s)"
-      if printf '%s\n' "$RUN_OUT" | grep -q 'ask-user'; then
-        RUN_DETAIL="$RUN_DETAIL (ask-user: authority decision)"
+      # Its own ${SEP} component, not free text inside the detail: consumers
+      # compare a whole component for equality, so nothing a gate name or a
+      # later note happens to contain can mint it.
+      if nm_gate_awaits_human_decision; then
+        RUN_DETAIL="$RUN_DETAIL${SEP}$FM_GATE_HUMAN_DECISION"
       fi
     else
       case "$status" in
@@ -982,6 +1127,10 @@ if [ "$HAVE_RUN" = 1 ]; then
             if [ "$CI_LOG_STATE" = green ]; then
               RUN_STATE="done"
               RUN_DETAIL="checks green: PR ready for review (still monitoring for merge/close)"
+              # The run's own PR URL makes this reading actionable even when
+              # the worker never reported it and no pr= was recorded.
+              ci_pr_url=$(strip_quotes "$(nm_field pr)")
+              [ -z "$ci_pr_url" ] || RUN_DETAIL="$RUN_DETAIL: $ci_pr_url"
             fi
             ;;
           fixing)
@@ -994,7 +1143,7 @@ if [ "$HAVE_RUN" = 1 ]; then
 
   if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
     if [ "$RUN_SOURCE" = coarse ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit_ship_status_done "run still monitoring PR"
     fi
     [ -n "$CI_STEP_STATUS" ] || CI_STEP_STATUS=$(nm_effective_ci_step_status)
     if [ "$RUN_STATUS" = fixing ]; then
@@ -1005,7 +1154,7 @@ if [ "$HAVE_RUN" = 1 ]; then
       CI_LOG_STATE=not-ready
     fi
     if [ "$CI_LOG_STATE" != not-ready ]; then
-      emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}run still monitoring PR"
+      emit_ship_status_done "run still monitoring PR"
     fi
   fi
 
@@ -1146,6 +1295,9 @@ fi
 # the verb->state mapping (including the configurable paused verb), so reusing its
 # `unknown` verdict as the "not a state" test needs no second verb list here.
 if [ -n "$LOG_VERB" ]; then
+  if [ "$LOG_VERB" = "done" ]; then
+    emit_ship_status_done
+  fi
   LOG_STATE=$(map_log_state "$LOG_LINE")
   if [ "$LOG_STATE" != unknown ]; then
     emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")"

@@ -15,6 +15,8 @@
 # "off" preferences propagate as files. Primary
 # config/trace-context is copied at the launch convergence point as part of the
 # default-off W3C trace-context setup, while live convergence leaves it unchanged.
+# Primary config/lavish-axi-host carries the one per-machine Lavish server address
+# to every worker so a worker never starts a second server on another interface.
 # The primary passes its frozen home-session decision into a newly launched
 # Secondmate; see docs/trace-context.md.
 # Primary config/claude-permission-mode is a captain-wide safety preference
@@ -66,7 +68,7 @@ FM_SHARED_CAPTAIN_MODE="444"
 # The declared inheritable set (space-separated, config-dir-relative item paths).
 # Extend here to inherit more of the primary's local config; override via the
 # environment only in tests. Items must not contain whitespace.
-FM_INHERITABLE_CONFIG="${FM_INHERITABLE_CONFIG:-crew-dispatch.json crew-harness backlog-backend backend herdr-presentation-spaces startup-memory-budget trace-context launch-env-allowlist claude-permission-mode}"
+FM_INHERITABLE_CONFIG="${FM_INHERITABLE_CONFIG:-crew-dispatch.json crew-harness backlog-backend backend herdr-presentation-spaces startup-memory-budget trace-context launch-env-allowlist claude-permission-mode lavish-axi-host}"
 
 # Items whose value is a home-SESSION enablement decision rather than durable
 # local configuration. They are inherited at the launch convergence point, where
@@ -74,6 +76,11 @@ FM_INHERITABLE_CONFIG="${FM_INHERITABLE_CONFIG:-crew-dispatch.json crew-harness 
 # untouched by live convergence into an already-running home, whose decision is
 # already frozen for its current session (bin/fm-trace-context-lib.sh).
 FM_SESSION_SCOPED_INHERITABLE_CONFIG="trace-context"
+
+# Local gitignored file in a secondmate home listing declared inheritable config
+# items that home keeps under its own control. Primary propagation skips those
+# items, reports them as skipped, and never sends a config-reread for them.
+FM_CONFIG_INHERIT_OPTOUT_REL="inherit-optout"
 
 # True when <item> is session-scoped in the sense above.
 fm_config_inherit_item_session_scoped() {  # <item>
@@ -208,6 +215,54 @@ inheritable_config_skip_reason() {
   printf '%s' "destination does not allow inherited item (not gitignored or guard failed)"
 }
 
+inheritable_config_optout_reason() {
+  printf '%s' "destination home opted out of this inherited item"
+}
+
+# True when <item> names a declared inheritable config path segment.
+fm_config_inherit_item_name_valid() {
+  local candidate=$1 item
+  case "$candidate" in
+    ''|/*|.|..|../*|*/../*|*/..) return 1 ;;
+  esac
+  for item in $FM_INHERITABLE_CONFIG; do
+    [ "$item" = "$candidate" ] && return 0
+  done
+  return 1
+}
+
+# Resolve the secondmate home directory from its config/ path.
+fm_config_inherit_dest_home() {
+  local dest_config=$1
+  case "$dest_config" in
+    */config)
+      printf '%s\n' "${dest_config%/config}"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# True when dest_home/config/inherit-optout lists <item> (bare config item name).
+fm_config_inherit_item_opted_out() {
+  local dest_home=$1 item=$2 path line trimmed
+  [ -n "$dest_home" ] && [ -n "$item" ] || return 1
+  path="$dest_home/config/$FM_CONFIG_INHERIT_OPTOUT_REL"
+  [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    trimmed=${line%%#*}
+    trimmed=${trimmed#"${trimmed%%[![:space:]]*}"}
+    trimmed=${trimmed%"${trimmed##*[![:space:]]}"}
+    [ -n "$trimmed" ] || continue
+    fm_config_inherit_item_name_valid "$trimmed" || continue
+    [ "$trimmed" = "$item" ] && return 0
+  done < "$path"
+  return 1
+}
+
 warn_inheritable_config_skip() {
   local item=$1 dest_config=$2 reason=$3
   echo "fm-config-inherit: warning: skipped $item for $dest_config: $reason" >&2
@@ -218,14 +273,18 @@ warn_inheritable_config_error() {
   echo "fm-config-inherit: error: $reason $item at $dest" >&2
 }
 
+# Prints nothing and returns 0 when the header carries every required phrase.
+# Otherwise prints the first required phrase it did not find on stdout and
+# returns 1, so a caller can name the concrete gap instead of a generic
+# rejection. The accept set itself is unchanged.
 shared_captain_header_valid() {
   local src=$1 head
   head=$(sed -n '1,12p' "$src" 2>/dev/null) || return 1
-  case "$head" in *main-authoritative*) ;; *) return 1 ;; esac
-  case "$head" in *"read-only in secondmate homes"*) ;; *) return 1 ;; esac
-  case "$head" in *"must not be edited there"*) ;; *) return 1 ;; esac
-  case "$head" in *"main firstmate"*) ;; *) return 1 ;; esac
-  case "$head" in *"marked status"*|*"document pointer"*) ;; *) return 1 ;; esac
+  case "$head" in *main-authoritative*) ;; *) printf '%s' "main-authoritative"; return 1 ;; esac
+  case "$head" in *"read-only in secondmate homes"*) ;; *) printf '%s' "read-only in secondmate homes"; return 1 ;; esac
+  case "$head" in *"must not be edited there"*) ;; *) printf '%s' "must not be edited there"; return 1 ;; esac
+  case "$head" in *"main firstmate"*) ;; *) printf '%s' "main firstmate"; return 1 ;; esac
+  case "$head" in *"marked status"*|*"document pointer"*) ;; *) printf '%s' "marked status\" or \"document pointer"; return 1 ;; esac
 }
 
 shared_captain_dir_safe() {
@@ -324,7 +383,7 @@ copy_shared_captain_file() {
 }
 
 propagate_shared_captain_preferences() {
-  local src_data=$1 dest_data=$2 src dest src_hash dest_hash dest_parent dest_home quarantine reason rc
+  local src_data=$1 dest_data=$2 src dest src_hash dest_hash dest_parent dest_home quarantine reason rc missing
   [ -n "$src_data" ] || return 1
   [ -n "$dest_data" ] || return 1
   src="$src_data/$FM_SHARED_CAPTAIN_FILE"
@@ -340,8 +399,9 @@ propagate_shared_captain_preferences() {
       record_inheritable_config_result "$FM_SHARED_CAPTAIN_REL" error "$reason"
       return 1
     fi
-    if ! shared_captain_header_valid "$src"; then
+    if ! missing=$(shared_captain_header_valid "$src"); then
       reason="primary source header missing required main-authoritative warning"
+      [ -z "$missing" ] || reason="$reason: missing \"$missing\""
       warn_inheritable_config_error "$FM_SHARED_CAPTAIN_REL" "$src" "$reason"
       record_inheritable_config_result "$FM_SHARED_CAPTAIN_REL" error "$reason"
       return 1
@@ -452,9 +512,10 @@ propagate_secondmate_inheritance() {
 }
 
 propagate_inheritable_config() {
-  local src_config=$1 dest_config=$2 item src dest source_present reason rc
+  local src_config=$1 dest_config=$2 item src dest source_present reason rc dest_home
   [ -n "$src_config" ] || return 1
   [ -n "$dest_config" ] || return 1
+  dest_home=$(fm_config_inherit_dest_home "$dest_config" 2>/dev/null || true)
   rc=0
   for item in $FM_INHERITABLE_CONFIG; do
     case "$item" in
@@ -462,6 +523,12 @@ propagate_inheritable_config() {
     esac
     if [ "${FM_CONFIG_INHERIT_LIVE:-0}" = 1 ] && fm_config_inherit_item_session_scoped "$item"; then
       record_inheritable_config_result "$item" unchanged "session-scoped"
+      continue
+    fi
+    if [ -n "$dest_home" ] && fm_config_inherit_item_opted_out "$dest_home" "$item"; then
+      reason=$(inheritable_config_optout_reason)
+      warn_inheritable_config_skip "$item" "$dest_config" "$reason"
+      record_inheritable_config_result "$item" skipped "$reason"
       continue
     fi
     src="$src_config/$item"
