@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Durable ownership of the authority under which a task's merge was accepted.
 #
-# The away-posture record (state/.afk-contract) and the task's recorded yolo
-# posture are resolved only at the merge gate. After a forge accepts the merge,
-# bin/fm-pr-merge.sh persists that answer as:
+# The away-posture record (state/.afk-contract) is resolved only at the merge
+# gate. After a forge accepts the merge, bin/fm-pr-merge.sh persists that answer
+# as:
 #   state/<task-id>.merge-authority
 #   fm-merge-authority-v1
 #   <provider>
 #   <host>
 #   <path>
 #   <number>
-#   <authority>                 yolo | away-grant | attended
+#   <authority>                 away | attended
+# While the away-posture record exists every merge runs under away authority
+# (the record's presence is the whole mechanical fact; which merge the captain's
+# away words meant is the supervision session's reading); without it the merge
+# is attended. The retired values yolo and away-grant are still accepted when an
+# existing record is read, so a merge persisted before the words model landed is
+# still consumed, but they are never written again.
 # The identity comes from the merge run's immutable canonical URL parse;
 # persistence revalidates the task's current pr= metadata under its metadata
 # and lifecycle locks and refuses a mismatch. The file is atomically published,
@@ -30,7 +36,7 @@
 # A captain hold is the standing authority's revocation, owned here rather than
 # duplicated at each merge gate. fm_merge_authority_resolve reads it first, so a
 # held task resolves to captain-hold (or hold-unreadable when the hold cannot be
-# read) whatever its recorded yolo posture or away grants say, and
+# read) whatever the away-posture record says, and
 # bin/fm-pr-merge.sh and bin/fm-merge-local.sh share one predicate for it. The
 # hold's own record lives in the backlog and is owned by bin/fm-captain-hold.sh.
 #
@@ -63,14 +69,14 @@ fm_merge_authority_captain_hold() {  # <home> <state> <task-id>
 
 fm_merge_authority_resolve() {  # <home> <state> <meta> <task-id>
   local home=${1-} state=${2-} meta=${3-} id=${4-}
-  local yolo='' grants grant hold_status=0
+  local hold_status=0
   FM_MERGE_AUTHORITY=
   FM_MERGE_AUTHORITY_REASON='invalid'
   [ -n "$home" ] && [ -n "$state" ] && [ -n "$meta" ] && [ -n "$id" ] || return 1
 
   # A captain hold revokes the standing authority first, before the away
-  # posture is even consulted, so a held task can never resolve to yolo or
-  # away-grant and a recorded hold cannot disagree with the merge path.
+  # posture is even consulted, so a held task can never resolve to away
+  # authority and a recorded hold cannot disagree with the merge path.
   fm_merge_authority_captain_hold "$home" "$state" "$id" || hold_status=$?
   case "$hold_status" in
     0)
@@ -94,30 +100,10 @@ fm_merge_authority_resolve() {  # <home> <state> <meta> <task-id>
     FM_MERGE_AUTHORITY_REASON='record-unreadable'
     return 1
   fi
-  if [ -f "$meta" ]; then
-    yolo=$(grep '^yolo=' "$meta" | tail -1 | cut -d= -f2- || true)
-  fi
-  if [ "$yolo" = on ]; then
-    FM_MERGE_AUTHORITY='yolo'
-    FM_MERGE_AUTHORITY_REASON='granted'
-    return 0
-  fi
-  grants=$(FM_HOME="$home" FM_STATE_OVERRIDE="$state" \
-    "$_FM_MERGE_AUTHORITY_LIB_DIR/fm-afk-contract.sh" grants 2>/dev/null) || {
-    FM_MERGE_AUTHORITY_REASON='grants-unreadable'
-    return 1
-  }
-  while IFS= read -r grant; do
-    [ "$grant" = "$id" ] || continue
-    FM_MERGE_AUTHORITY='away-grant'
-    FM_MERGE_AUTHORITY_REASON='granted'
-    return 0
-  done <<EOF
-$grants
-EOF
+  FM_MERGE_AUTHORITY='away'
   # shellcheck disable=SC2034 # Public results consumed by sourcing callers.
-  FM_MERGE_AUTHORITY_REASON='not-granted'
-  return 1
+  FM_MERGE_AUTHORITY_REASON='away'
+  return 0
 }
 
 fm_merge_authority_record_matches() {  # <record> <device> <provider> <host> <path> <number>
@@ -136,7 +122,7 @@ fm_merge_authority_record_matches() {  # <record> <device> <provider> <host> <pa
     return 1
   fi
   exec 8<&-
-  case "$authority" in yolo|away-grant|attended) ;; *) return 1 ;; esac
+  case "$authority" in away|attended|yolo|away-grant) ;; *) return 1 ;; esac
   [ "$version" = fm-merge-authority-v1 ] \
     && [ "$provider" = "$expected_provider" ] \
     && [ "$host" = "$expected_host" ] \
@@ -149,7 +135,7 @@ fm_merge_authority_persist() {  # <state> <task-id> <meta> <provider> <host> <pa
   local state=$1 id=$2 meta=$3 provider=$4 host=$5 path=$6 number=$7 authority=$8
   local record tmp='' state_device lock status=0
   fm_pr_task_id_valid "$id" || return 1
-  case "$authority" in yolo|away-grant|attended) ;; *) return 1 ;; esac
+  case "$authority" in away|attended) ;; *) return 1 ;; esac
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   state_device=$(fm_pr_file_device "$state") || return 1
   fm_pr_metadata_identity_parse "$meta" || return 1
