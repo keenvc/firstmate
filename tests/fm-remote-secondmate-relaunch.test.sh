@@ -169,9 +169,14 @@ pass "a local secondmate is refused by the remote relaunch tool"
 # other key appearing after pr= as invalid, so this wrapper must not append
 # its harness=/model=/effort= lines after that identity block.
 reset_meta
+# fm-pr-check.sh refuses a kind=secondmate record, so the fixture is armed as a
+# ship record and its kind is restored in place; pr= stays the last identity line.
+sed -i.bak 's/^kind=secondmate$/kind=ship/' "$HOME_DIR/state/ios.meta"
 PATH="$HOME_DIR/fakebin:$PATH" FM_HOME="$HOME_DIR" FM_GUARD_GRACE=999999 \
   "$ROOT/bin/fm-pr-check.sh" ios https://github.com/example/repo/pull/1 >/dev/null 2>&1 \
   || fail "could not arm the PR poll fixture for the relaunch-ordering test"
+sed -i.bak 's/^kind=ship$/kind=secondmate/' "$HOME_DIR/state/ios.meta"
+rm -f "$HOME_DIR/state/ios.meta.bak"
 fm_pr_poll_artifacts_valid "$HOME_DIR/state" ios "$ROOT/bin/fm-pr-poll.sh" \
   || fail "PR poll fixture did not authenticate before the relaunch"
 OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
