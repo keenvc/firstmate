@@ -77,6 +77,11 @@ FM_INHERITABLE_CONFIG="${FM_INHERITABLE_CONFIG:-crew-dispatch.json crew-harness 
 # already frozen for its current session (bin/fm-trace-context-lib.sh).
 FM_SESSION_SCOPED_INHERITABLE_CONFIG="trace-context"
 
+# Local gitignored file in a secondmate home listing declared inheritable config
+# items that home keeps under its own control. Primary propagation skips those
+# items, reports them as skipped, and never sends a config-reread for them.
+FM_CONFIG_INHERIT_OPTOUT_REL="inherit-optout"
+
 # True when <item> is session-scoped in the sense above.
 fm_config_inherit_item_session_scoped() {  # <item>
   local item=$1 candidate
@@ -208,6 +213,54 @@ record_inheritable_config_result() {
 
 inheritable_config_skip_reason() {
   printf '%s' "destination does not allow inherited item (not gitignored or guard failed)"
+}
+
+inheritable_config_optout_reason() {
+  printf '%s' "destination home opted out of this inherited item"
+}
+
+# True when <item> names a declared inheritable config path segment.
+fm_config_inherit_item_name_valid() {
+  local candidate=$1 item
+  case "$candidate" in
+    ''|/*|.|..|../*|*/../*|*/..) return 1 ;;
+  esac
+  for item in $FM_INHERITABLE_CONFIG; do
+    [ "$item" = "$candidate" ] && return 0
+  done
+  return 1
+}
+
+# Resolve the secondmate home directory from its config/ path.
+fm_config_inherit_dest_home() {
+  local dest_config=$1
+  case "$dest_config" in
+    */config)
+      printf '%s\n' "${dest_config%/config}"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# True when dest_home/config/inherit-optout lists <item> (bare config item name).
+fm_config_inherit_item_opted_out() {
+  local dest_home=$1 item=$2 path line trimmed
+  [ -n "$dest_home" ] && [ -n "$item" ] || return 1
+  path="$dest_home/config/$FM_CONFIG_INHERIT_OPTOUT_REL"
+  [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    trimmed=${line%%#*}
+    trimmed=${trimmed#"${trimmed%%[![:space:]]*}"}
+    trimmed=${trimmed%"${trimmed##*[![:space:]]}"}
+    [ -n "$trimmed" ] || continue
+    fm_config_inherit_item_name_valid "$trimmed" || continue
+    [ "$trimmed" = "$item" ] && return 0
+  done < "$path"
+  return 1
 }
 
 warn_inheritable_config_skip() {
@@ -459,9 +512,10 @@ propagate_secondmate_inheritance() {
 }
 
 propagate_inheritable_config() {
-  local src_config=$1 dest_config=$2 item src dest source_present reason rc
+  local src_config=$1 dest_config=$2 item src dest source_present reason rc dest_home
   [ -n "$src_config" ] || return 1
   [ -n "$dest_config" ] || return 1
+  dest_home=$(fm_config_inherit_dest_home "$dest_config" 2>/dev/null || true)
   rc=0
   for item in $FM_INHERITABLE_CONFIG; do
     case "$item" in
@@ -469,6 +523,12 @@ propagate_inheritable_config() {
     esac
     if [ "${FM_CONFIG_INHERIT_LIVE:-0}" = 1 ] && fm_config_inherit_item_session_scoped "$item"; then
       record_inheritable_config_result "$item" unchanged "session-scoped"
+      continue
+    fi
+    if [ -n "$dest_home" ] && fm_config_inherit_item_opted_out "$dest_home" "$item"; then
+      reason=$(inheritable_config_optout_reason)
+      warn_inheritable_config_skip "$item" "$dest_config" "$reason"
+      record_inheritable_config_result "$item" skipped "$reason"
       continue
     fi
     src="$src_config/$item"

@@ -148,6 +148,7 @@ Inherited harness and runtime-backend defaults must not harden `fm-spawn` to rej
 The [worker launch environment contract](../../../docs/configuration.md#worker-launch-environment-configlaunch-env-allowlist) separately governs explicit environment grants.
 For already-live secondmates, use `bin/fm-config-push.sh` to push a mid-session inherited local-material change without running the tracked-file fast-forward.
 It uses the same live-home discovery and propagation helper as bootstrap, reports each item as `pushed`, `unchanged`, `skipped`, or `error`, and follows the config-reread contract above for changed or pending generations.
+A secondmate home that must keep its own copy of one declared inheritable config item lists that bare item name in gitignored `config/inherit-optout`; propagation skips and reports that item for that home only and never treats the skip as convergence or sends a config-reread for it.
 `bin/fm-home-seed.sh` refuses to copy a missing or placeholder charter.
 
 Direct seed without a preexisting brief requires `FM_SECONDMATE_CHARTER`.

@@ -1321,6 +1321,9 @@ It uses the same live secondmate discovery and propagation helper as bootstrap; 
 - The locked bootstrap inheritance pass uses the same placement-specific behavior; see `secondmate-provisioning` for the single contract owner.
 - That live discovery starts from `state/*.meta` records with `kind=secondmate`; `data/secondmates.md` only backfills `home=` for older or incomplete meta records.
 - Skipped items, such as a destination checkout that does not yet gitignore the item, are visible warnings but not hard failures.
+- A secondmate home may list declared inheritable config item names, one per line, in gitignored `config/inherit-optout` (blank lines and `#` comments allowed).
+  Propagation skips those items for that home only, reports them as `skipped`, leaves the home's bytes untouched, and never includes them in a config-reread instruction.
+  Other homes keep converging on the primary for that item.
 
 ## Watched tool updates (config/watched-tools.json)
 
