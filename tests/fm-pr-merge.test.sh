@@ -3748,10 +3748,10 @@ test_yolo_does_not_override_a_captain_hold() {
 }
 
 # The recorded authority must agree with the hold everywhere it is read, not
-# only at the merge command. Under an away posture a held yolo=on task resolves
-# to no authority at all, while an identical unheld task beside it still
-# resolves to the yolo posture the record grants.
-test_held_authority_is_not_resolved_as_yolo() {
+# only at the merge command. Under an away posture a held task resolves to no
+# authority at all, while an identical unheld task beside it still resolves to
+# the away authority the record's presence grants.
+test_held_authority_is_not_resolved_as_away() {
   local case_dir out
   case_dir=$(make_case held-authority-not-yolo)
   printf '\npr=https://github.com/example/repo/pull/72\n' >> "$case_dir/state/task-x1.meta"
@@ -3775,15 +3775,15 @@ test_held_authority_is_not_resolved_as_yolo() {
     "$ROOT/bin/fm-fleet-snapshot.sh" --contribution-input 2>/dev/null) \
     || fail "held-authority: the contribution view could not be built"
 
-  printf '%s' "$out" | jq -e '[.tasks[] | select(.id=="task-x1")][0].merge_authority != "yolo"' >/dev/null \
-    || fail "held-authority: a held task still resolved to the yolo merge authority"
-  printf '%s' "$out" | jq -e '[.tasks[] | select(.id=="task-x2")][0].merge_authority == "yolo"' >/dev/null \
-    || fail "held-authority: an unheld task beside the held one lost its own yolo resolution"
+  printf '%s' "$out" | jq -e '[.tasks[] | select(.id=="task-x1")][0].merge_authority != "away"' >/dev/null \
+    || fail "held-authority: a held task still resolved to the away merge authority"
+  printf '%s' "$out" | jq -e '[.tasks[] | select(.id=="task-x2")][0].merge_authority == "away"' >/dev/null \
+    || fail "held-authority: an unheld task beside the held one lost its own away resolution"
   pass "a captain hold is the authority's revocation, not a bypassed flag"
 }
 
 test_yolo_does_not_override_a_captain_hold
-test_held_authority_is_not_resolved_as_yolo
+test_held_authority_is_not_resolved_as_away
 
 test_required_check_that_never_reported_refuses
 test_required_checks_reported_and_green_merge
