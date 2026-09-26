@@ -554,8 +554,10 @@ test_reused_pool_slot_refuses_before_touching_the_other_task() {
   [ "$rc" -ne 0 ] || fail "teardown returned a pool slot a secondmate home record still holds"
   assert_present "$dir/worktree/sentinel" "teardown reset a pool slot a secondmate home record still holds"
   assert_present "$dir/home/state/$other.meta" "teardown removed the secondmate record"
-  [ ! -s "$dir/runtime.log" ] \
-    || fail "teardown reached the runtime on a slot held by a secondmate home: $(cat "$dir/runtime.log")"
+  # The duplicate-slot reconciliation may read endpoint state (tmux list-windows)
+  # to tell a stale record from a live owner; only a runtime change is a breach.
+  ! grep -qv '^tmux <list-windows> ' "$dir/runtime.log" \
+    || fail "teardown changed the runtime on a slot held by a secondmate home: $(cat "$dir/runtime.log")"
 
   # A second task record that is a hardlink of this one is still a second
   # claim on the slot, not this record reached through another spelling.
@@ -605,8 +607,10 @@ test_cross_home_pool_slot_collision_refuses() {
   assert_present "$dir/home/state/$id.meta" "cross-home collision removed stale metadata"
   assert_present "$second_home/state/$other.meta" "cross-home collision removed live metadata"
   assert_present "$dir/worktree/sentinel" "cross-home collision reset the shared slot"
-  [ ! -s "$dir/runtime.log" ] \
-    || fail "cross-home collision reached the runtime: $(cat "$dir/runtime.log")"
+  # The duplicate-slot reconciliation may read endpoint state (tmux list-windows)
+  # to tell a stale record from a live owner; only a runtime change is a breach.
+  ! grep -qv '^tmux <list-windows> ' "$dir/runtime.log" \
+    || fail "cross-home collision changed the runtime: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "$other" \
     "cross-home refusal should name the task holding the slot"
   pass "fm-teardown: a pool slot held by another firstmate home is never returned"
