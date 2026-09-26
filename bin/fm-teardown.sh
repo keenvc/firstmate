@@ -63,6 +63,10 @@
 # up a merged PR whose head branch matches the worktree's branch, fetching its head
 # via refs/pull/<n>/head when the branch itself was deleted. So a missing pr= never
 # by itself causes a false refusal of landed work.
+# When the task record already carries a merge-poll merge notification for that
+# pr=, or a no-mistakes pr_head= for the same URL, teardown treats the PR as
+# merged without a live forge read and proves landing from the default-branch
+# content check and, for a recorded pr_head=, from containment in that object.
 # A gh lookup error falls back to the content check; if that is also inconclusive,
 # teardown refuses rather than risk discarding unlanded work.
 # Uncommitted changes are never landed.
@@ -87,6 +91,13 @@
 # this home or any locally registered Firstmate home may name the same live path
 # in its worktree= or home=. One live path with two task records is the reuse
 # collision itself, whichever record is stale.
+# When the scan finds another task record naming the same live slot, teardown
+# does not always refuse: a finished task whose endpoint is confidently gone
+# while the other record is still live, the slot claim names that other task, or
+# the slot checkout and newer record belong to the other task, retires only this
+# task's record and skips every slot step, exactly like a reassigned slot. When
+# both records could still be live, or the evidence does not pick a single owner,
+# the refusal stays.
 # That scan alone cannot prove THIS record is the current owner, because the task
 # that took the slot next may leave no record it can reach - its own worker may
 # have exited and its record been cleaned up, or it may live in a home this
@@ -1575,8 +1586,45 @@ content_in_default() {
 # current local work is contained in the PR head, OR the content is already in the
 # default branch (fallback, which also covers the no-PR and gh-error paths). False
 # only for genuinely unlanded work.
+teardown_pr_recorded_merge_notified() {
+  [ -n "$PR_URL" ] || return 1
+  fm_pr_url_parse "$PR_URL" || return 1
+  fm_pr_poll_merge_already_notified "$STATE" "$ID" \
+    "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER"
+}
+
+teardown_pr_recorded_forge_head() {
+  case "$MODE" in
+    no-mistakes|'') ;;
+    *) return 1 ;;
+  esac
+  local recorded_pr recorded_head
+  recorded_pr=$(fm_meta_get "$META" pr)
+  recorded_head=$(fm_meta_get "$META" pr_head)
+  [ -n "$recorded_pr" ] && [ "$recorded_pr" = "$PR_URL" ] \
+    && fm_pr_head_valid "$recorded_head"
+}
+
+teardown_recorded_pr_proves_landed() {
+  local branch=$1 pr_head current
+  if teardown_pr_recorded_merge_notified || teardown_pr_recorded_forge_head; then
+    content_in_default && return 0
+    if teardown_pr_recorded_forge_head; then
+      pr_head=$(fm_meta_get "$META" pr_head)
+      current=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) || return 1
+      if git -C "$WT" merge-base --is-ancestor "$current" "$pr_head" 2>/dev/null; then
+        return 0
+      fi
+      unpushed_patches_are_in_pr_head "$pr_head" && return 0
+    fi
+    return 1
+  fi
+  return 1
+}
+
 work_is_landed() {
   local branch=$1
+  teardown_recorded_pr_proves_landed "$branch" && return 0
   pr_is_merged "$branch" && return 0
   content_in_default
 }
@@ -2290,6 +2338,11 @@ teardown_live_slot_path() {
   canonical_existing_dir "$WT"
 }
 
+TEARDOWN_SLOT_REASSIGNED_RC=3
+TEARDOWN_SLOT_REASSIGNED=0
+TEARDOWN_SLOT_REASSIGNED_TO=
+TEARDOWN_SLOT_REASSIGNED_HOME=
+
 collect_local_firstmate_states() {
   local record_state=$1 root home reg line child known existing i=0
   local -a homes
@@ -2336,9 +2389,75 @@ collect_local_firstmate_states() {
   done
 }
 
+teardown_meta_agent_state() {  # <meta> <id>
+  local meta=$1 id=$2
+  if ! fm_backend_validate_task_endpoint "$meta" "$id" 2>/dev/null; then
+    printf 'missing'
+    return 0
+  fi
+  fm_backend_agent_state "$FM_BACKEND_VALIDATED_BACKEND" "$FM_BACKEND_VALIDATED_TARGET"
+}
+
+teardown_slot_checkout_branch() {  # <slot>
+  git -C "$slot" symbolic-ref -q --short HEAD 2>/dev/null || true
+}
+
+# When <record_id> is tearing down and <peer_meta> names the same slot, return 0
+# only when evidence shows the slot belongs to <peer_id> and this record is stale.
+teardown_duplicate_slot_peer_owns_slot() {  # <record_meta> <record_id> <peer_meta> <peer_id> <slot>
+  local record_meta=$1 record_id=$2 peer_meta=$3 peer_id=$4 slot=$5
+  local record_state peer_state slot_branch record_branch peer_branch peer_home
+
+  fm_treehouse_slot_owner_state "$slot" "$record_id"
+  case "$FM_TREEHOUSE_SLOT_OWNER" in
+    other)
+      [ "$FM_TREEHOUSE_SLOT_OWNER_ID" = "$peer_id" ] || return 1
+      TEARDOWN_SLOT_REASSIGNED_TO=$peer_id
+      TEARDOWN_SLOT_REASSIGNED_HOME=$FM_TREEHOUSE_SLOT_OWNER_HOME
+      return 0
+      ;;
+    unsafe) return 1 ;;
+  esac
+
+  record_state=$(teardown_meta_agent_state "$record_meta" "$record_id")
+  case "$record_state" in
+    dead|missing) ;;
+    *) return 1 ;;
+  esac
+
+  peer_state=$(teardown_meta_agent_state "$peer_meta" "$peer_id")
+  case "$peer_state" in
+    alive) ;;
+    *) return 1 ;;
+  esac
+
+  slot_branch=$(teardown_slot_checkout_branch "$slot")
+  record_branch=$(fm_meta_get "$record_meta" branch)
+  peer_branch=$(fm_meta_get "$peer_meta" branch)
+  if [ -n "$slot_branch" ] && [ -n "$peer_branch" ] \
+    && [ "$slot_branch" = "$peer_branch" ]; then
+    if [ -z "$record_branch" ] || [ "$record_branch" != "$peer_branch" ]; then
+      TEARDOWN_SLOT_REASSIGNED_TO=$peer_id
+      peer_home=$(fm_meta_get "$peer_meta" home)
+      TEARDOWN_SLOT_REASSIGNED_HOME=$peer_home
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+teardown_mark_slot_reassigned_to_peer() {
+  local record_id=$1 peer_id=$2 slot=$3 peer_home=$4
+  echo "warning: task $record_id's recorded worktree $slot is also named by task $peer_id's record, but the slot checkout, slot claim, and live endpoints show $peer_id owns that pool slot now; $record_id's own cleanup runs and the slot is left untouched." >&2
+  TEARDOWN_SLOT_REASSIGNED=1
+  TEARDOWN_SLOT_REASSIGNED_TO=$peer_id
+  TEARDOWN_SLOT_REASSIGNED_HOME=$peer_home
+}
+
 require_exclusive_worktree_slot_record() {
   local record_meta=$1 record_id=$2 record_state=$3 worktree=$4
-  local slot state_dir other other_id field other_path other_slot
+  local slot state_dir other other_id field other_path other_slot peer_home
   slot=$(canonical_existing_dir "$worktree") || return 0
   collect_local_firstmate_states "$record_state" || return 1
   for state_dir in "${TREEHOUSE_OWNER_STATES[@]}"; do
@@ -2355,6 +2474,12 @@ require_exclusive_worktree_slot_record() {
         [ -n "$other_path" ] || continue
         other_slot=$(canonical_existing_dir "$other_path") || continue
         [ "$other_slot" = "$slot" ] || continue
+        if teardown_duplicate_slot_peer_owns_slot \
+          "$record_meta" "$record_id" "$other" "$other_id" "$slot"; then
+          peer_home=$TEARDOWN_SLOT_REASSIGNED_HOME
+          teardown_mark_slot_reassigned_to_peer "$record_id" "$other_id" "$slot" "$peer_home"
+          return "$TEARDOWN_SLOT_REASSIGNED_RC"
+        fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
         echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
@@ -2365,9 +2490,14 @@ require_exclusive_worktree_slot_record() {
 }
 
 require_exclusive_task_worktree_slot() {
-  local slot
+  local slot rc=0
   slot=$(teardown_live_slot_path) || return 0
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot"
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    "$TEARDOWN_SLOT_REASSIGNED_RC") return 0 ;;
+    *) return "$rc" ;;
+  esac
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
@@ -2393,7 +2523,6 @@ require_exclusive_task_worktree_slot() {
 # existed, or already returned to the pool, carries none, and refusing those
 # would strand every task in flight across the change for no evidence at all.
 # Those keep exactly the record-scan protection they had before.
-TEARDOWN_SLOT_REASSIGNED_RC=3
 require_owned_worktree_slot_record() {  # <task-id> <worktree>
   local record_id=$1 worktree=$2 marker
   fm_treehouse_slot_owner_state "$worktree" "$record_id"
@@ -2413,9 +2542,6 @@ require_owned_worktree_slot_record() {  # <task-id> <worktree>
 # The one ownership determination for this task's recorded slot. Every later
 # step that would read or touch $WT consults teardown_owns_worktree, so a
 # reassigned slot is skipped consistently rather than by each step's own guess.
-TEARDOWN_SLOT_REASSIGNED=0
-TEARDOWN_SLOT_REASSIGNED_TO=
-TEARDOWN_SLOT_REASSIGNED_HOME=
 require_owned_task_worktree_slot() {
   local slot rc=0
   slot=$(teardown_live_slot_path) || return 0
@@ -2956,7 +3082,12 @@ preflight_descendant_treehouse_slots() {
       continue
     fi
     fm_backend_validate_task_endpoint "$meta" "$task_id" || return 1
-    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
+    owner_rc=0
+    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || owner_rc=$?
+    case "$owner_rc" in
+      0|"$TEARDOWN_SLOT_REASSIGNED_RC") ;;
+      *) return 1 ;;
+    esac
     owner_rc=0
     require_owned_worktree_slot_record "$task_id" "$worktree" || owner_rc=$?
     case "$owner_rc" in
