@@ -822,6 +822,50 @@ test_no_mistakes_truly_unpushed_refuses() {
   pass "no-mistakes worktree with genuinely unlanded work is refused (safety preserved)"
 }
 
+write_merge_marker() {  # <state> <id> <provider> <host> <path> <number>
+  printf '%s\n' fm-pr-poll-merge-notified-v1 "$3" "$4" "$5" "$6" > "$1/$2.pr-poll-merge-notified"
+  chmod 600 "$1/$2.pr-poll-merge-notified"
+}
+
+test_squash_merged_recorded_merge_notified_allows_when_gh_unreachable() {
+  local case_dir rc
+  case_dir=$(make_case squash-merge-notified-offline)
+  write_meta "$case_dir" direct-PR ship
+  wt_commit_file "$case_dir" feature.txt hello "add feature"
+  land_on_origin_main "$case_dir" feature.txt hello
+  append_pr_meta_url "$case_dir"
+  write_merge_marker "$case_dir/state" task-x1 github github.com example/repo 7
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "merge-notified-offline: teardown should succeed without gh"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "merge-notified-offline: teardown printed a REFUSED line"
+  pass "recorded merge notification satisfies landed work when gh is unreachable"
+}
+
+test_squash_merged_recorded_merge_notified_unlanded_content_refuses() {
+  local case_dir rc local_head
+  case_dir=$(make_case squash-merge-notified-unlanded)
+  write_meta "$case_dir" direct-PR ship
+  wt_commit_file "$case_dir" feature.txt hello "add feature"
+  local_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  append_pr_meta_url "$case_dir"
+  write_merge_marker "$case_dir/state" task-x1 github github.com example/repo 7
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "merge-notified-unlanded: teardown should refuse genuinely unlanded work"
+  grep -q REFUSED "$case_dir/stderr" || fail "merge-notified-unlanded: no REFUSED line in stderr"
+  assert_refusal_retained_task_state "$case_dir" merge-notified-unlanded "$local_head"
+  pass "recorded merge notification still refuses when the local content never landed"
+}
+
 test_squash_merged_branch_deleted_allows() {
   local case_dir rc pr_head
   case_dir=$(make_case squash-merged)
@@ -4319,6 +4363,8 @@ test_herdr_projection_teardown_retains_journal_when_close_unconfirmed
 test_herdr_projection_teardown_surfaces_restore_failure_without_blocking_cleanup
 test_herdr_projection_teardown_removes_a_workspace_left_by_the_task_pane_close
 test_herdr_projection_teardown_retains_records_when_its_workspace_survives
+test_squash_merged_recorded_merge_notified_allows_when_gh_unreachable
+test_squash_merged_recorded_merge_notified_unlanded_content_refuses
 test_squash_merged_branch_deleted_allows
 test_squash_merged_pr_allows_when_head_ancestor_of_pr_head
 test_no_pr_recorded_discovers_merged_pr_by_branch_allows

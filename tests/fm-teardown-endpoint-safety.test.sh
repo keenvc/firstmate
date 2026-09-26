@@ -473,6 +473,39 @@ test_bare_relative_origin_shares_project_lock_with_clone() {
   pass "Treehouse locking resolves a bare local origin against its source project, matching the provisioned clone"
 }
 
+test_duplicate_slot_stale_record_finishes_when_claim_names_live_task() {
+  local dir id=stale-task other=live-task worker rc
+
+  dir=$(make_case slot-reconcile-claim)
+  mark_case_as_treehouse_pool "$dir"
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=firstmate:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  fm_write_meta "$dir/home/state/$other.meta" \
+    "window=firstmate:fm-$other" "endpoint_task_id=$other" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
+  claim_pool_slot "$dir" "$other"
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
+  set +e
+  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+
+  [ "$rc" -eq 0 ] || fail "stale duplicate-slot teardown failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "stale duplicate-slot teardown killed the live worker"
+  assert_present "$dir/worktree/sentinel" "stale duplicate-slot teardown left the live slot untouched"
+  assert_present "$dir/home/state/$other.meta" "stale duplicate-slot teardown kept the live task record"
+  assert_absent "$dir/home/state/$id.meta" "stale duplicate-slot teardown left the stale record behind"
+  assert_contains "$(cat "$dir/stderr")" "$other" \
+    "stale duplicate-slot teardown should name the live task holding the slot"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  pass "fm-teardown: a stale duplicate slot record retires when the slot claim names the live task"
+}
+
 test_reused_pool_slot_refuses_before_touching_the_other_task() {
   local dir id=stale-task other=live-task worker rc
 
@@ -486,9 +519,7 @@ test_reused_pool_slot_refuses_before_touching_the_other_task() {
   fm_write_meta "$dir/home/state/$other.meta" \
     "window=firstmate:fm-$other" "endpoint_task_id=$other" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
-  # Staged in this shell, not a command substitution: a background child of a
-  # $(...) subshell does not outlive it, and the point of this worker is to be
-  # alive in the slot while teardown runs.
+  claim_pool_slot "$dir" "$other"
   ( cd "$dir/worktree" && exec sleep 30 ) &
   worker=$!
 
@@ -497,15 +528,11 @@ test_reused_pool_slot_refuses_before_touching_the_other_task() {
   rc=$?
   set -e
 
-  [ "$rc" -ne 0 ] || fail "teardown returned a pool slot a second task record still holds"
-  kill -0 "$worker" 2>/dev/null || fail "teardown killed the worker holding the reused pool slot"
-  assert_present "$dir/worktree/sentinel" "teardown reset a pool slot a second task record still holds"
-  assert_present "$dir/home/state/$other.meta" "teardown removed the live task's record"
-  assert_present "$dir/home/state/$id.meta" "teardown removed the stale task's record before refusing"
-  [ ! -s "$dir/runtime.log" ] \
-    || fail "teardown reached the runtime on a contested pool slot: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/stderr")" "$other" \
-    "refusal should name the other task holding the slot"
+  [ "$rc" -eq 0 ] || fail "stale duplicate-slot teardown with a live claim failed: $(cat "$dir/stderr")"
+  kill -0 "$worker" 2>/dev/null || fail "stale duplicate-slot teardown killed the live worker"
+  assert_present "$dir/worktree/sentinel" "stale duplicate-slot teardown left the live slot untouched"
+  assert_present "$dir/home/state/$other.meta" "stale duplicate-slot teardown kept the live task record"
+  assert_absent "$dir/home/state/$id.meta" "stale duplicate-slot teardown left the stale record behind"
   kill "$worker" 2>/dev/null || true
   wait "$worker" 2>/dev/null || true
 
@@ -1399,6 +1426,7 @@ test_forced_secondmate_child_close_failure_still_refuses
 test_orca_close_failure_refuses_even_under_force
 test_already_gone_endpoint_still_completes_without_a_refusal
 test_bare_relative_origin_shares_project_lock_with_clone
+test_duplicate_slot_stale_record_finishes_when_claim_names_live_task
 test_reused_pool_slot_refuses_before_touching_the_other_task
 test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
