@@ -85,7 +85,7 @@ A relaunch also carries one session reference: the endpoint runtime's own bound 
    When the recorded endpoint is proven gone rather than merely idle or unreachable - which only Herdr can establish - the launch owner creates one fresh endpoint in that same worktree and the republished record rebinds the task to it - see [Reclaiming a task whose endpoint is gone](#reclaiming-a-task-whose-endpoint-is-gone).
 6. **Preserve runtime-bound status authority where supported.**
    The endpoint's runtime may bind pane status to one session identity; the launch owner preserves it only when that runtime records a reference the replacement adapter can consume.
-   Whenever the endpoint's runtime reports no readable session - every non-Herdr backend, and a Herdr pane whose registration is gone, unreadable, or foreign - a pi/pi-signed replacement instead resumes the task's recorded `pi_session_id`; every other case launches the ordinary fresh session.
+   Whenever the endpoint's runtime reports no readable session - every non-Herdr backend, and a Herdr pane whose registration is gone, unreadable, or foreign - a pi/pi-signed ship or scout replacement instead resumes the task's recorded `pi_session_id`, provided the resolved executable advertises `--session-id`; a secondmate, an unprobed flag, and every other case launch the ordinary fresh session.
    This reference is a launch input, never authority to send, close, or act on the pane.
    [`docs/herdr-backend.md`](herdr-backend.md#agent-status-authority-and-relaunch) owns the mechanism and measured behavior.
 

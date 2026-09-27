@@ -1710,7 +1710,6 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: --relaunch needs an existing task record; no $RELAUNCH_META" >&2
     exit 1
   fi
-  RELAUNCH_PI_SESSION_ID=$(fm_meta_get "$RELAUNCH_META" pi_session_id)
   fm_backlog_record_present "$RELAUNCH_META" "task record" "$STATE" || {
     echo "error: --relaunch refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
@@ -1807,6 +1806,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
       exit 1
     fi
   fi
+  RELAUNCH_PI_SESSION_ID=$(fm_meta_get "$RELAUNCH_META" pi_session_id)
   RELAUNCH_WT=$(fm_meta_get "$RELAUNCH_META" worktree)
   [ -n "$RELAUNCH_WT" ] && [ -d "$RELAUNCH_WT" ] || {
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
@@ -4984,17 +4984,16 @@ preserve_relaunch_meta() {
   # The deterministic Pi session id (pi_session_args owns the launch side).
   # Owned by the relaunch recompute like every key above it: a harness switch
   # away from Pi drops it, and a switch back to Pi re-derives it from the task
-  # id, so a stale id can never survive the harness that owned it. When the
-  # version probe is inconclusive this launch selects no session, but a session
-  # the PREVIOUS incarnation recorded still holds the conversation and stays
-  # resumable on a later supporting-Pi relaunch, so that id is carried forward
-  # rather than erased; with no prior id there is nothing to name.
+  # id, so a stale id can never survive the harness that owned it. The id is
+  # always the task id, so republishing it is what both a probed launch and a
+  # prior incarnation's session name; an inconclusive probe launches fresh but
+  # keeps a session the previous incarnation recorded, since that one still
+  # holds the conversation and stays resumable on a later supporting-Pi
+  # relaunch. With neither, there is nothing to name.
   case "$HARNESS:$KIND" in
   pi:ship | pi:scout | pi-signed:ship | pi-signed:scout)
-    if [ -n "${PI_SESSION_FLAG:-}" ]; then
+    if [ -n "${PI_SESSION_FLAG:-}" ] || [ -n "$RELAUNCH_PI_SESSION_ID" ]; then
       echo "pi_session_id=$ID"
-    elif [ -n "$RELAUNCH_PI_SESSION_ID" ]; then
-      echo "pi_session_id=$RELAUNCH_PI_SESSION_ID"
     fi
     ;;
   esac
