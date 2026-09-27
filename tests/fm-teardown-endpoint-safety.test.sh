@@ -1261,6 +1261,72 @@ test_shared_slot_retire_leaves_the_work_refusals_to_the_return() {
   pass "fm-teardown: retiring a record leaves the unlanded-work refusals to the slot's return"
 }
 
+# A scout record on the case's pool slot, complete enough for an unforced
+# teardown: the report is a scout's work product and its captain-call
+# inventory is already reviewed, so only the slot checks remain.
+write_shared_slot_scout_meta() {  # <case> <id> [session]
+  local dir=$1 id=$2 session=${3:-firstmate}
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=$session:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout" \
+    "mode=local-only" "decisions_reviewed=1"
+  mkdir -p "$dir/home/data/$id"
+  printf 'scout report\n' > "$dir/home/data/$id/report.md"
+}
+
+test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks() {
+  local dir
+
+  # A pool slot handed on from a scout to a ship: the ship retires first, so
+  # the scout is left as the slot's last record with the ship's uncommitted
+  # work in the copy. A scout's scratch carve-out must not discard it.
+  dir=$(make_shared_slot_case shared-scout-last)
+  write_shared_slot_scout_meta "$dir" scout-task
+  write_shared_slot_ship_meta "$dir" ship-task
+  claim_pool_slot "$dir" ship-task
+  : > "$dir/worktree/sentinel"
+  run_unforced_case "$dir" ship-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring the claiming record beside a scout failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/ship-task.meta" "the retired record was left behind"
+  assert_present "$dir/home/state/scout-task.meta" "retiring one record removed the scout"
+  : > "$dir/runtime.log"
+  assert_shared_slot_refused "$dir" scout-task "a scout left as a shared slot's last record"
+  assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
+    "the scout last record should refuse on the work it inherited"
+  assert_present "$dir/worktree/sentinel" \
+    "the scout last record discarded the work left in the shared slot"
+
+  # Unlanded commits in the inherited copy are held by the same boundary.
+  dir=$(make_shared_slot_case shared-scout-last-unlanded)
+  write_shared_slot_scout_meta "$dir" scout-task
+  write_shared_slot_ship_meta "$dir" ship-task
+  claim_pool_slot "$dir" ship-task
+  git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
+    commit --allow-empty -qm unlanded
+  run_unforced_case "$dir" ship-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring the claiming record beside a scout failed: $(cat "$dir/stderr")"
+  : > "$dir/runtime.log"
+  assert_shared_slot_refused "$dir" scout-task "a scout left with unlanded work in its slot"
+  assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
+    "the scout last record should refuse on the landed-work check"
+  assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
+    "the scout last record discarded the unlanded commit left in the shared slot"
+
+  # The ordinary scout path is unchanged: a slot whose claim still names this
+  # scout holds nothing but its own scratch, which is declared discardable.
+  dir=$(make_shared_slot_case scout-own-claimed-slot)
+  write_shared_slot_scout_meta "$dir" scout-task
+  claim_pool_slot "$dir" scout-task
+  : > "$dir/worktree/sentinel"
+  run_unforced_case "$dir" scout-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of a scout holding its own slot claim failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/scout-task.meta" "the scout record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "a scout holding its own claim did not return its slot: $(cat "$dir/runtime.log")"
+
+  pass "fm-teardown: a scout left as a shared slot's last record refuses on the work it inherited"
+}
+
 write_windowless_ship_meta() {  # <case> <id>
   local dir=$1 id=$2
   fm_write_meta "$dir/home/state/$id.meta" \
@@ -1796,6 +1862,7 @@ test_shared_slot_with_a_live_record_still_refuses
 test_shared_slot_of_finished_records_retires_until_the_last
 test_shared_slot_retire_leaves_the_work_refusals_to_the_return
 test_shared_slot_of_windowless_records_retires_in_any_order
+test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks
 test_shared_slot_with_an_undeterminable_record_refuses
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts

@@ -73,6 +73,12 @@
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
 # unresolved-decision completion gate verifies its captain-held inventory.
+# The carve-out covers a scout's own scratch, so it holds only while the copy is
+# provably still this record's: a Treehouse pool slot is handed on when a worker
+# exits without returning it, and the copy then holds the next task's work. The
+# slot claim is that proof, and an unclaimed slot has none, so a scout whose
+# recorded slot no longer carries its own claim runs the ordinary
+# uncommitted-changes and landed-work refusals like any other kind.
 # Before destructive cleanup, teardown validates task check artifacts as
 # ordinary single-link files on the state device. It refuses and preserves
 # task state when that proof fails; otherwise it removes the task's check,
@@ -145,8 +151,10 @@
 # itself - its processes, copy, branch, and pool lease - is neither inspected
 # nor touched. It is left for the last record naming it, whose teardown runs
 # the uncommitted-changes and landed-work checks on that copy before returning
-# it through the ordinary path, so those refusals guard the reset that would
-# actually discard work rather than every co-claimant's retirement.
+# it through the ordinary path - a scout last record included, since retiring
+# its co-claimants leaves the slot unclaimed and the scratch carve-out above
+# holds only on this record's own claim - so those refusals guard the reset that
+# would actually discard work rather than every co-claimant's retirement.
 # These refusals are not relaxed by --force, and --force never takes that
 # retire path: --force authorizes discarding THIS task's unlanded work, never
 # another task's live work. Nothing of this task's own is removed by a refusal;
@@ -1867,13 +1875,29 @@ teardown_treehouse_return() {
   return 1
 }
 
+# Is this record's copy provably nothing but its own scout scratch? That is the
+# one ground on which the refusals below are skipped by kind, so both the
+# pre-return check and the post-lock re-check ask it here rather than testing
+# kind themselves. A pool slot is handed on when a worker exits without
+# returning it, and the task that took it next may leave no record behind (its
+# own may have been retired off this very slot), so only the slot's own claim
+# proves the copy is still this scout's. An unclaimed slot proves nothing and
+# gets the ordinary refusals; a worktree that is no pool slot at all was never
+# handed on and keeps the carve-out.
+teardown_copy_is_scout_scratch() {
+  local slot
+  [ "$KIND" = scout ] || return 1
+  slot=$(teardown_live_slot_path) || return 0
+  fm_treehouse_slot_owner_state "$slot" "$ID"
+  [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ]
+}
+
 validate_worktree_teardown_safety() {
   local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
-  case "$KIND" in
-    secondmate|scout) return 0 ;;
-  esac
+  [ "$KIND" != secondmate ] || return 0
+  ! teardown_copy_is_scout_scratch || return 0
 
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
@@ -3683,7 +3707,8 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # the project. teardown_treehouse_return tolerates transient and stale git locks
   # left by a killed crew process; see the script header for retry and stale-lock proof.
   post_lock_cleanup_check=
-  if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
+  if [ "$FORCE" != "--force" ] && [ "$KIND" != secondmate ] \
+     && ! teardown_copy_is_scout_scratch; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
