@@ -9,6 +9,7 @@ Verified on 2026-07-27 with Pi and Pi-signed 0.82.0 unless a fact gives another 
 |---|---|
 | Busy state | The Firstmate-owned extension's `agent_start` marks busy and `agent_settled`, confirmed by `ctx.isIdle()`, marks idle; this covers retries, compaction, tool loops, and queued continuations. |
 | Exit command | `/quit`. |
+| Resume | `--session <path-or-id>` resumes that exact session, and creates it at that path when the file is gone. `--session-id <id>` uses an exact project session id, creating it if missing - verified live on this host's installed Pi: a session written under `--session-id <id>` is resumed by a later process with the same id and cwd, prior turns recalled verbatim. Every `../../../bin/fm-spawn.sh` ship or scout launch passes `--session-id <task-id>` and records it as `pi_session_id=` in `state/<id>.meta`, so the session identity is deterministic and a relaunch resumes the same conversation. On a relaunch a Herdr pane's already-bound status authority still wins when it reports a readable Pi session (`../../../bin/fm-control-lib.sh`'s `fm_control_relaunch_resume_flag`; `../../../docs/herdr-backend.md` "Agent status authority and relaunch"), and the recorded id is the fallback when it reports nothing. There is still no `resume` control verb. |
 | Interrupt | Single Escape. |
 | Skill invocation | No separate verified form beyond normal command behavior; use natural language when the exact command is uncertain. |
 | Model flag | `--model <model>`. |

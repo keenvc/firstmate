@@ -30,7 +30,8 @@
 #   secondmate's charter.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>]
 #   --relaunch launches a replacement agent for an EXISTING task into that
-#   task's own recorded endpoint and worktree instead of creating either. It is
+#   task's own recorded worktree, reusing its recorded endpoint when that
+#   endpoint still exists, instead of creating either from scratch. It is
 #   the launch half of the control plane (bin/fm-control.sh relaunch), which
 #   owns the checkpoint, the progress note, stopping the previous agent, and the
 #   transaction; call fm-control rather than this flag directly unless you are
@@ -42,7 +43,20 @@
 #   ordinary relaunch. It refuses unless the recorded endpoint is positively
 #   agent-free on a backend with a recovery-grade agent-state classifier (tmux
 #   or herdr), and clears the previous harness's per-task wiring before arming
-#   the new incarnation. The replacement still never starts outside the copy
+#   the new incarnation. Two verdicts are agent-free: a `dead` endpoint is
+#   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
+#   worktree and the republished record rebinds the task to it. That proof is
+#   its own step, because a backend's `missing` also covers an endpoint that is
+#   merely unreachable from here - and it is only available on HERDR, which must
+#   still read the recorded pane as gone once that session's server is running
+#   again. A tmux `missing` always refuses: a task record carries no socket
+#   identity for its endpoint, so no read here can tell a destroyed window from
+#   one on a tmux server this process cannot address. An endpoint that turns out
+#   to have survived refuses too. The worktree is reused untouched either way; a
+#   rebind is a recovery, never a teardown. Only a crewmate or scout rebinds: a
+#   secondmate whose endpoint is gone is respawned by its own owner
+#   (`--secondmate`, driven by the session-start liveness sweep).
+#   The replacement still never starts outside the copy
 #   holding the work: a Herdr shell that has drifted out of the recorded
 #   worktree is told once to return, and only a shell that will not go refuses.
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
@@ -300,6 +314,15 @@
 #     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
+#     __PISESSION__ Pi-family session selection, with its own leading space and
+#                  empty for secondmates and every other harness. A fresh ship
+#                  or scout passes `--session-id <task-id>` so every
+#                  incarnation of the task runs the same persistent Pi session,
+#                  recorded as pi_session_id= in state/<id>.meta. A relaunch
+#                  resumes that recorded id - or, when the endpoint's runtime
+#                  still binds a session of its own, the reference that runtime
+#                  reports (pi_session_args below owns the order;
+#                  relaunch_resume_args owns the runtime read).
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi turn-end extension,
@@ -1656,6 +1679,14 @@ RAW_LAUNCH=0
 # refuses here exactly as it refuses there.
 RELAUNCH_PRIOR_HARNESS=
 RELAUNCH_PRIOR_CLAUDE_CONFIG_DIR=
+# 1 when the recorded endpoint is authoritatively gone and this relaunch must
+# create a fresh one for the task rather than adopt its recorded address.
+RELAUNCH_REBIND=0
+# The Pi session id the task's PRIOR record carries, captured before this
+# relaunch republishes the record (which re-derives the field from the task
+# id): the fallback must resume what the PREVIOUS incarnation ran, and a
+# record from before the field existed must stay a fresh session.
+RELAUNCH_PI_SESSION_ID=
 if [ "$RELAUNCH" -eq 1 ]; then
   [ "${#POS[@]}" -eq 1 ] || {
     echo "error: --relaunch takes the task id only; its project or home comes from the task's own record" >&2
@@ -1666,6 +1697,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: --relaunch needs an existing task record; no $RELAUNCH_META" >&2
     exit 1
   fi
+  RELAUNCH_PI_SESSION_ID=$(fm_meta_get "$RELAUNCH_META" pi_session_id)
   fm_backlog_record_present "$RELAUNCH_META" "task record" "$STATE" || {
     echo "error: --relaunch refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
@@ -1689,15 +1721,70 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: backend '$BACKEND' has no recovery-grade agent-state classifier, so a relaunch cannot prove the previous agent exited; refusing rather than risking two agents in one endpoint" >&2
     exit 1
   }
+  # Two states are agent-free, and both license a relaunch:
+  #   dead    - the endpoint exists and confidently holds no agent. The
+  #             endpoint is ADOPTED, so the task keeps its exact address.
+  #   missing - the endpoint itself is gone. There is no endpoint AND therefore
+  #             no agent, so a relaunch cannot adopt it: it CREATES a fresh
+  #             endpoint in the recorded worktree and the published record
+  #             rebinds to it.
+  # `missing` is NOT one state, and that is what the duplicate-agent argument
+  # turns on. fm_backend_agent_state's per-backend `missing` conflates "the
+  # endpoint was DESTROYED" with "the endpoint is UNREACHABLE from here right
+  # now", and an unreachable endpoint can still hold the live agent this
+  # relaunch would duplicate. So absence is PROVEN before it may rebind, never
+  # inferred from a failed read - and only HERDR can prove it:
+  #   herdr - the recorded session's server is started, and the recorded pane is
+  #           RE-READ through that session's own socket. `dead` means the pane
+  #           survived the restart and is adopted after all; `alive` means the
+  #           agent came back and refuses; only a second `missing` proves the
+  #           pane itself did not survive.
+  #   tmux  - REFUSES, always. A task record carries no socket identity for its
+  #           endpoint, and a server-wide inventory describes only the server
+  #           this process addresses, so no read available here can tell "gone"
+  #           from "on a server I cannot see". A tmux `missing` therefore stays
+  #           as deadlocked as it was before this change - deliberately, and
+  #           with the reason stated rather than guessed past.
+  # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
+  # and refuses as it always did (bin/fm-backend.sh's fm_backend_agent_state
+  # owns that vocabulary). The proof itself lives in one place for the whole
+  # control plane - fm_control_endpoint_absence_verdict - so `exit` and
+  # `relaunch` cannot reach two different answers about one endpoint.
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
-  [ "$RELAUNCH_STATE" = dead ] || {
-    echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
-    exit 1
-  }
+  if [ "$RELAUNCH_STATE" = missing ]; then
+    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET")
+    case "${RELAUNCH_ABSENCE%%$'\t'*}" in
+      gone) RELAUNCH_STATE=missing ;;
+      dead) RELAUNCH_STATE=dead ;;
+      alive) RELAUNCH_STATE=alive ;;
+      *)
+        echo "error: task $ID's recorded endpoint $RELAUNCH_TARGET reads 'missing', but ${RELAUNCH_ABSENCE#*$'\t'}. An endpoint that cannot be proven absent may still hold a live agent on this task's worktree; refusing rather than launching a second agent into it" >&2
+        exit 1
+        ;;
+    esac
+  fi
+  case "$RELAUNCH_STATE" in
+    dead) ;;
+    missing) RELAUNCH_REBIND=1 ;;
+    *)
+      echo "error: task $ID's endpoint reads '$RELAUNCH_STATE'; a relaunch requires a positively agent-free endpoint (stop the agent first with bin/fm-control.sh $ID exit)" >&2
+      exit 1
+      ;;
+  esac
   RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
   RELAUNCH_PRIOR_CLAUDE_CONFIG_DIR=$(fm_meta_get "$RELAUNCH_META" claude_config_dir)
   KIND=$(fm_meta_get "$RELAUNCH_META" kind)
   [ -n "$KIND" ] || KIND=ship
+  # A secondmate whose endpoint is gone already has ONE owner for that
+  # recovery: the session-start liveness sweep respawns it with
+  # `fm-spawn.sh <id> --secondmate`, which stands its home's own workspace back
+  # up (bin/fm-bootstrap.sh; the secondmate-provisioning skill). Rebinding one
+  # here as well would be a second path to the same outcome, so this refuses
+  # and names the one that owns it.
+  if [ "$RELAUNCH_REBIND" -eq 1 ] && [ "$KIND" = secondmate ]; then
+    echo "error: secondmate $ID's recorded endpoint is gone; its recovery is owned by the secondmate respawn path, not by relaunch (run bin/fm-spawn.sh $ID --secondmate, or let the session-start liveness sweep do it)" >&2
+    exit 1
+  fi
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
   YOLO=$(fm_meta_get "$RELAUNCH_META" yolo)
   RELAUNCH_WT=$(fm_meta_get "$RELAUNCH_META" worktree)
@@ -1716,6 +1803,12 @@ if [ "$RELAUNCH" -eq 1 ]; then
     }
   fi
   if [ "$BACKEND" = herdr ]; then
+    # fm-spawn uses HERDR_PANE_ID for the TASK's pane, while the herdr adapter
+    # reads that SAME name as the pane THIS process is itself running in
+    # (fm_backend_herdr_launcher_identity). The record is about to overwrite it,
+    # so keep what herdr actually injected: a rebind still has to prove its own
+    # launcher identity, and a task's recorded pane is not it.
+    RELAUNCH_LAUNCHER_PANE_ID=${HERDR_PANE_ID:-}
     HERDR_SES=$(fm_meta_get "$RELAUNCH_META" herdr_session)
     HERDR_WORKSPACE_ID=$(fm_meta_get "$RELAUNCH_META" herdr_workspace_id)
     HERDR_TAB_ID=$(fm_meta_get "$RELAUNCH_META" herdr_tab_id)
@@ -1776,12 +1869,16 @@ resolve_pi_executable() {
 }
 
 # Pi's CLI surface is version-dependent, so probe the resolved executable's help
-# before composing the optional regular-TUI flag. An absent or inconclusive probe
+# before composing any version-dependent flag. An absent or inconclusive probe
 # omits the flag so older Pi versions can still spawn.
-pi_supports_tui_mode() {
+pi_supports_flag() {  # <executable> <flag>
   local executable=$1 help
   help=$("$executable" --help 2>&1) || return 1
-  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--tui-mode([[:space:]=]|$)'
+  printf '%s\n' "$help" | grep -Eq -- "(^|[[:space:]])$2([[:space:]=]|$)"
+}
+
+pi_supports_tui_mode() {
+  pi_supports_flag "$1" --tui-mode
 }
 
 # omp pre-launch model validation. `omp models --json` (omp 18.1.11) prints
@@ -1956,7 +2053,7 @@ launch_template() {
     ;;
   opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
-    printf '%s' '__PIBIN____PITUIMODE__'
+    printf '%s' '__PIBIN____PITUIMODE____PISESSION__'
     if [ "$kind" = secondmate ]; then
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
@@ -2242,6 +2339,8 @@ pi | pi-signed)
     PI_TUI_MODE=' --tui-mode regular'
   fi
   LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
+  PI_SESSION_FLAG=--session-id
+  pi_supports_flag "$PI_BIN" --session-id || PI_SESSION_FLAG=
   LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
   ;;
 cursor)
@@ -2553,6 +2652,109 @@ muse_worker_meta_api_key_present() {
 muse_credential_present() {
   local auth=$1
   [ -s "$auth" ] || muse_worker_meta_api_key_present
+}
+
+# relaunch_resume_args: the launch arguments that keep a RELAUNCH bound to the
+# agent session this endpoint's runtime already reports, so the runtime's own
+# status authority survives the replacement.
+#
+# Why this exists, and why it is relaunch-only: some runtimes bind a pane's
+# agent status to one session identity and ignore reports carrying another (the
+# defect fixed 2026-09-21 for Herdr-backed Pi workers - docs/herdr-backend.md
+# "Agent status authority and relaunch"). A fresh replacement session is
+# exactly such a report, so the pane freezes at the previous agent's last
+# reported state. Passing the SAME session back to the replacement keeps that
+# identity, and the authority with it; no fresh spawn needs this because nothing
+# is bound yet.
+#
+# The reference is read from the endpoint's own runtime record, never guessed
+# from what looks recent, and only for an adapter with a verified resume form
+# whose own agent label reported it
+# (bin/fm-control-lib.sh's fm_control_relaunch_resume_flag owns both rules, and
+# bin/backends/herdr.sh's fm_backend_herdr_pane_agent_session_ref owns the
+# read). Every other combination prints nothing, so the launch stays exactly
+# what it was before this existed: a fresh session.
+#
+# Prints the arguments with the single leading space that appends them to the
+# launch line, so an empty result leaves every other launch byte-identical.
+#
+# Only the Herdr backend is asked: it is the one adapter whose runtime records a
+# per-pane agent session, and on every other backend the pane carries no such
+# identity for a replacement to preserve. An unreadable registration - no
+# agent, a stale one, a malformed reference - degrades to that same
+# fresh-session launch rather than refusing, because nothing here is a safety
+# property; it preserves a display and supervision signal.
+relaunch_resume_args() {  # <harness> <backend> <target>
+  local harness=${1-} backend=${2-} target=${3-} identity agent ref flag
+  [ "$backend" = herdr ] || return 0
+  [ -n "$target" ] || return 0
+  fm_backend_herdr_parse_target "$target" || return 0
+  identity=$(fm_backend_herdr_pane_agent_session_ref "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE") || return 0
+  agent=${identity%%$'\t'*}
+  ref=${identity#*$'\t'}
+  flag=$(fm_control_relaunch_resume_flag "$harness" "$agent") || return 0
+  [ -n "$flag" ] && [ -n "$ref" ] || return 0
+  printf -- ' %s %s' "$flag" "$(shell_quote "$ref")"
+}
+
+# pi_session_args: the Pi-family launch arguments that select the task's own
+# persistent session, so a closed lane's replacement continues the same
+# conversation instead of re-reading its task from scratch.
+#
+# A fresh ship or scout spawn passes `--session-id <task-id>`: an exact
+# project session id, created when missing (confirmed against `pi --help`,
+# and version-probed below like `--tui-mode`), so the session identity is a
+# deterministic function of the task id and is recorded as pi_session_id= in
+# the task record. A relaunch of a ship or scout resumes the id the task's
+# PRIOR record carries (captured by the caller before this relaunch
+# republishes that record), with one precedence rule ahead of it: when the
+# endpoint's runtime still binds a session of its own, the reference that
+# runtime reports wins (relaunch_resume_args below), because that bound
+# identity is the one the runtime applies status reports for, and for a Pi
+# session resumed from the recorded id the two name the same session anyway.
+# The runtime-reported reference is #5161's own behavior and is gated on the
+# adapter pair alone, so a pi/pi-signed secondmate relaunch keeps it too; the
+# DETERMINISTIC id is the crewmate/scout contract, and a secondmate (whose
+# home owns its session lifecycle), any other harness, and a relaunch of a
+# task with no recorded id and no runtime-bound reference keep today's fresh
+# session exactly as they were.
+#
+# <session-flag> is the probed flag name: empty when the executable's own
+# help does not advertise --session-id, which degrades an older Pi to the
+# fresh-session launch exactly as the --tui-mode probe does.
+#
+# Prints the arguments with the single leading space that appends them to the
+# launch line, so an empty result leaves every other launch byte-identical.
+# A malformed recorded id is treated as absent rather than passed through:
+# a task id is [A-Za-z0-9._-] only, so anything else cannot be one this
+# script recorded.
+pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <recorded-id> <session-flag>
+  local resume
+  case "$1" in
+  pi | pi-signed) ;;
+  *) return 0 ;;
+  esac
+  [ -n "$8" ] || return 0
+  if [ "$4" = 1 ]; then
+    resume=$(relaunch_resume_args "$1" "$5" "$6") || resume=
+    [ -n "$resume" ] && {
+      printf '%s' "$resume"
+      return 0
+    }
+    case "$2:$7" in
+    ship:* | scout:*) ;;
+    *) return 0 ;;
+    esac
+    case "$7" in
+    '' | *[!A-Za-z0-9._-]*) return 0 ;;
+    esac
+    printf -- ' %s %s' "$8" "$(shell_quote "$7")"
+    return 0
+  fi
+  case "$2" in
+  ship | scout) printf -- ' %s %s' "$8" "$(shell_quote "$3")" ;;
+  esac
+  return 0
 }
 
 model_flag_for_harness() {
@@ -3374,16 +3576,92 @@ fi
 
 W="fm-$ID"
 if [ "$RELAUNCH" -eq 1 ]; then
-  # Adopt the recorded endpoint instead of creating one. This is what keeps a
-  # relaunch a REPLACEMENT rather than a second copy of the task: no new
-  # terminal, no second worktree, and every uncommitted change left exactly
-  # where the previous agent left it.
-  T=$RELAUNCH_TARGET
   # A secondmate's home already resolved WT above through the same validation a
   # fresh secondmate spawn uses; every other kind takes the recorded worktree.
+  # Either way the worktree is REUSED, never re-created: its branch, commits and
+  # uncommitted changes are exactly as the previous agent left them, and nothing
+  # below may touch them.
   [ "$KIND" = secondmate ] || WT=$RELAUNCH_WT
-  WT_TARGET=$T
-  SES=${T%%:*}
+  if [ "$RELAUNCH_REBIND" -eq 0 ]; then
+    # Adopt the recorded endpoint instead of creating one. This is what keeps a
+    # relaunch a REPLACEMENT rather than a second copy of the task: no new
+    # terminal, no second worktree, and every uncommitted change left exactly
+    # where the previous agent left it.
+    T=$RELAUNCH_TARGET
+    WT_TARGET=$T
+    SES=${T%%:*}
+  else
+    # The recorded endpoint is authoritatively gone, so there is nothing to
+    # adopt: create ONE fresh endpoint for the same task, opened directly in the
+    # recorded worktree. The record published below writes window= (and herdr's
+    # ids) from these values, which is the whole rebind - the task id, brief,
+    # worktree, armed poll and status log are untouched.
+    #
+    # Herdr is the ONLY backend that reaches here: the gate above rebinds only
+    # on a PROVEN-gone endpoint, and absence is provable only on herdr, whose
+    # every read is scoped to the session the record names
+    # (fm_control_endpoint_absence_verdict owns that argument). tmux and every
+    # secondmate were already refused, so there is no dispatch left to make.
+    #
+    # This deliberately uses the FLAT container shape rather than Herdr's
+    # presentation projection: projection is a presentation-only layout that is
+    # never endpoint or ownership authority, and flat is already the documented
+    # fallback for every recovery it cannot bind exactly
+    # (docs/herdr-backend.md "Presentation spaces").
+    #
+    # KNOWN LIMITATION (bead fm-herdr-rebind-leak-20260913): the tab minted
+    # below is registered with no abort cleanup, so a later refusal leaves that
+    # pane behind and a retry mints another. Documented in
+    # docs/agent-control.md rather than fixed here, because the remedy is
+    # machinery the ordinary flat spawn path does not have either.
+    #
+    # Re-create the tab under the RECORDED herdr session. Without the explicit
+    # session the container would resolve from the AMBIENT one
+    # (${HERDR_SESSION:-default}), so reclaiming a task recorded on a named
+    # session from a seat that is not in it would silently relocate the task
+    # onto another herdr server - an identity change, published as a
+    # self-consistent but wrong record.
+    HERDR_REBIND_SES=${RELAUNCH_TARGET%%:*}
+    HERDR_CONTAINER_RAW=$(HERDR_PANE_ID="$RELAUNCH_LAUNCHER_PANE_ID" \
+      fm_backend_herdr_container_ensure "$PROJ_ABS" launcher-home "$HERDR_REBIND_SES") || {
+      # container_ensure returns 1 for several unrelated reasons - a failed
+      # version check, a server that will not start, an ambiguous workspace
+      # label, a cross-session launcher identity, a failed workspace create -
+      # and each already printed its own accurate message. Add only what this
+      # layer actually knows, and name the session mismatch solely when there
+      # IS one, rather than asserting a cause this condition cannot establish.
+      #
+      # A seat with NO herdr pane never reaches the cross-session guard at all:
+      # fm_backend_herdr_launcher_identity returns 2 for it and the placement
+      # falls back to the recorded session's labeled container, which is what
+      # makes a plain ssh or cron reclaim work. Its ambient session still reads
+      # `default` (fm_backend_herdr_session's fallback), so the inequality alone
+      # would fire for EVERY named-session task reclaimed from a plain shell and
+      # send the operator chasing a session mismatch that was never the cause.
+      HERDR_AMBIENT_SES=$(fm_backend_herdr_session)
+      if [ -n "$RELAUNCH_LAUNCHER_PANE_ID" ] && [ "$HERDR_AMBIENT_SES" != "$HERDR_REBIND_SES" ]; then
+        echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; this seat is running in herdr session '$HERDR_AMBIENT_SES', and a reclaim never moves a task to another session" >&2
+      else
+        echo "error: task $ID's endpoint could not be re-created in its recorded herdr session '$HERDR_REBIND_SES'; see the refusal above for what failed" >&2
+      fi
+      exit 1
+    }
+    CONTAINER=${HERDR_CONTAINER_RAW%%$'\t'*}
+    HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
+    HERDR_SES=${CONTAINER%%:*}
+    HERDR_WORKSPACE_ID=${CONTAINER#*:}
+    HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$WT" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+    read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
+$HERDR_TASK_IDS
+EOF
+    if [ -z "$HERDR_TAB_ID" ] || [ -z "$HERDR_PANE_ID" ]; then
+      echo "error: herdr did not return a tab/pane id for $W" >&2
+      exit 1
+    fi
+    T="$HERDR_SES:$HERDR_PANE_ID"
+    SES=$HERDR_SES
+    WT_TARGET=$T
+  fi
 else
   case "$BACKEND" in
   tmux)
@@ -4756,7 +5034,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx claude_config_dir", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort pi_session_id busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx claude_config_dir", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4769,6 +5047,15 @@ preserve_relaunch_meta() {
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
+  # The deterministic Pi session id (pi_session_args owns the launch side).
+  # Owned by the relaunch recompute like every key above it: a harness switch
+  # away from Pi drops it, and a switch back to Pi re-derives it from the task
+  # id, so a stale id can never survive the harness that owned it. Gated on
+  # the same version probe as the launch flag, so the record never names a
+  # session the launch could not have selected.
+  case "$HARNESS:$KIND:${PI_SESSION_FLAG:-}" in
+  pi:ship:--session-id | pi:scout:--session-id | pi-signed:ship:--session-id | pi-signed:scout:--session-id) echo "pi_session_id=$ID" ;;
+  esac
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
   echo "tasktmp=$TASK_TMP"
@@ -4946,6 +5233,16 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
+# Pi session continuity. A fresh ship or scout passes its task id as Pi's
+# own `--session-id`, so every incarnation of the task runs the same
+# persistent session, recorded as pi_session_id= in the task record; a
+# relaunch resumes it (or the endpoint runtime's still-bound reference,
+# which pi_session_args prefers). Computed here, where the adopted endpoint
+# (T) is known, and substituted only into the Pi-family template's
+# `__PISESSION__` placeholder; an empty value leaves every other launch
+# byte-identical.
+PI_SESSION_ARGS=$(pi_session_args "$HARNESS" "$KIND" "$ID" "$RELAUNCH" "$BACKEND" "$T" "${RELAUNCH_PI_SESSION_ID:-}" "${PI_SESSION_FLAG:-}") || PI_SESSION_ARGS=
+LAUNCH=${LAUNCH//__PISESSION__/$PI_SESSION_ARGS}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$HARNESS" = rovo ]; then
   ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {

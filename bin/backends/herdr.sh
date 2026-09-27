@@ -2037,10 +2037,19 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> [<launcher-relationship
 # function allowed to prune it (fm_backend_herdr_workspace_prune_seeded_default_tab).
 # <launcher-relationship> is passed straight through to
 # fm_backend_herdr_workspace_ensure, which owns its meaning.
-fm_backend_herdr_container_ensure() {  # <cwd-for-a-fresh-workspace> [<launcher-relationship>]
-  local cwd=${1:-$PWD} relationship=${2:-launcher-home} session label status
+#
+# <session> is optional and DEFAULTS to fm_backend_herdr_session, so every
+# ordinary spawn keeps resolving the ambient session exactly as before. A
+# RECOVERY passes the session its record already names, because a task must not
+# be relocated onto whatever server the recovering seat happens to sit on. It is
+# threaded as a parameter rather than by shadowing HERDR_SESSION on purpose:
+# fm_backend_herdr_launcher_identity compares the launcher's own ambient session
+# against this one, and shadowing would make that half of its cross-session
+# guard compare the pinned value with itself and pass vacuously.
+fm_backend_herdr_container_ensure() {  # <cwd-for-a-fresh-workspace> [<launcher-relationship>] [<session>]
+  local cwd=${1:-$PWD} relationship=${2:-launcher-home} session=${3:-} label status
   fm_backend_herdr_version_check || return 1
-  session=$(fm_backend_herdr_session)
+  [ -n "$session" ] || session=$(fm_backend_herdr_session)
   fm_backend_herdr_server_ensure "$session" || return 1
   fm_backend_herdr_workspace_ensure "$session" "$cwd" "$relationship" >/dev/null && status=0 || status=$?
   # A 3 already reported the exact placement it refused to guess at; adding the
@@ -2338,6 +2347,56 @@ fm_backend_herdr_pane_agent_state() {  # <session> <pane_id>
   esac
 }
 
+# fm_backend_herdr_pane_agent_session_ref: the agent session reference the
+# named pane's Herdr registration currently holds, printed as
+# "<agent-label>\t<session-ref>", or nothing (nonzero) when the pane has no
+# readable registration or the reference is not one a harness can be resumed on.
+#
+# Why a caller wants this: Herdr gives a pane ONE status authority, and for Pi
+# with its integration installed that authority is the lifecycle hooks, so
+# Herdr also skips screen detection for the pane (docs/herdr-backend.md
+# "Agent status authority and relaunch"). The registration survives its agent
+# process in the crew shape (a nested worktree shell under the pane's top
+# shell), and Herdr then applies only reports carrying the session identity it
+# bound: an agent started fresh in that pane reports a new session and its
+# state reports are ignored, leaving the pane frozen at its pre-relaunch value
+# (measured 2026-09-21: herdr 0.9.1, `pane report-agent-session` and
+# `report-agent` accepted with rc=0 but never applied, and `pane release-agent`
+# ineffective from outside the agent process). Handing the bound reference back
+# to the replacement - Pi's own `--session <path-or-id>` - keeps that identity,
+# and the authority with it.
+#
+# The value is only reported when it has the shape the harness can consume: a
+# `path` reference must be absolute, and an `id` reference must be a bare token.
+# An unreadable, missing, or unrecognized reference prints nothing, so a caller
+# falls back to its ordinary behavior rather than launching on a guess.
+# A tab separates the two fields so a caller splits unambiguously.
+#
+# The registration is read whatever the agent label is - handing a FOREIGN
+# adapter's session reference to this harness would resume another agent's
+# conversation - so the label travels with the reference and the caller decides.
+# A pane whose registration is unreadable is not an error here: it is the
+# ordinary no-session case.
+#
+# Never reads as authority for anything else. This is a read of Herdr's own
+# record; it grants no send, close, or lifecycle authority, and a pane whose
+# registration is stale still has that staleness as its pane state.
+fm_backend_herdr_pane_agent_session_ref() {  # <session> <pane_id>
+  local session=$1 pane_id=$2 out agent kind value
+  [ -n "$session" ] && [ -n "$pane_id" ] || return 1
+  out=$(fm_backend_herdr_cli "$session" agent get "$pane_id" 2>&1) || return 1
+  agent=$(printf '%s' "$out" | jq -r '.result.agent.agent // empty' 2>/dev/null)
+  kind=$(printf '%s' "$out" | jq -r '.result.agent.agent_session.kind // empty' 2>/dev/null)
+  value=$(printf '%s' "$out" | jq -r '.result.agent.agent_session.value // empty' 2>/dev/null)
+  [ -n "$agent" ] || return 1
+  case "$kind" in
+    path) case "$value" in /*) ;; *) return 1 ;; esac ;;
+    id) case "$value" in '' | */* | *[[:space:]]*) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+  printf '%s\t%s' "$agent" "$value"
+}
+
 # fm_backend_herdr_tab_is_husk: true (0) only for the two conservative husk
 # states (dead, no-agent) fm_backend_herdr_pane_agent_state can positively
 # confirm; live, stale-agent, and unknown all refuse (1), so an inconclusive
@@ -2412,6 +2471,32 @@ fm_backend_herdr_agent_state() {  # <target>
       esac
       ;;
   esac
+}
+
+# fm_backend_herdr_endpoint_absence_recheck: re-read <target> with its own
+# session's server running, and print the resulting fm_backend_agent_state
+# verdict. For a recovery that is about to RE-CREATE an endpoint, this is the
+# read that decides whether there is anything to re-create at all.
+#
+# fm_backend_herdr_agent_state maps a positively STOPPED session server to
+# `missing` (issue #4091), which is correct for "no agent is running" but is
+# NOT evidence the endpoint was destroyed: stopping and restarting a named
+# Herdr server preserves workspace, tab, pane, and label ids (docs/herdr-backend.md
+# "Restart and liveness behavior") - only the harness processes and their
+# registrations die. So `missing` there means unreachable right now, and a
+# caller that rebound on it would abandon a pane that was about to come back.
+#
+# Only the RECORDED session's server is ensured, never a workspace or tab, so
+# this creates nothing: a merely-stopped server comes back and the recorded
+# pane classifies `dead` (adoptable), a genuinely destroyed pane still reads
+# `missing`, a returning agent reads `alive`, and a server that will not start
+# is `unreadable` - unreachable, which refuses, rather than absence.
+fm_backend_herdr_endpoint_absence_recheck() {  # <target>
+  local target=$1
+  fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
+  fm_backend_herdr_server_ensure "$FM_BACKEND_HERDR_SESSION" >/dev/null 2>&1 \
+    || { printf 'unreadable'; return 0; }
+  fm_backend_herdr_agent_state "$target"
 }
 
 # Backward-compatible three-state view for callers that only need a yes/no

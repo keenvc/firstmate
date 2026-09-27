@@ -12,9 +12,12 @@
 # verbs addressed to an exact task id, with the per-harness mechanics owned
 # here rather than improvised per harness in agent prose.
 #
-# This file owns three capability tables plus their pure artifact-path tables
-# and nothing else. It has no side effects, runs no backend command, and reads
-# no state, so it can be sourced by a test as a pure contract:
+# This file owns three capability tables plus their pure artifact-path tables,
+# and ONE named exception to that purity - fm_control_endpoint_absence_verdict,
+# the single owner of the per-backend endpoint-absence proof, which does run
+# backend reads. Everything else has no side effects, runs no backend command,
+# and reads no state, so sourcing this file is still free and the tables can be
+# read by a test as a pure contract:
 #
 #   1. Verb allowlist. There is no arbitrary-text and no generic raw-key entry
 #      point on the control plane; a caller either names an allowlisted verb or
@@ -34,13 +37,14 @@
 #      stopped. A verb whose postcondition cannot be proven on the recorded
 #      backend is refused rather than performed blind.
 #
-# `resume` is deliberately NOT a verb. It is not deterministic across the
-# verified adapters: codex and grok resume only from a session id printed at
-# exit, opencode resumes the most recent session for the cwd with --continue,
-# and claude, pi, pi-signed, omp, and kimi have no verified pane-resume contract
-# at all. `relaunch` covers the same need deterministically for every adapter,
-# because the brief on disk - not a harness-private session - is the durable
-# instruction.
+# `resume` is deliberately NOT a verb: it is not deterministic across the
+# verified adapters (docs/agent-control.md owns the per-adapter resume facts).
+# `relaunch` uses the brief on disk rather than a harness-private session as
+# its durable instruction, and for pi/pi-signed it ALSO resumes the task's own
+# recorded Pi session (bin/fm-spawn.sh's pi_session_args composes that from
+# the task record's pi_session_id=, with the relaunch-time exception below
+# ahead of it): a reference the endpoint's runtime bound as its status
+# authority is returned to a replacement with that adapter.
 
 # The complete control-plane verb allowlist, one per line.
 fm_control_verbs() {
@@ -199,6 +203,49 @@ fm_control_exit_command() {  # <harness>
   esac
 }
 
+# The launch argument that makes a RELAUNCH of <harness> RESUME an exact agent
+# session instead of starting a fresh one, printed only when <registered-agent>
+# is the label that session reference belongs to; nothing otherwise.
+#
+# This exists for one runtime failure, not as a general resume feature. Herdr
+# gives a pane one status authority, and for Pi with its installed integration
+# that authority is the lifecycle hooks, which also suppress Herdr's screen
+# detection for the pane. That registration outlives its agent process in the
+# crew shape - a nested worktree shell under the pane's top shell - and Herdr
+# then applies only reports carrying the session identity it bound. A
+# replacement agent started fresh in that same pane reports a NEW session, so
+# its state reports are ignored and the pane stays frozen at whatever the
+# previous agent last reported: a working crewmate reads idle until its task
+# ends (reproduced and fixed live 2026-09-21, herdr 0.9.1; the read that
+# supplies the reference is
+# bin/backends/herdr.sh's fm_backend_herdr_pane_agent_session_ref).
+#
+# So the reference is not chosen from what looks recent - it is the exact
+# identity the endpoint's own runtime recorded, which is why a matched
+# registered-agent label is required: resuming a reference reported by a
+# DIFFERENT agent would inject another agent's conversation into this launch.
+# `pi` is the label Pi and pi-signed both report, so one entry covers both.
+# Every other harness returns nothing and keeps today's fresh-session
+# relaunch, which is what the adapter tables above (and the absence of a
+# verified resume form for those harnesses) require.
+#
+# Prints the flag name only; the caller quotes and appends the reference, since
+# shell quoting belongs to the owner of the launch line (bin/fm-spawn.sh).
+#
+# This table answers only what the ENDPOINT's runtime reports. A task record
+# can also carry a deterministic pi_session_id= for a Pi lane spawned after
+# that field existed; bin/fm-spawn.sh's pi_session_args reads it as the
+# fallback when this table has nothing to return (the common case where the
+# recorded endpoint, and the registration with it, no longer exist).
+fm_control_relaunch_resume_flag() {  # <harness> <registered-agent>
+  case "${1-}" in
+    pi|pi-signed)
+      [ "${2-}" = pi ] && printf -- '--session'
+      ;;
+  esac
+  return 0
+}
+
 # Which named keys a backend adapter can deliver. Every session provider
 # normalizes Enter, Ctrl+C, and the Ctrl+U composer clear; Orca's terminal API
 # exposes only an interrupt and an Enter, so it can deliver neither Escape nor
@@ -226,6 +273,71 @@ fm_control_backend_state_verified() {  # <backend>
     tmux|herdr) return 0 ;;
   esac
   return 1
+}
+
+# fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
+# that an endpoint reading `missing` is actually GONE rather than merely
+# unreachable from this seat. Call it only for a `missing` raw state.
+#
+# Prints "<verdict>\t<reason>" - always exactly one TAB, so a caller splits
+# unambiguously with ${raw%%$'\t'*} and ${raw#*$'\t'}. The reason is empty
+# except on `unproven`, where it is the concrete sentence the caller's refusal
+# message embeds. It is returned on stdout rather than set in a variable
+# because every caller reads this through a command substitution, where an
+# assignment made here could never reach them.
+#
+# The verdicts:
+#   gone     - absence is PROVEN. There is no endpoint and therefore no agent.
+#   dead     - the endpoint is there after all and holds no agent.
+#   alive    - the endpoint is there and an agent is running in it.
+#   unproven - neither could be established; the caller must refuse.
+#
+# fm_backend_agent_state's `missing` conflates "the endpoint was DESTROYED"
+# with "the endpoint is UNREACHABLE from here right now". An unreachable
+# endpoint can still hold a live agent on the task's worktree, so every caller
+# that would act on absence - `exit` claiming the agent stopped, `relaunch`
+# re-creating the endpoint - must come through here rather than trusting the
+# raw verdict.
+#
+# Whether absence is provable AT ALL is a property of the backend, not of the
+# reading:
+#   herdr CAN prove it. Every read goes through fm_backend_herdr_cli, which
+#     passes `--session <session>`, so the recheck starts and reads the session
+#     the RECORD names, through that session's own socket. The answer is about
+#     the task's endpoint and nothing else.
+#   tmux CANNOT. `list-windows -a` describes only the server the CURRENT
+#     process addresses (its TMUX_TMPDIR/socket), and a task's record does not
+#     carry the endpoint's socket identity - so a different but running server
+#     would answer "not anywhere" about a window it was never able to see.
+#     There is no read available here that closes that gap, so tmux always
+#     returns `unproven` and both verbs refuse. tmux is left exactly as
+#     deadlocked as it was before this change - no worse - but deliberately.
+#
+# Both control-plane callers share this one implementation so the proof cannot
+# drift into two answers for the same endpoint.
+fm_control_endpoint_absence_verdict() {  # <backend> <target>
+  local backend=${1-} target=${2-}
+  fm_backend_source "$backend" \
+    || { printf 'unproven\tbackend %s could not be loaded to prove anything about that endpoint' "'$backend'"; return 0; }
+  case "$backend" in
+    tmux)
+      printf 'unproven\ttmux absence cannot be proven from a task record: the record does not carry the endpoint'"'"'s socket identity, and a server-wide window inventory only describes the tmux server this process addresses, so a window absent from it may still be alive on another'
+      ;;
+    herdr)
+      # Start the RECORDED session's server (only the server - nothing is
+      # created) and re-read the recorded pane. A pane that comes back with the
+      # server was never destroyed.
+      case "$(fm_backend_herdr_endpoint_absence_recheck "$target")" in
+        dead) printf 'dead\t' ;;
+        alive) printf 'alive\t' ;;
+        missing) printf 'gone\t' ;;
+        *) printf 'unproven\tthe recorded herdr session'"'"'s server could not be started, or its pane could not be classified once it was running' ;;
+      esac
+      ;;
+    *)
+      printf 'unproven\tbackend %s has no recovery-grade classifier, so absence cannot be proven on it at all' "'$backend'"
+      ;;
+  esac
 }
 
 # The per-task wiring artifacts a harness leaves behind, so a relaunch that
