@@ -4989,8 +4989,14 @@ preserve_relaunch_meta() {
   # the PREVIOUS incarnation recorded still holds the conversation and stays
   # resumable on a later supporting-Pi relaunch, so that id is carried forward
   # rather than erased; with no prior id there is nothing to name.
-  case "$HARNESS:$KIND:${PI_SESSION_FLAG:-}" in
-  pi:ship:--session-id | pi:scout:--session-id | pi-signed:ship:--session-id | pi-signed:scout:--session-id) echo "pi_session_id=$ID" ;;
+  case "$HARNESS:$KIND" in
+  pi:ship | pi:scout | pi-signed:ship | pi-signed:scout)
+    if [ -n "${PI_SESSION_FLAG:-}" ]; then
+      echo "pi_session_id=$ID"
+    elif [ -n "$RELAUNCH_PI_SESSION_ID" ]; then
+      echo "pi_session_id=$RELAUNCH_PI_SESSION_ID"
+    fi
+    ;;
   esac
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
