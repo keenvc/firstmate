@@ -1116,7 +1116,6 @@ test_relaunch_away_from_pi_drops_the_recorded_session_id() {
   dir=$(new_case pi-away pr81)
   add_ship_task "$dir" pr81 pi
   printf 'pi_session_id=pr81\n' >> "$dir/home/state/pr81.meta"
-  printf 'pi' > "$dir/fake/command"
   printf 'zsh' > "$dir/fake/command"
   printf 'codex' > "$dir/fake/becomes"
   printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
@@ -1138,7 +1137,6 @@ test_relaunch_back_to_pi_rederives_the_recorded_session_id() {
   local dir out command
   dir=$(new_case pi-back pr82)
   add_ship_task "$dir" pr82 codex
-  printf 'codex' > "$dir/fake/command"
   printf 'zsh' > "$dir/fake/command"
   printf 'pi' > "$dir/fake/becomes"
   printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"

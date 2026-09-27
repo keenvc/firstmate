@@ -468,6 +468,7 @@ A backend spawn refusal from a missing dependency, version gate, or unauthentica
 ### Task metadata
 
 Task meta records `backend=` only for a non-default backend; an absent `backend=` means `tmux`, preserving existing default-path meta files.
+
 - Every new task records `endpoint_task_id=` as the cleanup binding between the metadata filename and its opaque runtime endpoint.
 
 - A herdr task additionally records `herdr_session=`, `herdr_workspace_id=`, `herdr_tab_id=`, and `herdr_pane_id=`.
@@ -478,6 +479,9 @@ Task meta records `backend=` only for a non-default backend; an absent `backend=
 - A cmux task additionally records `cmux_workspace_id=` and `cmux_surface_id=`.
 
 - A pi/pi-signed ship or scout task additionally records `pi_session_id=`, the deterministic Pi session id `bin/fm-spawn.sh` passes as `--session-id` on every spawn and a relaunch resumes (see [`docs/agent-control.md`](agent-control.md) "Transactional relaunch").
+
+### Task selectors
+
 Task selectors for `fm-peek.sh`, `fm-send.sh`, and `fm-crew-state.sh` resolve centrally through `fm_backend_resolve_selector`.
 A selector containing `:` is passed through as an explicit backend endpoint escape hatch.
 

@@ -1889,16 +1889,13 @@ resolve_pi_executable() {
 }
 
 # Pi's CLI surface is version-dependent, so probe the resolved executable's help
-# before composing any version-dependent flag. An absent or inconclusive probe
-# omits the flag so older Pi versions can still spawn.
-pi_supports_flag() {  # <executable> <flag>
-  local executable=$1 help
-  help=$("$executable" --help 2>&1) || return 1
-  printf '%s\n' "$help" | grep -Eq -- "(^|[[:space:]])$2([[:space:]=]|$)"
-}
-
-pi_supports_tui_mode() {
-  pi_supports_flag "$1" --tui-mode
+# before composing any version-dependent flag. The caller captures that help
+# ONCE and asks this predicate per flag, so every flag on one launch is decided
+# from the same output and the executable is run once. An absent or
+# inconclusive probe leaves the help empty, which omits the flag so older Pi
+# versions can still spawn.
+pi_help_advertises_flag() {  # <help-text> <flag>
+  printf '%s\n' "$1" | grep -Eq -- "(^|[[:space:]])$2([[:space:]=]|$)"
 }
 
 # Same help-probe shape as pi_supports_tui_mode for the session-scoped project
@@ -2325,8 +2322,9 @@ pi | pi-signed)
     echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
     exit 1
   }
+  PI_HELP=$("$PI_BIN" --help 2>&1) || PI_HELP=
   PI_TUI_MODE=
-  if pi_supports_tui_mode "$PI_BIN"; then
+  if pi_help_advertises_flag "$PI_HELP" --tui-mode; then
     PI_TUI_MODE=' --tui-mode regular'
   fi
   LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
@@ -2340,7 +2338,7 @@ pi | pi-signed)
   fi
   LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
   PI_SESSION_FLAG=--session-id
-  pi_supports_flag "$PI_BIN" --session-id || PI_SESSION_FLAG=
+  pi_help_advertises_flag "$PI_HELP" --session-id || PI_SESSION_FLAG=
   LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
   ;;
 cursor)
@@ -2616,7 +2614,10 @@ relaunch_resume_args() {  # <harness> <backend> <target>
 #
 # <session-flag> is the probed flag name: empty when the executable's own
 # help does not advertise --session-id, which degrades an older Pi to the
-# fresh-session launch exactly as the --tui-mode probe does.
+# fresh-session launch exactly as the --tui-mode probe does. It gates the two
+# --session-id emissions only; the runtime-reported reference above them is a
+# different flag on a different contract, so it stays reachable whatever the
+# probe concluded.
 #
 # Prints the arguments with the single leading space that appends them to the
 # launch line, so an empty result leaves every other launch byte-identical.
@@ -2629,15 +2630,15 @@ pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <
   pi | pi-signed) ;;
   *) return 0 ;;
   esac
-  [ -n "$8" ] || return 0
   if [ "$4" = 1 ]; then
     resume=$(relaunch_resume_args "$1" "$5" "$6") || resume=
     [ -n "$resume" ] && {
       printf '%s' "$resume"
       return 0
     }
-    case "$2:$7" in
-    ship:* | scout:*) ;;
+    [ -n "$8" ] || return 0
+    case "$2" in
+    ship | scout) ;;
     *) return 0 ;;
     esac
     case "$7" in
@@ -2646,6 +2647,7 @@ pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <
     printf -- ' %s %s' "$8" "$(shell_quote "$7")"
     return 0
   fi
+  [ -n "$8" ] || return 0
   case "$2" in
   ship | scout) printf -- ' %s %s' "$8" "$(shell_quote "$3")" ;;
   esac
