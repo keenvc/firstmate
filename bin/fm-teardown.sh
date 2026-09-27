@@ -77,11 +77,10 @@
 # Treehouse pool slot passes from task to task, so uncommitted changes in a pool
 # slot's copy cannot be attributed to the record being torn down: teardown names
 # them and refuses rather than discarding them as scratch, and the remedy is to
-# land or move that work, not to force the discard. A slot a record was retired
-# off (see the shared-slot retire path below) carries a trace beside its
-# checkout, which drops the carve-out entirely, so the scout that finally
-# returns that slot runs the landed-work refusals too. A worktree that is no
-# pool slot was never handed on and keeps the whole carve-out.
+# land or move that work, not to force the discard. A copy another record also
+# names drops the carve-out entirely, so the landed-work refusals run on it too.
+# A worktree that is no pool slot was never handed on and keeps the whole
+# carve-out.
 # Before destructive cleanup, teardown validates task check artifacts as
 # ordinary single-link files on the state device. It refuses and preserves
 # task state when that proof fails; otherwise it removes the task's check,
@@ -137,33 +136,27 @@
 # through metadata publication, closing the publication
 # gap; forced secondmate teardown takes it and runs the same checks for every
 # descendant Treehouse slot before touching any child.
-# A slot several finished records still name is shared, not contested, and an
-# unforced teardown retires those records one at a time instead of stranding
-# them all. Every other record naming the slot, and this record itself, must
-# read `dead` or `missing` from bin/fm-backend.sh's recovery-grade
-# fm_backend_agent_state on its validated recorded endpoint - the classifier
-# bin/fm-crew-state.sh trusts - never from a status line. A record of the exact
-# windowless shape (no window, no backend but tmux, no foreign endpoint keys)
-# names no endpoint and reads `missing` whichever record is being torn down, so
-# such records retire in any order. Any other verdict, any other record whose
+# A slot several finished records still name is shared, not contested, so an
+# unforced teardown returns it instead of stranding every record naming it -
+# but on one rule, and nothing weaker: every record naming the copy, this one
+# included, must be provably non-live AND the copy must hold no work. Liveness
+# is `dead` or `missing` from bin/fm-backend.sh's recovery-grade
+# fm_backend_agent_state on the record's validated recorded endpoint - the
+# classifier bin/fm-crew-state.sh trusts - never a status line. A record of the
+# exact windowless shape (no window, no backend but tmux, no foreign endpoint
+# keys) names no endpoint and reads `missing` whichever record is being torn
+# down, so such records clear in any order. Any other verdict, any record whose
 # endpoint cannot be validated, or a secondmate home refuses exactly as a live
 # claimant does, and the refusal names the co-claimant and its verdict so the
-# operator knows which record to reconcile first. On that proof teardown retires only this
-# record: its endpoint, records, checks, and backlog close as usual, its own
-# slot claim is dropped so the slot does not read as reassigned, its retirement
-# is traced beside the checkout so the slot's last record cannot mistake the
-# work left there for its own, and the slot itself - its processes, copy,
-# branch, and pool lease - is neither inspected nor touched. It is left for the
-# last record naming it, whose teardown runs the uncommitted-changes and
-# landed-work checks on that copy before returning it through the ordinary path
-# - a scout last record included, because that trace drops the scratch carve-out
-# above - so those refusals guard the reset that would actually discard work
-# rather than every co-claimant's retirement. The return that resets the copy
-# spends the trace with it.
-# These refusals are not relaxed by --force, and --force never takes that
-# retire path: --force authorizes discarding THIS task's unlanded work, never
-# another task's live work. Nothing of this task's own is removed by a refusal;
-# reconcile whichever record is wrong and re-run.
+# operator knows which record to reconcile first. "No work" is the ordinary
+# uncommitted-changes and landed-work refusals below, which a shared copy runs
+# regardless of kind: a scout's scratch carve-out never covers a copy another
+# record also names. A record is never retired without returning its slot, so
+# every claim on that copy is still on disk when these checks run.
+# These refusals are not relaxed by --force, and a co-claimant refuses under
+# --force exactly as before: --force authorizes discarding THIS task's unlanded
+# work, never work another record may own. Nothing of this task's own is removed
+# by a refusal; reconcile whichever record is wrong and re-run.
 # Orca is not a pool slot and proves its path through
 # require_orca_worktree_path_match instead.
 # Orca tasks use the same safety checks, then close the recorded terminal and
@@ -1887,8 +1880,8 @@ validate_worktree_teardown_safety() {
   [ "$FORCE" != "--force" ] || return 0
   [ "$KIND" != secondmate ] || return 0
   if [ "$KIND" = scout ]; then
-    teardown_slot_retired_records || return 0
-    [ -n "$TEARDOWN_SLOT_RETIRED_RECORDS" ] || scout_scratch=1
+    teardown_live_slot_path >/dev/null || return 0
+    [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || scout_scratch=1
   fi
 
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
@@ -1904,8 +1897,8 @@ validate_worktree_teardown_safety() {
   if [ "$KIND" = scout ] && [ -n "$dirty" ]; then
     echo "REFUSED: pool slot copy $WT has uncommitted changes that scout task $ID cannot be shown to have written." >&2
     echo "uncommitted changes present" >&2
-    [ "$scout_scratch" = 1 ] \
-      || echo "Record(s) $TEARDOWN_SLOT_RETIRED_RECORDS were retired off this slot without returning it, so this copy may still hold their work." >&2
+    [ -z "$TEARDOWN_SLOT_SHARED_WITH" ] \
+      || echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so it may hold their work." >&2
     echo "A pool slot passes from task to task, so a scout's scratch never covers changes another task may have left: commit them on a branch, move them out of $WT, or reconcile the record that owns them, then re-run teardown." >&2
     return 1
   fi
@@ -2413,17 +2406,16 @@ coclaimant_endpoint_state() {  # <meta> <task-id> <field>
   )
 }
 
-# Record exclusivity for one slot. With no <retire-ok> argument every other
-# record naming the slot refuses. With <retire-ok>=1 (an unforced teardown of
-# this task's own slot) a slot whose other records are all provably non-live
-# is shared rather than contested: it sets TEARDOWN_SLOT_RETAINED and names
-# them in TEARDOWN_SLOT_RETAINED_FOR, and this record is retired without
-# returning the slot, which stays for the last of them to return normally. Any
+# Record exclusivity for one slot. With no <shared-ok> argument every other
+# record naming the slot refuses. With <shared-ok>=1 (an unforced teardown of
+# this task's own slot) a slot whose other records are all provably non-live is
+# shared rather than contested: it names them in TEARDOWN_SLOT_SHARED_WITH and
+# does not refuse, leaving the copy's own work refusals - which a shared copy
+# runs regardless of kind - to decide whether the slot may be returned. Any
 # live or undeterminable co-claimant still refuses exactly as before.
-TEARDOWN_SLOT_RETAINED=0
-TEARDOWN_SLOT_RETAINED_FOR=
+TEARDOWN_SLOT_SHARED_WITH=
 require_exclusive_worktree_slot_record() {
-  local record_meta=$1 record_id=$2 record_state=$3 worktree=$4 retire_ok=${5:-0}
+  local record_meta=$1 record_id=$2 record_state=$3 worktree=$4 shared_ok=${5:-0}
   local slot state_dir other other_id field other_path other_slot endpoint_state
   local shared_with=
   slot=$(canonical_existing_dir "$worktree") || return 0
@@ -2443,7 +2435,7 @@ require_exclusive_worktree_slot_record() {
         other_slot=$(canonical_existing_dir "$other_path") || continue
         [ "$other_slot" = "$slot" ] || continue
         endpoint_state=
-        if [ "$retire_ok" = 1 ] && [ ! "$other" -ef "$record_meta" ]; then
+        if [ "$shared_ok" = 1 ] && [ ! "$other" -ef "$record_meta" ]; then
           endpoint_state=$(coclaimant_endpoint_state "$other" "$other_id" "$field")
           case "$endpoint_state" in
             dead|missing)
@@ -2456,24 +2448,21 @@ require_exclusive_worktree_slot_record() {
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
         echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
         if [ -n "$endpoint_state" ]; then
-          echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so $record_id cannot be retired while leaving the slot to it." >&2
+          echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
         return 1
       done
     done
   done
-  if [ -n "$shared_with" ]; then
-    TEARDOWN_SLOT_RETAINED=1
-    TEARDOWN_SLOT_RETAINED_FOR=$shared_with
-  fi
+  TEARDOWN_SLOT_SHARED_WITH=$shared_with
 }
 
 require_exclusive_task_worktree_slot() {
-  local slot own_state retire_ok=0
+  local slot own_state shared_ok=0
   slot=$(teardown_live_slot_path) || return 0
-  [ "$FORCE" = "--force" ] || retire_ok=1
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$retire_ok" || return 1
-  [ "$TEARDOWN_SLOT_RETAINED" = 1 ] || return 0
+  [ "$FORCE" = "--force" ] || shared_ok=1
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || return 1
+  [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
   if [ "$TEARDOWN_WINDOWLESS" = 1 ] || [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
@@ -2484,58 +2473,12 @@ require_exclusive_task_worktree_slot() {
   case "$own_state" in
     dead|missing) ;;
     *)
-      echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_RETAINED_FOR, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
-      echo "A shared slot is retired record by record only once every record naming it is non-live; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
+      echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
+      echo "A shared slot is returned only once every record naming it is non-live; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
       return 1
       ;;
   esac
-  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_RETAINED_FOR; retiring $ID's record without returning that pool slot, which stays for the last of them to return." >&2
-}
-
-# Retirement trace: which records were retired off a pool slot without returning
-# it. A retired record's work stays in the copy with nothing naming it, so the
-# slot's last record can no longer tell that work from its own and must not
-# discard it as scratch. Like the slot claim it is a sibling of the checkout, so
-# writing it can never dirty the copy the landed-work checks inspect, and the
-# return that resets the copy spends it.
-teardown_slot_retire_trace() {  # <worktree>
-  local slot
-  slot=$(canonical_existing_dir "$1") || return 1
-  printf '%s/.fm-slot-retired\n' "$(dirname "$slot")"
-}
-
-teardown_slot_retire_trace_add() {  # <worktree> <task-id>
-  local trace=
-  trace=$(teardown_slot_retire_trace "$1") || return 1
-  if { [ -e "$trace" ] || [ -L "$trace" ]; } \
-     && { [ ! -f "$trace" ] || [ -L "$trace" ]; }; then
-    return 1
-  fi
-  printf '%s\n' "$2" >> "$trace" 2>/dev/null
-}
-
-teardown_slot_retire_trace_clear() {  # <worktree>
-  local trace=
-  trace=$(teardown_slot_retire_trace "$1") || return 0
-  rm -f "$trace" 2>/dev/null || true
-}
-
-# The records retired off this record's own pool slot, space separated and empty
-# when none. Returns 1 when the recorded worktree is no pool slot at all, which
-# is the one case where nothing can ever have been handed on. A trace that
-# cannot be read counts as a retirement rather than as none.
-TEARDOWN_SLOT_RETIRED_RECORDS=
-teardown_slot_retired_records() {
-  local slot trace
-  TEARDOWN_SLOT_RETIRED_RECORDS=
-  slot=$(teardown_live_slot_path) || return 1
-  trace=$(teardown_slot_retire_trace "$slot") || return 1
-  { [ -e "$trace" ] || [ -L "$trace" ]; } || return 0
-  if [ -f "$trace" ] && [ ! -L "$trace" ]; then
-    TEARDOWN_SLOT_RETIRED_RECORDS=$(tr '\n' ' ' < "$trace" 2>/dev/null || true)
-  fi
-  [ -n "$TEARDOWN_SLOT_RETIRED_RECORDS" ] \
-    || TEARDOWN_SLOT_RETIRED_RECORDS="(unreadable retirement trace at $trace)"
+  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_SHARED_WITH; none of them names live work, so the slot is returned if the copy proves to hold none either." >&2
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
@@ -2580,8 +2523,7 @@ require_owned_worktree_slot_record() {  # <task-id> <worktree>
 
 # The one ownership determination for this task's recorded slot. Every later
 # step that would read or touch $WT consults teardown_owns_worktree, so a
-# reassigned or retained slot is skipped consistently rather than by each step's
-# own guess.
+# reassigned slot is skipped consistently rather than by each step's own guess.
 TEARDOWN_SLOT_REASSIGNED=0
 TEARDOWN_SLOT_REASSIGNED_TO=
 TEARDOWN_SLOT_REASSIGNED_HOME=
@@ -2602,7 +2544,7 @@ require_owned_task_worktree_slot() {
 }
 
 teardown_owns_worktree() {
-  [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ] && [ "$TEARDOWN_SLOT_RETAINED" != 1 ]
+  [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ]
 }
 
 firstmate_home_has_treehouse_slot() {
@@ -3734,16 +3676,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   fi
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
 elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then
-  # A retained slot stays for its last remaining record to return. This
-  # record's own claim on it is dropped so that record reads the slot as
-  # unclaimed rather than reassigned; another task's claim is never touched.
-  # The retirement is traced on the slot first: without it the last record
-  # could take this record's leftover work for its own scratch.
-  if [ "$TEARDOWN_SLOT_RETAINED" = 1 ] && [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ]; then
-    teardown_slot_retire_trace_add "$WT" "$ID" \
-      || { echo "error: could not record $ID's retirement on pool slot $WT; retaining every durable task record so the slot's last record still refuses on the work left there" >&2; exit 1; }
-    fm_treehouse_slot_owner_release "$WT" "$ID"
-  fi
+  :
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != "HEAD" ]; then
@@ -3769,10 +3702,8 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
   # it here - and only after a return that succeeded - keeps a returned slot
   # unclaimed until its next holder claims it, and leaves the claim in place
-  # whenever the return did not actually happen. The return reset the copy, so
-  # any retirement traced on the slot is spent with it.
+  # whenever the return did not actually happen.
   fm_treehouse_slot_owner_release "$WT" "$ID"
-  teardown_slot_retire_trace_clear "$WT"
 fi
 
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
@@ -3970,17 +3901,11 @@ fi
 if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
-TEARDOWN_LEGACY_NOTE=
 if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
-  TEARDOWN_LEGACY_NOTE="; legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN"
-fi
-if teardown_owns_worktree && [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT)"
-elif [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ]; then
-  echo "teardown $ID complete (window ${T:-none}; record retired, pool slot $WT left for task(s) $TEARDOWN_SLOT_RETAINED_FOR, which also record it$TEARDOWN_LEGACY_NOTE)"
 else
-  echo "teardown $ID complete (window ${T:-none}; pool slot $WT left to task $TEARDOWN_SLOT_REASSIGNED_TO${TEARDOWN_SLOT_REASSIGNED_HOME:+ (home $TEARDOWN_SLOT_REASSIGNED_HOME)}, which it was reassigned to$TEARDOWN_LEGACY_NOTE)"
+  echo "teardown $ID complete (window ${T:-none}; pool slot $WT left to task $TEARDOWN_SLOT_REASSIGNED_TO${TEARDOWN_SLOT_REASSIGNED_HOME:+ (home $TEARDOWN_SLOT_REASSIGNED_HOME)}, which it was reassigned to)"
 fi
 backlog_refresh_reminder

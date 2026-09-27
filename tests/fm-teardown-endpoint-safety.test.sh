@@ -1019,9 +1019,9 @@ test_own_and_absent_slot_claims_still_tear_down() {
 
 # --- Shared slots whose every record is finished ------------------------------
 #
-# A slot named by several records is retired record by record once every one
-# of them is provably non-live: each unforced teardown drops only its own
-# record, and the last one returns the slot. Liveness comes from the backend's
+# A slot named by several records is returned once every one of them is
+# provably non-live and the copy proves to hold no work; anything else refuses.
+# Liveness comes from the backend's
 # recovery-grade classifier, driven here by a tmux shim whose reads answer from
 # <case>/tmux-live (window names whose pane runs an agent) and
 # <case>/tmux-unreadable-<session> (a session whose inventory read fails
@@ -1149,8 +1149,8 @@ test_shared_slot_with_a_live_record_still_refuses() {
   pass "fm-teardown: a slot shared with any live record still refuses without touching it"
 }
 
-test_shared_slot_of_finished_records_retires_until_the_last() {
-  local dir worker
+test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
+  local dir
 
   dir=$(make_shared_slot_case shared-finished)
   write_shared_slot_ship_meta "$dir" first-task
@@ -1158,87 +1158,86 @@ test_shared_slot_of_finished_records_retires_until_the_last() {
   write_shared_slot_ship_meta "$dir" third-task
   # The first record took the slot last, so its claim is the one on it.
   claim_pool_slot "$dir" first-task
-  # A process under the slot that no record's endpoint accounts for: retiring
-  # a record must not reap the slot it leaves behind.
-  ( cd "$dir/worktree" && exec sleep 30 ) &
-  worker=$!
 
   run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a finished record on a shared slot failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/first-task.meta" "the retired record was left behind"
-  assert_present "$dir/home/state/second-task.meta" "retiring one record removed another"
-  assert_present "$dir/home/state/third-task.meta" "retiring one record removed another"
-  assert_present "$dir/pool/1/project/.git" "retiring a record removed the shared slot's checkout"
-  kill -0 "$worker" 2>/dev/null || fail "retiring a record reaped processes under the shared slot"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a record returned the shared slot: $(cat "$dir/runtime.log")"
+    || fail "tearing down a finished record on a clean shared slot failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-task.meta" "the torn-down record was left behind"
+  assert_present "$dir/home/state/second-task.meta" "tearing down one record removed another"
+  assert_present "$dir/home/state/third-task.meta" "tearing down one record removed another"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "a shared slot whose every record is non-live was not returned: $(cat "$dir/runtime.log")"
   grep -Fq "tmux <kill-window> <-t> <=firstmate:=fm-first-task>" "$dir/runtime.log" \
-    || fail "retiring a record did not close its own endpoint: $(cat "$dir/runtime.log")"
-  assert_absent "$dir/pool/1/.fm-slot-owner" \
-    "the retired record's own claim was left to make the slot read as reassigned"
-  assert_contains "$(cat "$dir/stdout")" "pool slot $dir/worktree left for task(s) second-task, third-task" \
-    "the completion line should name the records the slot is left to"
+    || fail "teardown did not close its own endpoint: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stderr")" "also recorded by non-live task(s) second-task, third-task" \
+    "the note should name the records that share the copy"
+  assert_contains "$(cat "$dir/stdout")" "worktree $dir/worktree)" \
+    "a shared slot should complete through the ordinary return"
+  assert_absent "$dir/pool/1/.fm-slot-owner" "the returned slot kept its spent claim"
 
+  # The records left behind name a slot that is back in the pool; each still
+  # clears on its own without --force.
   : > "$dir/runtime.log"
   run_unforced_case "$dir" second-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring the second finished record failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/second-task.meta" "the second retired record was left behind"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "a non-last record returned the shared slot: $(cat "$dir/runtime.log")"
-
-  # The last record naming the slot returns it through the ordinary path.
+    || fail "teardown of a remaining record on the returned slot failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/second-task.meta" "the remaining record was left behind"
   : > "$dir/runtime.log"
   run_unforced_case "$dir" third-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of the last record on the slot failed: $(cat "$dir/stderr")"
+    || fail "teardown of the last record on the returned slot failed: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/third-task.meta" "the last record was left behind"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the last record did not return the slot: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/stdout")" "worktree $dir/worktree)" \
-    "the last record should complete through the ordinary return"
-  kill "$worker" 2>/dev/null || true
-  wait "$worker" 2>/dev/null || true
 
-  # A claim held by another of the finished records is theirs, never removed.
+  # A claim held by another of the finished records proves the slot is no
+  # longer this record's, so that slot is still left untouched.
   dir=$(make_shared_slot_case shared-finished-other-claim)
   write_shared_slot_ship_meta "$dir" first-task
   write_shared_slot_ship_meta "$dir" second-task
   claim_pool_slot "$dir" second-task
   run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a record whose slot another record claims failed: $(cat "$dir/stderr")"
+    || fail "teardown of a record whose slot another record claims failed: $(cat "$dir/stderr")"
   assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=second-task" \
-    "retiring a record removed or rewrote another record's claim"
+    "teardown removed or rewrote another record's claim"
   ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a record returned a slot another record claims: $(cat "$dir/runtime.log")"
+    || fail "teardown returned a slot another record claims: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
   run_unforced_case "$dir" second-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of the claiming last record failed: $(cat "$dir/stderr")"
+    || fail "teardown of the claiming record failed: $(cat "$dir/stderr")"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the claiming last record did not return the slot: $(cat "$dir/runtime.log")"
+    || fail "the claiming record did not return the slot: $(cat "$dir/runtime.log")"
 
-  pass "fm-teardown: finished records sharing a slot retire one by one and the last returns it"
+  pass "fm-teardown: a shared slot whose every record is non-live and whose copy is clean is returned"
 }
 
-test_shared_slot_retire_leaves_the_work_refusals_to_the_return() {
+test_shared_slot_with_work_in_its_copy_refuses_every_record() {
   local dir
 
-  # Work in a shared slot belongs to whoever returns that copy, not to every
-  # record naming it: a co-claimant still retires while the changes stay put,
-  # and the last record's return is what refuses on them.
+  # Uncommitted changes in a copy several records name belong to whichever of
+  # them wrote them, which nothing here can say, so every record refuses and
+  # the changes stay put.
   dir=$(make_shared_slot_case shared-dirty)
   write_shared_slot_ship_meta "$dir" first-task
   write_shared_slot_ship_meta "$dir" second-task
   : > "$dir/worktree/sentinel"
-  run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a record on a dirty shared slot failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/first-task.meta" "the retired record was left behind"
-  assert_present "$dir/worktree/sentinel" \
-    "retiring a record discarded the shared slot's uncommitted changes"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a record returned the dirty shared slot: $(cat "$dir/runtime.log")"
-  : > "$dir/runtime.log"
-  assert_shared_slot_refused "$dir" second-task "uncommitted changes in a sole-record slot"
+  assert_shared_slot_refused "$dir" first-task "uncommitted changes in a shared copy"
   assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
-    "the ordinary return should refuse on the uncommitted-changes check"
+    "the refusal should name the uncommitted-changes check"
+  assert_present "$dir/worktree/sentinel" \
+    "the refusal discarded the shared copy's uncommitted changes"
+  : > "$dir/runtime.log"
+  assert_shared_slot_refused "$dir" second-task "uncommitted changes read from the other record"
+  assert_present "$dir/home/state/first-task.meta" "the refusal removed the other record"
+
+  # --force authorizes discarding this task's own work, never a copy another
+  # record still names, so the forced rerun the refusal suggests is refused
+  # too and nothing is reset.
+  : > "$dir/runtime.log"
+  set +e
+  run_case "$dir" second-task > "$dir/stdout" 2> "$dir/stderr"
+  set -e
+  assert_contains "$(cat "$dir/stderr")" "not even with --force" \
+    "--force should refuse while another record names the same copy"
+  assert_present "$dir/worktree/sentinel" "--force discarded work another record may own"
+  assert_present "$dir/home/state/second-task.meta" "--force removed the record it refused"
+  [ ! -s "$dir/runtime.log" ] \
+    || fail "--force acted on a copy another record names: $(cat "$dir/runtime.log")"
 
   # Commits that never landed are held by the same boundary.
   dir=$(make_shared_slot_case shared-unlanded)
@@ -1246,19 +1245,13 @@ test_shared_slot_retire_leaves_the_work_refusals_to_the_return() {
   write_shared_slot_ship_meta "$dir" second-task
   git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
     commit --allow-empty -qm unlanded
-  run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a record on a shared slot with unlanded work failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/first-task.meta" "the retired record was left behind"
-  assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
-    "retiring a record discarded the shared slot's unlanded commit"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a record returned the unlanded shared slot: $(cat "$dir/runtime.log")"
-  : > "$dir/runtime.log"
-  assert_shared_slot_refused "$dir" second-task "unlanded commits in a sole-record slot"
+  assert_shared_slot_refused "$dir" first-task "unlanded commits in a shared copy"
   assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
-    "the ordinary return should refuse on the landed-work check"
+    "the refusal should name the landed-work check"
+  assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
+    "the refusal discarded the shared copy's unlanded commit"
 
-  pass "fm-teardown: retiring a record leaves the unlanded-work refusals to the slot's return"
+  pass "fm-teardown: work in a copy several records name refuses every one of them, --force included"
 }
 
 # A scout record on the case's pool slot, complete enough for an unforced
@@ -1274,27 +1267,27 @@ write_shared_slot_scout_meta() {  # <case> <id> [session]
   printf 'scout report\n' > "$dir/home/data/$id/report.md"
 }
 
-test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks() {
+test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
   local dir
 
-  # A record predating slot claims, on a clean copy: its own commits are the
-  # scratch the carve-out declares discardable, so it still returns the slot.
-  dir=$(make_shared_slot_case scout-unclaimed-clean)
+  # A scout alone on its slot with a clean copy: its own commits are the
+  # scratch the carve-out declares discardable, so it returns the slot.
+  dir=$(make_shared_slot_case scout-sole-clean)
   write_shared_slot_scout_meta "$dir" scout-task
   git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
     commit --allow-empty -qm scout-scratch
   run_unforced_case "$dir" scout-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of an unclaimed clean scout failed: $(cat "$dir/stderr")"
+    || fail "teardown of a sole clean scout failed: $(cat "$dir/stderr")"
   assert_absent "$dir/home/state/scout-task.meta" "the scout record was left behind"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "an unclaimed clean scout did not return its slot: $(cat "$dir/runtime.log")"
+    || fail "a sole clean scout did not return its slot: $(cat "$dir/runtime.log")"
 
   # The same record on a dirty copy: a pool slot passes from task to task, so
   # those changes cannot be attributed to this scout and are never discarded.
-  dir=$(make_shared_slot_case scout-unclaimed-dirty)
+  dir=$(make_shared_slot_case scout-sole-dirty)
   write_shared_slot_scout_meta "$dir" scout-task
   : > "$dir/worktree/sentinel"
-  assert_shared_slot_refused "$dir" scout-task "an unclaimed scout on a dirty pool slot"
+  assert_shared_slot_refused "$dir" scout-task "a scout on a dirty pool slot"
   assert_contains "$(cat "$dir/stderr")" "cannot be shown to have written" \
     "the refusal should say the changes cannot be attributed to the scout"
   assert_not_contains "$(cat "$dir/stderr")" "--force" \
@@ -1302,65 +1295,32 @@ test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks() {
   assert_present "$dir/worktree/sentinel" \
     "the refusal discarded the changes it could not attribute"
 
-  # Two such records on one slot: the first retires, the second returns the
-  # slot, and neither needs --force.
-  dir=$(make_shared_slot_case scout-unclaimed-pair)
-  write_shared_slot_scout_meta "$dir" first-scout
-  write_shared_slot_scout_meta "$dir" second-scout
-  run_unforced_case "$dir" first-scout > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring the first of two unclaimed scouts failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/first-scout.meta" "the retired scout record was left behind"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a non-last scout returned the slot: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/pool/1/.fm-slot-retired")" first-scout \
-    "retiring a record left no trace on the slot it kept"
-  : > "$dir/runtime.log"
-  run_unforced_case "$dir" second-scout > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of the last of two unclaimed scouts failed: $(cat "$dir/stderr")"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the last unclaimed scout did not return the slot: $(cat "$dir/runtime.log")"
-  assert_absent "$dir/pool/1/.fm-slot-retired" \
-    "the return that reset the copy left the retirement trace behind"
-
-  # A pool slot handed on from a scout to a ship: the ship retires first, so
-  # the scout is left as the slot's last record with the ship's uncommitted
-  # work in the copy. A scout's scratch carve-out must not discard it.
-  dir=$(make_shared_slot_case shared-scout-last)
+  # A ship record naming the same copy voids the scratch carve-out entirely:
+  # the unlanded commits in it may be the ship's, so the scout refuses.
+  dir=$(make_shared_slot_case scout-shared-unlanded)
   write_shared_slot_scout_meta "$dir" scout-task
   write_shared_slot_ship_meta "$dir" ship-task
-  claim_pool_slot "$dir" ship-task
-  : > "$dir/worktree/sentinel"
-  run_unforced_case "$dir" ship-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring the claiming record beside a scout failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/ship-task.meta" "the retired record was left behind"
-  assert_present "$dir/home/state/scout-task.meta" "retiring one record removed the scout"
-  : > "$dir/runtime.log"
-  assert_shared_slot_refused "$dir" scout-task "a scout left as a shared slot's last record"
-  assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
-    "the scout last record should refuse on the work it inherited"
-  assert_contains "$(cat "$dir/stderr")" "ship-task" \
-    "the refusal should name the record that was retired off the slot"
-  assert_present "$dir/worktree/sentinel" \
-    "the scout last record discarded the work left in the shared slot"
-
-  # Unlanded commits in the inherited copy are held by the same boundary, and
-  # only the retirement trace tells the scout its scratch carve-out is void.
-  dir=$(make_shared_slot_case shared-scout-last-unlanded)
-  write_shared_slot_scout_meta "$dir" scout-task
-  write_shared_slot_ship_meta "$dir" ship-task
-  claim_pool_slot "$dir" ship-task
   git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
     commit --allow-empty -qm unlanded
-  run_unforced_case "$dir" ship-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring the claiming record beside a scout failed: $(cat "$dir/stderr")"
-  : > "$dir/runtime.log"
-  assert_shared_slot_refused "$dir" scout-task "a scout left with unlanded work in its slot"
+  assert_shared_slot_refused "$dir" scout-task "a scout sharing a copy that holds unlanded work"
   assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
-    "the scout last record should refuse on the landed-work check"
+    "the shared scout should refuse on the landed-work check"
   assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
-    "the scout last record discarded the unlanded commit left in the shared slot"
+    "the shared scout discarded the unlanded commit in the copy"
+  assert_present "$dir/home/state/ship-task.meta" "the refusal removed the co-claimant record"
 
-  pass "fm-teardown: a scout returns its pool slot only once the copy holds nothing but its own scratch"
+  # The same pair on a dirty copy: the refusal names the record that shares it.
+  dir=$(make_shared_slot_case scout-shared-dirty)
+  write_shared_slot_scout_meta "$dir" scout-task
+  write_shared_slot_ship_meta "$dir" ship-task
+  : > "$dir/worktree/sentinel"
+  assert_shared_slot_refused "$dir" scout-task "a scout sharing a dirty copy"
+  assert_contains "$(cat "$dir/stderr")" "ship-task" \
+    "the refusal should name the record that shares the copy"
+  assert_present "$dir/worktree/sentinel" \
+    "the shared scout discarded the copy's uncommitted changes"
+
+  pass "fm-teardown: a scout's scratch carve-out ends where another record names the same copy"
 }
 
 write_windowless_ship_meta() {  # <case> <id>
@@ -1382,7 +1342,7 @@ seed_shared_slot_backlog() {  # <case> <id>...
   done
 }
 
-test_shared_slot_of_windowless_records_retires_in_any_order() {
+test_shared_slot_of_windowless_records_clears_in_any_order() {
   local dir
 
   # Two windowless leftovers naming one slot name no endpoint at all, so
@@ -1392,16 +1352,14 @@ test_shared_slot_of_windowless_records_retires_in_any_order() {
   write_windowless_ship_meta "$dir" second-leftover
   seed_shared_slot_backlog "$dir" first-leftover second-leftover
   run_unforced_case "$dir" first-leftover > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a windowless record beside another windowless one failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/first-leftover.meta" "the retired windowless record was left behind"
-  assert_present "$dir/pool/1/project/.git" "retiring a windowless record removed the shared slot's checkout"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a non-last windowless record returned the slot: $(cat "$dir/runtime.log")"
+    || fail "tearing down a windowless record beside another windowless one failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-leftover.meta" "the windowless record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "a clean slot whose every record is windowless was not returned: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
   run_unforced_case "$dir" second-leftover > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of the last windowless record failed: $(cat "$dir/stderr")"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the last windowless record did not return the slot: $(cat "$dir/runtime.log")"
+    || fail "teardown of the remaining windowless record failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/second-leftover.meta" "the remaining windowless record was left behind"
 
   # A windowless leftover beside a windowed record whose agent is gone: the
   # windowed record goes first here, which used to refuse on the leftover.
@@ -1410,14 +1368,12 @@ test_shared_slot_of_windowless_records_retires_in_any_order() {
   write_shared_slot_ship_meta "$dir" done-task
   seed_shared_slot_backlog "$dir" leftover done-task
   run_unforced_case "$dir" done-task --legacy-record > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a dead windowed record beside a windowless one failed: $(cat "$dir/stderr")"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a non-last record returned the slot: $(cat "$dir/runtime.log")"
+    || fail "tearing down a dead windowed record beside a windowless one failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the windowed record did not return the clean shared slot: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
   run_unforced_case "$dir" leftover > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of the last windowless record failed: $(cat "$dir/stderr")"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the last windowless record did not return the slot: $(cat "$dir/runtime.log")"
+    || fail "teardown of the remaining windowless record failed: $(cat "$dir/stderr")"
 
   # The same pair in the other order.
   dir=$(make_shared_slot_case shared-windowless-mixed-leftover-first)
@@ -1425,14 +1381,12 @@ test_shared_slot_of_windowless_records_retires_in_any_order() {
   write_shared_slot_ship_meta "$dir" done-task
   seed_shared_slot_backlog "$dir" leftover done-task
   run_unforced_case "$dir" leftover > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "retiring a windowless record beside a dead windowed one failed: $(cat "$dir/stderr")"
-  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "retiring a non-last record returned the slot: $(cat "$dir/runtime.log")"
+    || fail "tearing down a windowless record beside a dead windowed one failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the windowless record did not return the clean shared slot: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
   run_unforced_case "$dir" done-task --legacy-record > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of the last windowed record failed: $(cat "$dir/stderr")"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the last windowed record did not return the slot: $(cat "$dir/runtime.log")"
+    || fail "teardown of the remaining windowed record failed: $(cat "$dir/stderr")"
 
   # A windowless leftover never licenses a live co-claimant.
   dir=$(make_shared_slot_case shared-windowless-live)
@@ -1444,7 +1398,7 @@ test_shared_slot_of_windowless_records_retires_in_any_order() {
   assert_contains "$(cat "$dir/stderr")" "reads 'alive'" \
     "the refusal should name the live co-claimant's verdict"
 
-  pass "fm-teardown: windowless leftovers sharing a slot retire in any order and the last returns it"
+  pass "fm-teardown: windowless leftovers sharing a clean slot clear in any order"
 }
 
 test_shared_slot_with_an_undeterminable_record_refuses() {
@@ -1490,15 +1444,15 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_contains "$(cat "$dir/stderr")" "reads 'secondmate'" \
     "the refusal should name the secondmate claim"
 
-  # --force never reaches the retire path: its refusal is unchanged even when
-  # every other record is provably finished.
+  # --force never takes the shared-slot path: its refusal is unchanged even
+  # when every other record is provably finished.
   dir=$(make_shared_slot_case shared-forced)
   write_shared_slot_ship_meta "$dir" done-task
   write_shared_slot_ship_meta "$dir" other-done-task
   set +e
   run_case "$dir" done-task > "$dir/stdout" 2> "$dir/stderr"
   set -e
-  assert_present "$dir/home/state/done-task.meta" "--force retired a record on a shared slot"
+  assert_present "$dir/home/state/done-task.meta" "--force removed a record on a shared slot"
   [ ! -s "$dir/runtime.log" ] \
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "not even with --force" \
@@ -1895,10 +1849,10 @@ test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_own_and_absent_slot_claims_still_tear_down
 test_shared_slot_with_a_live_record_still_refuses
-test_shared_slot_of_finished_records_retires_until_the_last
-test_shared_slot_retire_leaves_the_work_refusals_to_the_return
-test_shared_slot_of_windowless_records_retires_in_any_order
-test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks
+test_shared_slot_of_finished_records_returns_once_every_record_is_non_live
+test_shared_slot_with_work_in_its_copy_refuses_every_record
+test_shared_slot_of_windowless_records_clears_in_any_order
+test_scout_copy_is_scratch_only_while_no_other_record_names_it
 test_shared_slot_with_an_undeterminable_record_refuses
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
