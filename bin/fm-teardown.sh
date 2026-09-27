@@ -73,12 +73,15 @@
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
 # unresolved-decision completion gate verifies its captain-held inventory.
-# The carve-out covers a scout's own scratch, so it holds only while the copy is
-# provably still this record's: a Treehouse pool slot is handed on when a worker
-# exits without returning it, and the copy then holds the next task's work. The
-# slot claim is that proof, and an unclaimed slot has none, so a scout whose
-# recorded slot no longer carries its own claim runs the ordinary
-# uncommitted-changes and landed-work refusals like any other kind.
+# The carve-out covers scratch this scout wrote, never work it merely found. A
+# Treehouse pool slot passes from task to task, so uncommitted changes in a pool
+# slot's copy cannot be attributed to the record being torn down: teardown names
+# them and refuses rather than discarding them as scratch, and the remedy is to
+# land or move that work, not to force the discard. A slot a record was retired
+# off (see the shared-slot retire path below) carries a trace beside its
+# checkout, which drops the carve-out entirely, so the scout that finally
+# returns that slot runs the landed-work refusals too. A worktree that is no
+# pool slot was never handed on and keeps the whole carve-out.
 # Before destructive cleanup, teardown validates task check artifacts as
 # ordinary single-link files on the state device. It refuses and preserves
 # task state when that proof fails; otherwise it removes the task's check,
@@ -147,14 +150,16 @@
 # claimant does, and the refusal names the co-claimant and its verdict so the
 # operator knows which record to reconcile first. On that proof teardown retires only this
 # record: its endpoint, records, checks, and backlog close as usual, its own
-# slot claim is dropped so the slot does not read as reassigned, and the slot
-# itself - its processes, copy, branch, and pool lease - is neither inspected
-# nor touched. It is left for the last record naming it, whose teardown runs
-# the uncommitted-changes and landed-work checks on that copy before returning
-# it through the ordinary path - a scout last record included, since retiring
-# its co-claimants leaves the slot unclaimed and the scratch carve-out above
-# holds only on this record's own claim - so those refusals guard the reset that
-# would actually discard work rather than every co-claimant's retirement.
+# slot claim is dropped so the slot does not read as reassigned, its retirement
+# is traced beside the checkout so the slot's last record cannot mistake the
+# work left there for its own, and the slot itself - its processes, copy,
+# branch, and pool lease - is neither inspected nor touched. It is left for the
+# last record naming it, whose teardown runs the uncommitted-changes and
+# landed-work checks on that copy before returning it through the ordinary path
+# - a scout last record included, because that trace drops the scratch carve-out
+# above - so those refusals guard the reset that would actually discard work
+# rather than every co-claimant's retirement. The return that resets the copy
+# spends the trace with it.
 # These refusals are not relaxed by --force, and --force never takes that
 # retire path: --force authorizes discarding THIS task's unlanded work, never
 # another task's live work. Nothing of this task's own is removed by a refusal;
@@ -1875,29 +1880,16 @@ teardown_treehouse_return() {
   return 1
 }
 
-# Is this record's copy provably nothing but its own scout scratch? That is the
-# one ground on which the refusals below are skipped by kind, so both the
-# pre-return check and the post-lock re-check ask it here rather than testing
-# kind themselves. A pool slot is handed on when a worker exits without
-# returning it, and the task that took it next may leave no record behind (its
-# own may have been retired off this very slot), so only the slot's own claim
-# proves the copy is still this scout's. An unclaimed slot proves nothing and
-# gets the ordinary refusals; a worktree that is no pool slot at all was never
-# handed on and keeps the carve-out.
-teardown_copy_is_scout_scratch() {
-  local slot
-  [ "$KIND" = scout ] || return 1
-  slot=$(teardown_live_slot_path) || return 0
-  fm_treehouse_slot_owner_state "$slot" "$ID"
-  [ "$FM_TREEHOUSE_SLOT_OWNER" = mine ]
-}
-
 validate_worktree_teardown_safety() {
   local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch
+  local scout_scratch=0
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   [ "$KIND" != secondmate ] || return 0
-  ! teardown_copy_is_scout_scratch || return 0
+  if [ "$KIND" = scout ]; then
+    teardown_slot_retired_records || return 0
+    [ -n "$TEARDOWN_SLOT_RETIRED_RECORDS" ] || scout_scratch=1
+  fi
 
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
@@ -1908,6 +1900,16 @@ validate_worktree_teardown_safety() {
     return 1
   fi
   dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' | head -1 || true)
+
+  if [ "$KIND" = scout ] && [ -n "$dirty" ]; then
+    echo "REFUSED: pool slot copy $WT has uncommitted changes that scout task $ID cannot be shown to have written." >&2
+    echo "uncommitted changes present" >&2
+    [ "$scout_scratch" = 1 ] \
+      || echo "Record(s) $TEARDOWN_SLOT_RETIRED_RECORDS were retired off this slot without returning it, so this copy may still hold their work." >&2
+    echo "A pool slot passes from task to task, so a scout's scratch never covers changes another task may have left: commit them on a branch, move them out of $WT, or reconcile the record that owns them, then re-run teardown." >&2
+    return 1
+  fi
+  [ "$scout_scratch" != 1 ] || return 0
 
   if ! unpushed_raw=$(git -C "$WT" log --oneline HEAD --not --remotes -- 2>/dev/null); then
     if worktree_safety_blocked_by_lock "commits not on a remote"; then
@@ -2488,6 +2490,52 @@ require_exclusive_task_worktree_slot() {
       ;;
   esac
   echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_RETAINED_FOR; retiring $ID's record without returning that pool slot, which stays for the last of them to return." >&2
+}
+
+# Retirement trace: which records were retired off a pool slot without returning
+# it. A retired record's work stays in the copy with nothing naming it, so the
+# slot's last record can no longer tell that work from its own and must not
+# discard it as scratch. Like the slot claim it is a sibling of the checkout, so
+# writing it can never dirty the copy the landed-work checks inspect, and the
+# return that resets the copy spends it.
+teardown_slot_retire_trace() {  # <worktree>
+  local slot
+  slot=$(canonical_existing_dir "$1") || return 1
+  printf '%s/.fm-slot-retired\n' "$(dirname "$slot")"
+}
+
+teardown_slot_retire_trace_add() {  # <worktree> <task-id>
+  local trace=
+  trace=$(teardown_slot_retire_trace "$1") || return 1
+  if { [ -e "$trace" ] || [ -L "$trace" ]; } \
+     && { [ ! -f "$trace" ] || [ -L "$trace" ]; }; then
+    return 1
+  fi
+  printf '%s\n' "$2" >> "$trace" 2>/dev/null
+}
+
+teardown_slot_retire_trace_clear() {  # <worktree>
+  local trace=
+  trace=$(teardown_slot_retire_trace "$1") || return 0
+  rm -f "$trace" 2>/dev/null || true
+}
+
+# The records retired off this record's own pool slot, space separated and empty
+# when none. Returns 1 when the recorded worktree is no pool slot at all, which
+# is the one case where nothing can ever have been handed on. A trace that
+# cannot be read counts as a retirement rather than as none.
+TEARDOWN_SLOT_RETIRED_RECORDS=
+teardown_slot_retired_records() {
+  local slot trace
+  TEARDOWN_SLOT_RETIRED_RECORDS=
+  slot=$(teardown_live_slot_path) || return 1
+  trace=$(teardown_slot_retire_trace "$slot") || return 1
+  { [ -e "$trace" ] || [ -L "$trace" ]; } || return 0
+  if [ -f "$trace" ] && [ ! -L "$trace" ]; then
+    TEARDOWN_SLOT_RETIRED_RECORDS=$(tr '\n' ' ' < "$trace" 2>/dev/null || true)
+  fi
+  [ -n "$TEARDOWN_SLOT_RETIRED_RECORDS" ] \
+    || TEARDOWN_SLOT_RETIRED_RECORDS="(unreadable retirement trace at $trace)"
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
@@ -3689,7 +3737,11 @@ elif [ "$KIND" != secondmate ] && ! teardown_owns_worktree; then
   # A retained slot stays for its last remaining record to return. This
   # record's own claim on it is dropped so that record reads the slot as
   # unclaimed rather than reassigned; another task's claim is never touched.
+  # The retirement is traced on the slot first: without it the last record
+  # could take this record's leftover work for its own scratch.
   if [ "$TEARDOWN_SLOT_RETAINED" = 1 ] && [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ]; then
+    teardown_slot_retire_trace_add "$WT" "$ID" \
+      || { echo "error: could not record $ID's retirement on pool slot $WT; retaining every durable task record so the slot's last record still refuses on the work left there" >&2; exit 1; }
     fm_treehouse_slot_owner_release "$WT" "$ID"
   fi
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
@@ -3707,8 +3759,7 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # the project. teardown_treehouse_return tolerates transient and stale git locks
   # left by a killed crew process; see the script header for retry and stale-lock proof.
   post_lock_cleanup_check=
-  if [ "$FORCE" != "--force" ] && [ "$KIND" != secondmate ] \
-     && ! teardown_copy_is_scout_scratch; then
+  if [ "$FORCE" != "--force" ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" || {
@@ -3718,8 +3769,10 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   # The slot is back in the pool, so this task's claim on it is spent. Dropping
   # it here - and only after a return that succeeded - keeps a returned slot
   # unclaimed until its next holder claims it, and leaves the claim in place
-  # whenever the return did not actually happen.
+  # whenever the return did not actually happen. The return reset the copy, so
+  # any retirement traced on the slot is spent with it.
   fm_treehouse_slot_owner_release "$WT" "$ID"
+  teardown_slot_retire_trace_clear "$WT"
 fi
 
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"

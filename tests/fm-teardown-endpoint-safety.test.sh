@@ -1277,6 +1277,51 @@ write_shared_slot_scout_meta() {  # <case> <id> [session]
 test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks() {
   local dir
 
+  # A record predating slot claims, on a clean copy: its own commits are the
+  # scratch the carve-out declares discardable, so it still returns the slot.
+  dir=$(make_shared_slot_case scout-unclaimed-clean)
+  write_shared_slot_scout_meta "$dir" scout-task
+  git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
+    commit --allow-empty -qm scout-scratch
+  run_unforced_case "$dir" scout-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of an unclaimed clean scout failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/scout-task.meta" "the scout record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "an unclaimed clean scout did not return its slot: $(cat "$dir/runtime.log")"
+
+  # The same record on a dirty copy: a pool slot passes from task to task, so
+  # those changes cannot be attributed to this scout and are never discarded.
+  dir=$(make_shared_slot_case scout-unclaimed-dirty)
+  write_shared_slot_scout_meta "$dir" scout-task
+  : > "$dir/worktree/sentinel"
+  assert_shared_slot_refused "$dir" scout-task "an unclaimed scout on a dirty pool slot"
+  assert_contains "$(cat "$dir/stderr")" "cannot be shown to have written" \
+    "the refusal should say the changes cannot be attributed to the scout"
+  assert_not_contains "$(cat "$dir/stderr")" "--force" \
+    "the refusal should not offer --force as the remedy"
+  assert_present "$dir/worktree/sentinel" \
+    "the refusal discarded the changes it could not attribute"
+
+  # Two such records on one slot: the first retires, the second returns the
+  # slot, and neither needs --force.
+  dir=$(make_shared_slot_case scout-unclaimed-pair)
+  write_shared_slot_scout_meta "$dir" first-scout
+  write_shared_slot_scout_meta "$dir" second-scout
+  run_unforced_case "$dir" first-scout > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring the first of two unclaimed scouts failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-scout.meta" "the retired scout record was left behind"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a non-last scout returned the slot: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-retired")" first-scout \
+    "retiring a record left no trace on the slot it kept"
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" second-scout > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the last of two unclaimed scouts failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the last unclaimed scout did not return the slot: $(cat "$dir/runtime.log")"
+  assert_absent "$dir/pool/1/.fm-slot-retired" \
+    "the return that reset the copy left the retirement trace behind"
+
   # A pool slot handed on from a scout to a ship: the ship retires first, so
   # the scout is left as the slot's last record with the ship's uncommitted
   # work in the copy. A scout's scratch carve-out must not discard it.
@@ -1293,10 +1338,13 @@ test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks() {
   assert_shared_slot_refused "$dir" scout-task "a scout left as a shared slot's last record"
   assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
     "the scout last record should refuse on the work it inherited"
+  assert_contains "$(cat "$dir/stderr")" "ship-task" \
+    "the refusal should name the record that was retired off the slot"
   assert_present "$dir/worktree/sentinel" \
     "the scout last record discarded the work left in the shared slot"
 
-  # Unlanded commits in the inherited copy are held by the same boundary.
+  # Unlanded commits in the inherited copy are held by the same boundary, and
+  # only the retirement trace tells the scout its scratch carve-out is void.
   dir=$(make_shared_slot_case shared-scout-last-unlanded)
   write_shared_slot_scout_meta "$dir" scout-task
   write_shared_slot_ship_meta "$dir" ship-task
@@ -1312,19 +1360,7 @@ test_scout_last_record_returns_a_shared_slot_only_after_the_work_checks() {
   assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
     "the scout last record discarded the unlanded commit left in the shared slot"
 
-  # The ordinary scout path is unchanged: a slot whose claim still names this
-  # scout holds nothing but its own scratch, which is declared discardable.
-  dir=$(make_shared_slot_case scout-own-claimed-slot)
-  write_shared_slot_scout_meta "$dir" scout-task
-  claim_pool_slot "$dir" scout-task
-  : > "$dir/worktree/sentinel"
-  run_unforced_case "$dir" scout-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "teardown of a scout holding its own slot claim failed: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/scout-task.meta" "the scout record was left behind"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "a scout holding its own claim did not return its slot: $(cat "$dir/runtime.log")"
-
-  pass "fm-teardown: a scout left as a shared slot's last record refuses on the work it inherited"
+  pass "fm-teardown: a scout returns its pool slot only once the copy holds nothing but its own scratch"
 }
 
 write_windowless_ship_meta() {  # <case> <id>
