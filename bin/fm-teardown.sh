@@ -133,9 +133,13 @@
 # them all. Every other record naming the slot, and this record itself, must
 # read `dead` or `missing` from bin/fm-backend.sh's recovery-grade
 # fm_backend_agent_state on its validated recorded endpoint - the classifier
-# bin/fm-crew-state.sh trusts - never from a status line. Any other verdict, a
-# record whose endpoint cannot be validated, or a secondmate home refuses
-# exactly as a live claimant does. On that proof teardown retires only this
+# bin/fm-crew-state.sh trusts - never from a status line. A record of the exact
+# windowless shape (no window, no backend but tmux, no foreign endpoint keys)
+# names no endpoint and reads `missing` whichever record is being torn down, so
+# such records retire in any order. Any other verdict, any other record whose
+# endpoint cannot be validated, or a secondmate home refuses exactly as a live
+# claimant does, and the refusal names the co-claimant and its verdict so the
+# operator knows which record to reconcile first. On that proof teardown retires only this
 # record: its endpoint, records, checks, and backlog close as usual, its own
 # slot claim is dropped so the slot does not read as reassigned, and the slot
 # itself - its processes, copy, branch, and pool lease - is neither inspected
@@ -537,30 +541,33 @@ TEARDOWN_BACKLOG_APPLIES=0
 TEARDOWN_BACKLOG_SKIP_REASON=
 TEARDOWN_WINDOWLESS=0
 TEARDOWN_WINDOWLESS_SHAPE=0
-TEARDOWN_WINDOW_COUNT=$(LC_ALL=C grep -c '^window=' "$META" 2>/dev/null || true)
-TEARDOWN_BACKEND_COUNT=$(LC_ALL=C grep -c '^backend=' "$META" 2>/dev/null || true)
-case "$TEARDOWN_WINDOW_COUNT:$(fm_meta_get "$META" window)" in
-  0:|1:)
-    case "$TEARDOWN_BACKEND_COUNT:$(fm_meta_get "$META" backend)" in
-      0:|1:tmux)
-        TEARDOWN_FOREIGN_ENDPOINT_KEYS='^terminal='
-        for TEARDOWN_FOREIGN_BACKEND in $FM_BACKEND_KNOWN; do
-          [ "$TEARDOWN_FOREIGN_BACKEND" = tmux ] \
-            || TEARDOWN_FOREIGN_ENDPOINT_KEYS="$TEARDOWN_FOREIGN_ENDPOINT_KEYS|^${TEARDOWN_FOREIGN_BACKEND}_"
-        done
-        if ! LC_ALL=C grep -Eq "$TEARDOWN_FOREIGN_ENDPOINT_KEYS" "$META" 2>/dev/null; then
-          TEARDOWN_SHAPE_META=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-teardown-shape.XXXXXX") || exit 1
-          { LC_ALL=C grep -v '^window=' "$META" || true; printf 'window=leftover:fm-%s\n' "$ID"; } \
-            > "$TEARDOWN_SHAPE_META"
-          if fm_backend_validate_task_endpoint "$TEARDOWN_SHAPE_META" "$ID" 2>/dev/null; then
-            TEARDOWN_WINDOWLESS_SHAPE=1
-          fi
-          rm -f "$TEARDOWN_SHAPE_META"
-        fi
-        ;;
-    esac
-    ;;
-esac
+# A tmux record with no window, no backend other than tmux, and no foreign
+# endpoint keys names no endpoint at all, so nothing can be live behind it. The
+# same derivation classifies this record and every other record naming its slot.
+record_windowless_shape() {  # <meta> <task-id>
+  local meta=$1 id=$2 foreign_keys foreign_backend shape_meta rc=1
+  case "$(LC_ALL=C grep -c '^window=' "$meta" 2>/dev/null || true):$(fm_meta_get "$meta" window)" in
+    0:|1:) ;;
+    *) return 1 ;;
+  esac
+  case "$(LC_ALL=C grep -c '^backend=' "$meta" 2>/dev/null || true):$(fm_meta_get "$meta" backend)" in
+    0:|1:tmux) ;;
+    *) return 1 ;;
+  esac
+  foreign_keys='^terminal='
+  for foreign_backend in $FM_BACKEND_KNOWN; do
+    [ "$foreign_backend" = tmux ] || foreign_keys="$foreign_keys|^${foreign_backend}_"
+  done
+  ! LC_ALL=C grep -Eq "$foreign_keys" "$meta" 2>/dev/null || return 1
+  shape_meta=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-teardown-shape.XXXXXX") || return 1
+  { LC_ALL=C grep -v '^window=' "$meta" || true; printf 'window=leftover:fm-%s\n' "$id"; } > "$shape_meta"
+  fm_backend_validate_task_endpoint "$shape_meta" "$id" >/dev/null 2>&1 && rc=0
+  rm -f "$shape_meta"
+  return "$rc"
+}
+if record_windowless_shape "$META" "$ID"; then
+  TEARDOWN_WINDOWLESS_SHAPE=1
+fi
 if [ "$TEARDOWN_CLEANUP_RECOVERY" != orca ]; then
   if fm_backlog_transition_applies "$CONFIG" "$DATA" "$TEARDOWN_META_KIND"; then
     TEARDOWN_BACKLOG_APPLIES=1
@@ -2355,8 +2362,10 @@ collect_local_firstmate_states() {
 # The recovery-grade endpoint state of another task record naming this slot,
 # read exactly as bin/fm-crew-state.sh reads a record: its durable endpoint is
 # validated from metadata, then bin/fm-backend.sh's fm_backend_agent_state
-# classifies it. Prints that classifier's verdict, or `unreadable` when the
-# record names no endpoint that can be validated. Only `dead` and `missing`
+# classifies it. Prints that classifier's verdict; `missing` for a record of
+# exactly the windowless shape record_windowless_shape derives for this
+# record; or `unreadable` when any other record names no endpoint that can be
+# validated. Only `dead` and `missing`
 # count as non-live; every other verdict is a refusal. A secondmate home is
 # persistent rather than finished work, so a claim held by one always reads
 # `secondmate` and refuses.
@@ -2364,6 +2373,10 @@ coclaimant_endpoint_state() {  # <meta> <task-id> <field>
   local meta=$1 id=$2 field=$3
   if [ "$field" != worktree ] || [ "$(fm_meta_get "$meta" kind)" = secondmate ]; then
     printf 'secondmate'
+    return 0
+  fi
+  if record_windowless_shape "$meta" "$id"; then
+    printf 'missing'
     return 0
   fi
   (
@@ -2437,7 +2450,7 @@ require_exclusive_task_worktree_slot() {
   [ "$TEARDOWN_SLOT_RETAINED" = 1 ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
-  if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
+  if [ "$TEARDOWN_WINDOWLESS" = 1 ] || [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
     own_state=missing
   else
     own_state=$(fm_backend_agent_state "$BACKEND" "$T" 2>/dev/null) || own_state=unreadable
@@ -3879,13 +3892,17 @@ fi
 if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
+TEARDOWN_LEGACY_NOTE=
 if [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
+  TEARDOWN_LEGACY_NOTE="; legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN"
+fi
+if teardown_owns_worktree && [ "$TEARDOWN_LEGACY_ACCEPTED" = 1 ]; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT, legacy record accepted without spawn_gen: endpoint $TEARDOWN_LEGACY_ENDPOINT, incarnation $TEARDOWN_META_SPAWN_GEN)"
 elif teardown_owns_worktree; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT)"
 elif [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ]; then
-  echo "teardown $ID complete (window ${T:-none}; record retired, pool slot $WT left for task(s) $TEARDOWN_SLOT_RETAINED_FOR, which also record it)"
+  echo "teardown $ID complete (window ${T:-none}; record retired, pool slot $WT left for task(s) $TEARDOWN_SLOT_RETAINED_FOR, which also record it$TEARDOWN_LEGACY_NOTE)"
 else
-  echo "teardown $ID complete (window ${T:-none}; pool slot $WT left to task $TEARDOWN_SLOT_REASSIGNED_TO${TEARDOWN_SLOT_REASSIGNED_HOME:+ (home $TEARDOWN_SLOT_REASSIGNED_HOME)}, which it was reassigned to)"
+  echo "teardown $ID complete (window ${T:-none}; pool slot $WT left to task $TEARDOWN_SLOT_REASSIGNED_TO${TEARDOWN_SLOT_REASSIGNED_HOME:+ (home $TEARDOWN_SLOT_REASSIGNED_HOME)}, which it was reassigned to$TEARDOWN_LEGACY_NOTE)"
 fi
 backlog_refresh_reminder

@@ -1087,11 +1087,12 @@ make_shared_slot_case() {  # <name>
   printf '%s\n' "$dir"
 }
 
-run_unforced_case() {  # <case> <id>
+run_unforced_case() {  # <case> <id> [teardown-arg...]
   local dir=$1 id=$2
+  shift 2
   FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
   FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
-    "$TEARDOWN" "$id"
+    "$TEARDOWN" "$id" "$@"
 }
 
 assert_shared_slot_refused() {  # <case> <id> <description>
@@ -1260,6 +1261,90 @@ test_shared_slot_retire_leaves_the_work_refusals_to_the_return() {
   pass "fm-teardown: retiring a record leaves the unlanded-work refusals to the slot's return"
 }
 
+write_windowless_ship_meta() {  # <case> <id>
+  local dir=$1 id=$2
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
+}
+
+# Windowless leftovers are accepted where the backlog transition applies, as in
+# a real home, so these cases carry an in-flight backlog item per record.
+seed_shared_slot_backlog() {  # <case> <id>...
+  local dir=$1 id
+  shift
+  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' \
+    > "$dir/home/data/backlog.md"
+  for id in "$@"; do
+    tasks-axi add "$id" "shared slot fixture" --kind ship --file "$dir/home/data/backlog.md" >/dev/null
+    tasks-axi start "$id" --file "$dir/home/data/backlog.md" >/dev/null
+  done
+}
+
+test_shared_slot_of_windowless_records_retires_in_any_order() {
+  local dir
+
+  # Two windowless leftovers naming one slot name no endpoint at all, so
+  # neither may hold the other hostage.
+  dir=$(make_shared_slot_case shared-windowless-pair)
+  write_windowless_ship_meta "$dir" first-leftover
+  write_windowless_ship_meta "$dir" second-leftover
+  seed_shared_slot_backlog "$dir" first-leftover second-leftover
+  run_unforced_case "$dir" first-leftover > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a windowless record beside another windowless one failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-leftover.meta" "the retired windowless record was left behind"
+  assert_present "$dir/pool/1/project/.git" "retiring a windowless record removed the shared slot's checkout"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a non-last windowless record returned the slot: $(cat "$dir/runtime.log")"
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" second-leftover > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the last windowless record failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the last windowless record did not return the slot: $(cat "$dir/runtime.log")"
+
+  # A windowless leftover beside a windowed record whose agent is gone: the
+  # windowed record goes first here, which used to refuse on the leftover.
+  dir=$(make_shared_slot_case shared-windowless-mixed-windowed-first)
+  write_windowless_ship_meta "$dir" leftover
+  write_shared_slot_ship_meta "$dir" done-task
+  seed_shared_slot_backlog "$dir" leftover done-task
+  run_unforced_case "$dir" done-task --legacy-record > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a dead windowed record beside a windowless one failed: $(cat "$dir/stderr")"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a non-last record returned the slot: $(cat "$dir/runtime.log")"
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" leftover > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the last windowless record failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the last windowless record did not return the slot: $(cat "$dir/runtime.log")"
+
+  # The same pair in the other order.
+  dir=$(make_shared_slot_case shared-windowless-mixed-leftover-first)
+  write_windowless_ship_meta "$dir" leftover
+  write_shared_slot_ship_meta "$dir" done-task
+  seed_shared_slot_backlog "$dir" leftover done-task
+  run_unforced_case "$dir" leftover > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a windowless record beside a dead windowed one failed: $(cat "$dir/stderr")"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a non-last record returned the slot: $(cat "$dir/runtime.log")"
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" done-task --legacy-record > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the last windowed record failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the last windowed record did not return the slot: $(cat "$dir/runtime.log")"
+
+  # A windowless leftover never licenses a live co-claimant.
+  dir=$(make_shared_slot_case shared-windowless-live)
+  write_windowless_ship_meta "$dir" leftover
+  write_shared_slot_ship_meta "$dir" running-task
+  seed_shared_slot_backlog "$dir" leftover running-task
+  printf 'fm-running-task\n' > "$dir/tmux-live"
+  assert_shared_slot_refused "$dir" leftover "a windowless record sharing its slot with a live one"
+  assert_contains "$(cat "$dir/stderr")" "reads 'alive'" \
+    "the refusal should name the live co-claimant's verdict"
+
+  pass "fm-teardown: windowless leftovers sharing a slot retire in any order and the last returns it"
+}
+
 test_shared_slot_with_an_undeterminable_record_refuses() {
   local dir
 
@@ -1272,14 +1357,15 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_contains "$(cat "$dir/stderr")" "reads 'unreadable'" \
     "the refusal should name the undeterminable verdict"
 
-  # A record whose endpoint cannot be validated names nothing to classify.
+  # A record with no window but a foreign endpoint key is not the windowless
+  # shape: its endpoint cannot be validated, so it proves nothing.
   dir=$(make_shared_slot_case shared-no-endpoint)
   write_shared_slot_ship_meta "$dir" done-task
-  fm_write_meta "$dir/home/state/windowless-task.meta" \
-    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
-  assert_shared_slot_refused "$dir" done-task "a slot shared with a record naming no endpoint"
-  assert_contains "$(cat "$dir/stderr")" "windowless-task" \
-    "the refusal should name the record without an endpoint"
+  fm_write_meta "$dir/home/state/ambiguous-task.meta" \
+    "terminal=orphan" "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with a record naming no valid endpoint"
+  assert_contains "$(cat "$dir/stderr")" "ambiguous-task's recorded endpoint reads 'unreadable'" \
+    "the refusal should name the record without a valid endpoint and its verdict"
 
   # A backend with no recovery classifier cannot prove anything either.
   dir=$(make_shared_slot_case shared-unverified)
@@ -1709,6 +1795,7 @@ test_own_and_absent_slot_claims_still_tear_down
 test_shared_slot_with_a_live_record_still_refuses
 test_shared_slot_of_finished_records_retires_until_the_last
 test_shared_slot_retire_leaves_the_work_refusals_to_the_return
+test_shared_slot_of_windowless_records_retires_in_any_order
 test_shared_slot_with_an_undeterminable_record_refuses
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
