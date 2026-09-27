@@ -349,11 +349,15 @@
 #     __PIAPPROVE__ optional --approve on a seeded Pi/pi-signed secondmate when
 #                  that executable advertises the flag (empty otherwise; session
 #                  trust for the launch cwd only, never a trust.json rewrite)
-#     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
-#                  Pi replacement on the session the endpoint's runtime already
-#                  reports (relaunch_resume_args below owns it; it supplies its
-#                  own leading space, and is empty on every fresh spawn and for
-#                  every other harness)
+#     __PISESSION__ Pi-family session selection, with its own leading space and
+#                  empty for secondmates and every other harness. A fresh ship
+#                  or scout passes `--session-id <task-id>` so every
+#                  incarnation of the task runs the same persistent Pi session,
+#                  recorded as pi_session_id= in state/<id>.meta. A relaunch
+#                  resumes that recorded id - or, when the endpoint's runtime
+#                  still binds a session of its own, the reference that runtime
+#                  reports (pi_session_args below owns the order;
+#                  relaunch_resume_args owns the runtime read).
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi turn-end extension,
@@ -1691,6 +1695,11 @@ RELAUNCH_PRIOR_HARNESS=
 # 1 when the recorded endpoint is authoritatively gone and this relaunch must
 # create a fresh one for the task rather than adopt its recorded address.
 RELAUNCH_REBIND=0
+# The Pi session id the task's PRIOR record carries, captured before this
+# relaunch republishes the record (which re-derives the field from the task
+# id): the fallback must resume what the PREVIOUS incarnation ran, and a
+# record from before the field existed must stay a fresh session.
+RELAUNCH_PI_SESSION_ID=
 if [ "$RELAUNCH" -eq 1 ]; then
   [ "${#POS[@]}" -eq 1 ] || {
     echo "error: --relaunch takes the task id only; its project or home comes from the task's own record" >&2
@@ -1701,6 +1710,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: --relaunch needs an existing task record; no $RELAUNCH_META" >&2
     exit 1
   fi
+  RELAUNCH_PI_SESSION_ID=$(fm_meta_get "$RELAUNCH_META" pi_session_id)
   fm_backlog_record_present "$RELAUNCH_META" "task record" "$STATE" || {
     echo "error: --relaunch refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
@@ -1879,12 +1889,16 @@ resolve_pi_executable() {
 }
 
 # Pi's CLI surface is version-dependent, so probe the resolved executable's help
-# before composing the optional regular-TUI flag. An absent or inconclusive probe
+# before composing any version-dependent flag. An absent or inconclusive probe
 # omits the flag so older Pi versions can still spawn.
-pi_supports_tui_mode() {
+pi_supports_flag() {  # <executable> <flag>
   local executable=$1 help
   help=$("$executable" --help 2>&1) || return 1
-  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--tui-mode([[:space:]=]|$)'
+  printf '%s\n' "$help" | grep -Eq -- "(^|[[:space:]])$2([[:space:]=]|$)"
+}
+
+pi_supports_tui_mode() {
+  pi_supports_flag "$1" --tui-mode
 }
 
 # Same help-probe shape as pi_supports_tui_mode for the session-scoped project
@@ -2050,7 +2064,7 @@ launch_template() {
     ;;
   opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
-    printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIRESUME__'
+    printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PISESSION__'
     if [ "$kind" = secondmate ]; then
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
@@ -2325,6 +2339,8 @@ pi | pi-signed)
     PI_APPROVE=' --approve'
   fi
   LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
+  PI_SESSION_FLAG=--session-id
+  pi_supports_flag "$PI_BIN" --session-id || PI_SESSION_FLAG=
   LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
   ;;
 cursor)
@@ -2574,6 +2590,66 @@ relaunch_resume_args() {  # <harness> <backend> <target>
   flag=$(fm_control_relaunch_resume_flag "$harness" "$agent") || return 0
   [ -n "$flag" ] && [ -n "$ref" ] || return 0
   printf -- ' %s %s' "$flag" "$(shell_quote "$ref")"
+}
+
+# pi_session_args: the Pi-family launch arguments that select the task's own
+# persistent session, so a closed lane's replacement continues the same
+# conversation instead of re-reading its task from scratch.
+#
+# A fresh ship or scout spawn passes `--session-id <task-id>`: an exact
+# project session id, created when missing (confirmed against `pi --help`,
+# and version-probed below like `--tui-mode`), so the session identity is a
+# deterministic function of the task id and is recorded as pi_session_id= in
+# the task record. A relaunch of a ship or scout resumes the id the task's
+# PRIOR record carries (captured by the caller before this relaunch
+# republishes that record), with one precedence rule ahead of it: when the
+# endpoint's runtime still binds a session of its own, the reference that
+# runtime reports wins (relaunch_resume_args below), because that bound
+# identity is the one the runtime applies status reports for, and for a Pi
+# session resumed from the recorded id the two name the same session anyway.
+# The runtime-reported reference is #5161's own behavior and is gated on the
+# adapter pair alone, so a pi/pi-signed secondmate relaunch keeps it too; the
+# DETERMINISTIC id is the crewmate/scout contract, and a secondmate (whose
+# home owns its session lifecycle), any other harness, and a relaunch of a
+# task with no recorded id and no runtime-bound reference keep today's fresh
+# session exactly as they were.
+#
+# <session-flag> is the probed flag name: empty when the executable's own
+# help does not advertise --session-id, which degrades an older Pi to the
+# fresh-session launch exactly as the --tui-mode probe does.
+#
+# Prints the arguments with the single leading space that appends them to the
+# launch line, so an empty result leaves every other launch byte-identical.
+# A malformed recorded id is treated as absent rather than passed through:
+# a task id is [A-Za-z0-9._-] only, so anything else cannot be one this
+# script recorded.
+pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <recorded-id> <session-flag>
+  local resume
+  case "$1" in
+  pi | pi-signed) ;;
+  *) return 0 ;;
+  esac
+  [ -n "$8" ] || return 0
+  if [ "$4" = 1 ]; then
+    resume=$(relaunch_resume_args "$1" "$5" "$6") || resume=
+    [ -n "$resume" ] && {
+      printf '%s' "$resume"
+      return 0
+    }
+    case "$2:$7" in
+    ship:* | scout:*) ;;
+    *) return 0 ;;
+    esac
+    case "$7" in
+    '' | *[!A-Za-z0-9._-]*) return 0 ;;
+    esac
+    printf -- ' %s %s' "$8" "$(shell_quote "$7")"
+    return 0
+  fi
+  case "$2" in
+  ship | scout) printf -- ' %s %s' "$8" "$(shell_quote "$3")" ;;
+  esac
+  return 0
 }
 
 model_flag_for_harness() {
@@ -4890,7 +4966,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp model effort account account_provider busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree project harness kind mode yolo branch tasktmp model effort account account_provider pi_session_id busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -4903,6 +4979,15 @@ preserve_relaunch_meta() {
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
+  # The deterministic Pi session id (pi_session_args owns the launch side).
+  # Owned by the relaunch recompute like every key above it: a harness switch
+  # away from Pi drops it, and a switch back to Pi re-derives it from the task
+  # id, so a stale id can never survive the harness that owned it. Gated on
+  # the same version probe as the launch flag, so the record never names a
+  # session the launch could not have selected.
+  case "$HARNESS:$KIND:${PI_SESSION_FLAG:-}" in
+  pi:ship:--session-id | pi:scout:--session-id | pi-signed:ship:--session-id | pi-signed:scout:--session-id) echo "pi_session_id=$ID" ;;
+  esac
   [ -z "$MODE" ] || echo "mode=$MODE"
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
   [ -z "${BRANCH:-}" ] || echo "branch=$BRANCH"
@@ -5054,14 +5139,16 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
-# Relaunch session continuity. Computed here, where the adopted endpoint (T) is
-# known, and substituted only into the Pi-family template's `__PIRESUME__`
-# placeholder; an empty value leaves every other launch byte-identical.
-RESUME_ARGS=
-if [ "$RELAUNCH" -eq 1 ]; then
-  RESUME_ARGS=$(relaunch_resume_args "$HARNESS" "$BACKEND" "$T") || RESUME_ARGS=
-fi
-LAUNCH=${LAUNCH//__PIRESUME__/$RESUME_ARGS}
+# Pi session continuity. A fresh ship or scout passes its task id as Pi's
+# own `--session-id`, so every incarnation of the task runs the same
+# persistent session, recorded as pi_session_id= in the task record; a
+# relaunch resumes it (or the endpoint runtime's still-bound reference,
+# which pi_session_args prefers). Computed here, where the adopted endpoint
+# (T) is known, and substituted only into the Pi-family template's
+# `__PISESSION__` placeholder; an empty value leaves every other launch
+# byte-identical.
+PI_SESSION_ARGS=$(pi_session_args "$HARNESS" "$KIND" "$ID" "$RELAUNCH" "$BACKEND" "$T" "${RELAUNCH_PI_SESSION_ID:-}" "${PI_SESSION_FLAG:-}") || PI_SESSION_ARGS=
+LAUNCH=${LAUNCH//__PISESSION__/$PI_SESSION_ARGS}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$KEEP_AI_TRAILERS" = 1 ]; then
   LAUNCH=${LAUNCH//__CLAUDEATTRIBUTION__/}
