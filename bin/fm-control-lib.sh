@@ -40,9 +40,11 @@
 # `resume` is deliberately NOT a verb: it is not deterministic across the
 # verified adapters (docs/agent-control.md owns the per-adapter resume facts).
 # `relaunch` uses the brief on disk rather than a harness-private session as
-# its durable instruction. The relaunch-time exception is
-# fm_control_relaunch_resume_flag below: a reference the endpoint's runtime
-# bound as its status authority is returned to a replacement with that adapter.
+# its durable instruction, and for pi/pi-signed it ALSO resumes the task's own
+# recorded Pi session (bin/fm-spawn.sh's pi_session_args composes that from
+# the task record's pi_session_id=, with the relaunch-time exception below
+# ahead of it): a reference the endpoint's runtime bound as its status
+# authority is returned to a replacement with that adapter.
 
 # The complete control-plane verb allowlist, one per line.
 fm_control_verbs() {
@@ -229,6 +231,12 @@ fm_control_exit_command() {  # <harness>
 #
 # Prints the flag name only; the caller quotes and appends the reference, since
 # shell quoting belongs to the owner of the launch line (bin/fm-spawn.sh).
+#
+# This table answers only what the ENDPOINT's runtime reports. A task record
+# can also carry a deterministic pi_session_id= for a Pi lane spawned after
+# that field existed; bin/fm-spawn.sh's pi_session_args reads it as the
+# fallback when this table has nothing to return (the common case where the
+# recorded endpoint, and the registration with it, no longer exist).
 fm_control_relaunch_resume_flag() {  # <harness> <registered-agent>
   case "${1-}" in
     pi|pi-signed)

@@ -740,7 +740,7 @@ test_native_ultra_relaunch_preserves_profile_and_rejects_before_stop() {
   add_ship_task "$dir" "$id" pi
   printf pi > "$dir/fake/command"
   printf pi > "$dir/fake/becomes"
-  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode\\n"\n' > "$dir/fakebin/pi"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
   chmod +x "$dir/fakebin/pi"
   sed 's|^model=default$|model=codex-native/gpt-6-astra|; s/^effort=default$/effort=ultra/' \
     "$dir/home/state/$id.meta" > "$dir/home/state/$id.meta.tmp"
@@ -1025,6 +1025,84 @@ test_spawn_relaunch_without_a_harness_reuses_the_recorded_one() {
   pass "fm-spawn --relaunch: with no explicit harness it reuses the task's recorded one, never the crew default"
 }
 
+# A Pi ship task on the tmux backend whose window survived with no agent in it:
+# the endpoint is adopted, and the replacement resumes the task's recorded
+# session id instead of starting a fresh conversation.
+test_pi_relaunch_on_an_adopted_tmux_window_resumes_the_recorded_session_id() {
+  local dir out command
+  dir=$(new_case pi-tmux pr80)
+  add_ship_task "$dir" pr80 pi
+  printf 'pi_session_id=pr80\n' >> "$dir/home/state/pr80.meta"
+  printf 'pi' > "$dir/fake/becomes"
+  printf 'zsh' > "$dir/fake/command"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_spawn "$dir" pr80 --relaunch)
+  assert_contains "$out" "spawned pr80 harness=pi" "the relaunch should complete"
+  command=$(cat "$dir/fake/literal")
+  assert_contains "$command" "--session-id 'pr80'" \
+    "the replacement must resume the task's recorded session id"
+  assert_not_contains "$command" "--session '" \
+    "the tmux backend has no runtime session reference to pass"
+  [ "$(meta_field "$dir" pr80 pi_session_id)" = pr80 ] \
+    || fail "the republished record must keep the deterministic session id"
+  [ "$(meta_field "$dir" pr80 window)" = "fmses:fm-pr80" ] \
+    || fail "an adopted relaunch must keep its endpoint"
+  pass "fm-spawn --relaunch: a Pi task on an adopted tmux window resumes its recorded session id"
+}
+
+# A task record's pi_session_id= belongs to the Pi harness that recorded it:
+# relaunching onto a different adapter drops it, so a later relaunch back to
+# Pi re-derives a fresh deterministic id instead of resuming a session the
+# intermediate agent never wrote.
+test_relaunch_away_from_pi_drops_the_recorded_session_id() {
+  local dir out
+  dir=$(new_case pi-away pr81)
+  add_ship_task "$dir" pr81 pi
+  printf 'pi_session_id=pr81\n' >> "$dir/home/state/pr81.meta"
+  printf 'pi' > "$dir/fake/command"
+  printf 'zsh' > "$dir/fake/command"
+  printf 'codex' > "$dir/fake/becomes"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_control "$dir" pr81 relaunch --harness codex --note "switching runtime")
+  assert_contains "$out" "harness=codex from=pi" "the switch should complete"
+  [ -z "$(meta_field "$dir" pr81 pi_session_id)" ] \
+    || fail "a record switched away from Pi must drop the Pi session id"
+  assert_not_contains "$(cat "$dir/fake/literal")" "--session-id" \
+    "the codex replacement must not receive a Pi session flag"
+  pass "fm-control relaunch: switching away from Pi drops the recorded session id"
+}
+
+# And switching BACK to Pi records the deterministic id in the republished
+# record, so the NEXT relaunch resumes it - while the switch launch itself
+# stays a fresh session, because no Pi session was recorded to resume.
+test_relaunch_back_to_pi_rederives_the_recorded_session_id() {
+  local dir out command
+  dir=$(new_case pi-back pr82)
+  add_ship_task "$dir" pr82 codex
+  printf 'codex' > "$dir/fake/command"
+  printf 'zsh' > "$dir/fake/command"
+  printf 'pi' > "$dir/fake/becomes"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_control "$dir" pr82 relaunch --harness pi --note "back onto Pi")
+  assert_contains "$out" "harness=pi from=codex" "the switch back should complete"
+  [ "$(meta_field "$dir" pr82 pi_session_id)" = pr82 ] \
+    || fail "a record switched onto Pi must record the deterministic session id"
+  command=$(cat "$dir/fake/literal")
+  assert_not_contains "$command" "--session-id" \
+    "with no recorded Pi session there is nothing to resume; the switch launch is fresh"
+  pass "fm-control relaunch: switching to Pi records the task's deterministic session id for its next relaunch"
+}
+
+# A promoted scout records kind=ship and a custom ship branch in its meta, but
+# its brief is the scout scaffold: it never gained a Ship branch line, and a
+# relaunch cannot regenerate the brief (--branch-prefix is refused there). The
+# recorded branch is authoritative, so the relaunch must proceed on it.
 test_promoted_scout_relaunch_receives_the_current_delivery_contract() {
   local dir home id brief launch out mode rule
   for mode in no-mistakes direct-PR local-only; do
@@ -2068,6 +2146,98 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
   pass "fm-spawn --relaunch: resumes the bound Pi session only for a Pi registration"
 }
 
+# A Pi crewmate spawned after pi_session_id= existed runs the task's own
+# deterministic session. A destroyed pane takes the registration with it, so
+# the runtime has nothing to report and the recorded id is what the replacement
+# resumes - the conversation continues instead of being re-read from scratch.
+test_herdr_pi_rebind_resumes_the_recorded_session_id() {
+  local dir out rc=0 command
+  herdr_case_or_skip pi-rebind pr90 fmlab '%none' || {
+    echo "skip - herdr rebind needs jq (the herdr adapter parses JSON with it)"
+    return 0
+  }
+  dir=$HERDR_CASE_DIR
+  sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/pr90.meta"
+  printf 'pi_session_id=pr90\n' >> "$dir/home/state/pr90.meta"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_spawn "$dir" pr90 --relaunch) || rc=$?
+  expect_code 0 "$rc" "a destroyed pane should rebind and resume the recorded session"$'\n'"$out"
+  command=$(cat "$dir/fake/launched-command")
+  assert_contains "$command" "--session-id 'pr90'" \
+    "the replacement must resume the task's recorded session id"
+  assert_not_contains "$command" "--session '" \
+    "with no runtime-bound reference there is no --session <ref> to pass"
+  [ "$(meta_field "$dir" pr90 pi_session_id)" = pr90 ] \
+    || fail "the rebound record must keep the deterministic session id"
+  [ "$(meta_field "$dir" pr90 window)" = 'fmlab:%9' ] \
+    || fail "the rebind should publish the fresh pane, got $(meta_field "$dir" pr90 window)"
+  pass "reclaim: a Pi relaunch onto a destroyed pane resumes the task's recorded session id"
+}
+
+# When the pane DID survive, its Herdr registration is still the status
+# authority, and a readable Pi reference outranks the recorded id: the two name
+# the same session for a task spawned with the deterministic id, and the bound
+# reference cannot mismatch whatever the authority actually holds.
+test_herdr_pi_adopted_pane_prefers_the_runtime_bound_session() {
+  local dir out rc=0 command
+  herdr_case_or_skip pi-bound pr91 fmlab '%7' || {
+    echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
+    return 0
+  }
+  dir=$HERDR_CASE_DIR
+  rm -f "$dir/fake/herdr-stopped"
+  sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/pr91.meta"
+  printf 'pi_session_id=pr91\n' >> "$dir/home/state/pr91.meta"
+  printf '{"result":{"agent":{"agent":"pi","agent_status":"idle","agent_session":{"kind":"id","value":"pr91"}}}}\n' \
+    > "$dir/fake/herdr-agent-registration"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_spawn "$dir" pr91 --relaunch) || rc=$?
+  expect_code 0 "$rc" "an adopted pane should relaunch in place"$'\n'"$out"
+  command=$(cat "$dir/fake/launched-command")
+  assert_contains "$command" "--session 'pr91'" \
+    "the runtime-bound reference must outrank the recorded id"
+  assert_not_contains "$command" "--session-id" \
+    "one session selection form must win, not two stacked ones"
+  [ "$(meta_field "$dir" pr91 window)" = 'fmlab:%7' ] \
+    || fail "the adopted record must keep its endpoint"
+  pass "reclaim: a survived pane's runtime-bound session outranks the recorded id"
+}
+
+# A survived pane whose registration is unreadable or foreign (here: no
+# registered session at all) has no runtime reference to preserve, so the
+# recorded id resumes the conversation and the launch is no longer fresh.
+test_herdr_pi_adopted_pane_falls_back_to_the_recorded_session_id() {
+  local dir out rc=0 command
+  herdr_case_or_skip pi-noref pr92 fmlab '%7' || {
+    echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
+    return 0
+  }
+  dir=$HERDR_CASE_DIR
+  rm -f "$dir/fake/herdr-stopped"
+  sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/pr92.meta"
+  printf 'pi_session_id=pr92\n' >> "$dir/home/state/pr92.meta"
+  # A pane-level registration without a session reference: an agent the pane
+  # remembers (so process-info reads shell-only and the pane classifies dead)
+  # whose session binding cannot be read back.
+  printf '{"result":{"agent":{"agent":"pi","agent_status":"idle"}}}\n' \
+    > "$dir/fake/herdr-agent-registration"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_spawn "$dir" pr92 --relaunch) || rc=$?
+  expect_code 0 "$rc" "an agent-free adopted pane should relaunch"$'\n'"$out"
+  command=$(cat "$dir/fake/launched-command")
+  assert_contains "$command" "--session-id 'pr92'" \
+    "with no readable runtime reference the recorded id must resume"
+  [ "$(meta_field "$dir" pr92 window)" = 'fmlab:%7' ] \
+    || fail "the adopted record must keep its endpoint"
+  pass "reclaim: an adopted pane with no readable session resumes the recorded id"
+}
+
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
   local dir out rc=0 log stray
   herdr_case_or_skip gone-herdr rl68 || {
@@ -2327,6 +2497,10 @@ test_secondmate_relaunch_onto_a_crewmate_only_adapter_refuses_before_stop
 test_explicit_secondmate_harness_ignores_configured_profile_axes
 test_ship_relaunch_ignores_the_crew_harness_config
 test_spawn_relaunch_without_a_harness_reuses_the_recorded_one
+test_pi_relaunch_on_an_adopted_tmux_window_resumes_the_recorded_session_id
+test_relaunch_away_from_pi_drops_the_recorded_session_id
+test_relaunch_back_to_pi_rederives_the_recorded_session_id
+
 test_promoted_scout_relaunch_receives_the_current_delivery_contract
 test_prefixed_prior_harness_wiring_is_still_retired
 test_muse_session_binding_is_retired_on_a_harness_switch
@@ -2362,6 +2536,9 @@ test_tmux_refuses_a_session_that_cannot_be_found
 test_tmux_refuses_when_the_server_is_gone
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
+test_herdr_pi_rebind_resumes_the_recorded_session_id
+test_herdr_pi_adopted_pane_prefers_the_runtime_bound_session
+test_herdr_pi_adopted_pane_falls_back_to_the_recorded_session_id
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server
 test_herdr_rebind_stays_in_the_recorded_session

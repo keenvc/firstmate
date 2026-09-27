@@ -23,7 +23,7 @@ if [ "${1:-}" = --help ]; then
   if [ "${FM_FAKE_PI_VERSION:-0.84.0}" = 0.82.0 ]; then
     printf '%s\n' 'Pi 0.82.0' 'Options: --help'
   else
-    printf '%s\n' "Pi ${FM_FAKE_PI_VERSION:-0.84.0}" 'Options: --help --tui-mode <mode>'
+    printf '%s\n' "Pi ${FM_FAKE_PI_VERSION:-0.84.0}" 'Options: --help --tui-mode <mode> --session-id <id>'
   fi
 fi
 exit 0
@@ -721,7 +721,7 @@ test_pi_threads_model_and_max_effort() {
   expect_code 0 "$status" "pi spawn with max effort should succeed"
   assert_meta_profile "$HOME_DIR/state/$id.meta" pi openai-codex/gpt-5.6-sol max
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "FM_PI_HARNESS=pi '$FAKEBIN_DIR/pi' --tui-mode regular --model 'openai-codex/gpt-5.6-sol' --thinking 'max' -e" \
+  assert_contains "$launch" "FM_PI_HARNESS=pi '$FAKEBIN_DIR/pi' --tui-mode regular --session-id '$id' --model 'openai-codex/gpt-5.6-sol' --thinking 'max' -e" \
     "pi launch did not force the regular TUI while threading the requested model and max thinking level"
   assert_not_contains "$launch" "FM_FIRSTMATE_PI_LAUNCH_BRIEF=" \
     "pi launch still exports the removed Calm input-reroute binding"
@@ -743,7 +743,7 @@ test_pi_signed_threads_shared_pi_profile_and_preserves_identity() {
   assert_contains "$out" "spawned $id harness=pi-signed" "pi-signed spawn did not preserve its visible identity"
   assert_meta_profile "$HOME_DIR/state/$id.meta" pi-signed openai-codex/gpt-5.6-sol max
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "FM_PI_HARNESS=pi-signed '$FAKEBIN_DIR/pi-signed' --tui-mode regular --model 'openai-codex/gpt-5.6-sol' --thinking 'max' -e" \
+  assert_contains "$launch" "FM_PI_HARNESS=pi-signed '$FAKEBIN_DIR/pi-signed' --tui-mode regular --session-id '$id' --model 'openai-codex/gpt-5.6-sol' --thinking 'max' -e" \
     "pi-signed launch did not force the regular TUI with Pi's model, thinking, and extension semantics"
   assert_contains "$launch" "fm-operational-input.sh' encode launch-brief" \
     "pi-signed launch lost the canonical typed launch-brief envelope"
@@ -784,13 +784,19 @@ test_pi_tui_mode_probe_is_safe_for_old_and_new_pi() {
       if [ "$version" = 0.82.0 ]; then
         assert_not_contains "$launch" "--tui-mode" \
           "$harness $version launch must omit unsupported --tui-mode"
+        assert_not_contains "$launch" "--session-id" \
+          "$harness $version launch must omit unsupported --session-id"
+        assert_no_grep "^pi_session_id=" "$HOME_DIR/state/$id.meta" \
+          "$harness $version record must not name a session the launch cannot select"
       else
         assert_contains "$launch" "'$FAKEBIN_DIR/$harness' --tui-mode regular" \
           "$harness $version launch must preserve the regular TUI"
+        assert_contains "$launch" "--session-id '$id'" \
+          "$harness $version launch must run the task's deterministic session"
       fi
     done
   done
-  pass "Pi launch probing omits --tui-mode on older Pi and preserves it on supporting Pi"
+  pass "Pi launch probing omits --tui-mode and --session-id on older Pi and preserves them on supporting Pi"
 }
 
 test_pi_signed_missing_binary_refuses_before_endpoint_or_metadata() {
