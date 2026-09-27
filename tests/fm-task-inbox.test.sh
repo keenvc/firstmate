@@ -25,7 +25,9 @@
 #      one stale wake once the ring budget is spent.
 #   6. Dead panes: the doorbell line is a shell no-op when executed by a bare
 #      shell, the ring skips an agent the backend classifies dead, and the
-#      watcher surfaces such a record exactly once instead of re-ringing.
+#      watcher surfaces such a record exactly once instead of re-ringing, then
+#      rechecks it once per grace period and rings it as soon as a live agent
+#      is back in the pane.
 set -u
 
 # shellcheck source=tests/wake-helpers.sh
@@ -766,11 +768,11 @@ test_watcher_dead_pane_escalates_once_without_ringing() {
     || fail "the stale wake should say the agent has exited:"$'\n'"$(cat "$state/.wake-queue")"
   grep -qF "$rec" "$state/.wake-queue" || fail "the stale wake should name the record path"
   [ -f "$rec" ] || fail "the durable record must survive for recovery"
-  [ "$(cat "$state/t1.inbox/.escalated")" = "${rec##*/}" ] \
-    || fail "the escalation marker should suppress further surfacing of this record"
+  [ "$(cat "$state/t1.inbox/.unavailable")" = "${rec##*/}" ] \
+    || fail "the unavailable marker should suppress further surfacing of this record"
   [ ! -e "$state/t1.inbox/.ring-state" ] || fail "a dead pane must not enter the re-ring ladder"
-  # The ladder is capped: nothing further is due for this record, so no later
-  # poll rings the dead pane or queues a second wake.
+  # Within the recheck spacing nothing further is due, so no later poll rings
+  # the dead pane or queues a second wake.
   [ "$(inbox_lib "$state" fm_task_inbox_due_action "$state" t1)" = quiet ] \
     || fail "a dead pane already surfaced must be quiet on later polls"
   pass "watcher: a positively dead pane is never typed into and surfaces exactly one stale wake"
@@ -793,9 +795,95 @@ test_watcher_dead_pane_ignores_stale_busy_state() {
   [ "$(grep -cF 'unread firstmate instruction' "$state/.wake-queue" 2>/dev/null || true)" = 1 ] \
     || fail "a busy-marked dead pane should surface exactly once:"$'\n'"$(cat "$state/.wake-queue" 2>/dev/null)"
   [ -f "$rec" ] || fail "the durable record must survive stale busy-state recovery"
-  [ "$(cat "$state/t1.inbox/.escalated")" = "${rec##*/}" ] \
+  [ "$(cat "$state/t1.inbox/.unavailable")" = "${rec##*/}" ] \
     || fail "stale busy-state recovery should suppress repeated surfacing"
   pass "watcher: dead-pane recovery overrides stale busy state"
+}
+
+# A record surfaced for an unavailable endpoint is not abandoned: once per
+# grace period the ladder asks for a recheck. A recheck that still finds the
+# pane dead restarts the spacing without typing or another wake; one that
+# finds a live agent rings, clears the marker, and enters the ordinary ladder.
+test_ladder_rechecks_an_unavailable_endpoint() {
+  local state rec action
+  state="$TMP_ROOT/unavailable-ladder/state"; mkdir -p "$state"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  inbox_lib "$state" fm_task_inbox_record_unavailable "$state" t1 "$rec"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 inbox_lib "$state" fm_task_inbox_due_action "$state" t1)
+  [ "$action" = quiet ] || fail "a just-surfaced unavailable endpoint should be quiet within grace, got: $action"
+  age_path "$state/t1.inbox/.unavailable"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 inbox_lib "$state" fm_task_inbox_due_action "$state" t1)
+  [ "$action" = "recheck $rec" ] || fail "an aged unavailable marker should ask for a recheck, got: $action"
+  inbox_lib "$state" fm_task_inbox_record_ring "$state" t1 "$rec"
+  [ ! -e "$state/t1.inbox/.unavailable" ] || fail "a ring after a reachable recheck should clear the unavailable marker"
+  printf '001.msg\t1\t100\n' > "$state/t1.inbox/.ring-state"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 FM_TASK_INBOX_RING_MAX=3 inbox_lib "$state" fm_task_inbox_due_action "$state" t1)
+  [ "$action" = "ring $rec" ] || fail "after the recheck rang, the ordinary ladder should resume, got: $action"
+  mv "$rec" "$state/t1.inbox/handled/"
+  inbox_lib "$state" fm_task_inbox_record_unavailable "$state" t1 "$rec"
+  action=$(inbox_lib "$state" fm_task_inbox_due_action "$state" t1)
+  [ "$action" = quiet ] || fail "a handled inbox should be quiet, got: $action"
+  [ ! -e "$state/t1.inbox/.unavailable" ] || fail "the ack should clear the unavailable marker"
+  pass "inbox: an unavailable endpoint is rechecked once per grace and rejoins the ladder once rung"
+}
+
+test_watcher_rechecks_dead_pane_and_rings_a_returned_agent() {
+  local dir state out log pid rec i
+  dir=$(setup_watch_case dead-pane-recheck)
+  state="$dir/state"; out="$dir/watch.out"; log="$dir/send.log"; : > "$log"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  inbox_lib "$state" fm_task_inbox_record_unavailable "$state" t1 "$rec"
+  age_path "$state/t1.inbox/.unavailable"
+  # Still dead at the recheck: nothing typed, no second wake, spacing restarted.
+  watch_bg "$state" "$dir/fakebin" "$out" \
+    FM_SEND_LOG="$log" FM_FAKE_TMUX_CAPTURE="$(idle_capture "$dir")" \
+    FM_FAKE_TMUX_AGENT=zsh FM_TASK_INBOX_GRACE_SECS=60 FM_TASK_INBOX_RING_MAX=99
+  pid=$!
+  i=0
+  while [ "$i" -lt 100 ]; do
+    [ "$(inbox_lib "$state" fm_path_age "$state/t1.inbox/.unavailable")" -lt 60 ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -0 "$pid" 2>/dev/null \
+    || fail "a still-dead recheck must not wake firstmate again (watcher exited):"$'\n'"$(cat "$out")"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  [ "$(inbox_lib "$state" fm_path_age "$state/t1.inbox/.unavailable")" -lt 60 ] \
+    || fail "a still-dead recheck should restart the recheck spacing"
+  [ ! -s "$log" ] || fail "a still-dead recheck typed into the pane:"$'\n'"$(cat "$log")"
+  [ ! -s "$state/.wake-queue" ] || fail "a still-dead recheck queued a second wake:"$'\n'"$(cat "$state/.wake-queue")"
+  # A live agent is back: the recheck rings it quietly and the ladder resumes.
+  # A fresh case keeps this watcher a first start rather than a restart.
+  dir=$(setup_watch_case dead-pane-returned)
+  state="$dir/state"; out="$dir/watch.out"; log="$dir/send.log"; : > "$log"
+  rec=$(inbox_lib "$state" fm_task_inbox_write "$state" t1 "please continue")
+  age_path "$rec"
+  inbox_lib "$state" fm_task_inbox_record_unavailable "$state" t1 "$rec"
+  age_path "$state/t1.inbox/.unavailable"
+  watch_bg "$state" "$dir/fakebin" "$out" \
+    FM_SEND_LOG="$log" FM_FAKE_TMUX_CAPTURE="$(idle_capture "$dir")" \
+    FM_FAKE_TMUX_AGENT=claude FM_TASK_INBOX_RING_MAX=99
+  pid=$!
+  i=0
+  while [ "$i" -lt 100 ]; do
+    [ -f "$state/t1.inbox/.ring-state" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  kill -0 "$pid" 2>/dev/null \
+    || fail "ringing a returned agent must not wake firstmate (watcher exited):"$'\n'"$(cat "$out")"
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  grep -qF "Firstmate instruction waiting: list '$state/t1.inbox'/*.msg" "$log" \
+    || fail "the watcher never rang the returned agent:"$'\n'"$(cat "$log")"
+  [ ! -e "$state/t1.inbox/.unavailable" ] || fail "ringing the returned agent should clear the unavailable marker"
+  [ -f "$state/t1.inbox/.ring-state" ] || fail "ringing the returned agent should enter the ordinary ladder"
+  [ ! -s "$state/.wake-queue" ] || fail "ringing the returned agent queued a wake:"$'\n'"$(cat "$state/.wake-queue")"
+  [ -f "$rec" ] || fail "the durable record must stay until the worker acknowledges it"
+  pass "watcher: a surfaced dead pane is rechecked quietly and rung once a live agent returns"
 }
 
 test_write_is_durable_and_exact
@@ -819,3 +907,5 @@ test_watcher_surfaces_unwritable_ladder
 test_watcher_escalates_once_after_budget
 test_watcher_dead_pane_escalates_once_without_ringing
 test_watcher_dead_pane_ignores_stale_busy_state
+test_ladder_rechecks_an_unavailable_endpoint
+test_watcher_rechecks_dead_pane_and_rings_a_returned_agent

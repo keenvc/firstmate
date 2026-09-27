@@ -496,19 +496,34 @@ window_key() {  # <window>
   printf '%s' "${key//./_}"
 }
 
-inbox_steer_escalate_unavailable() {  # <window> <task> <record>
+inbox_steer_escalate_unavailable() {  # <window> <task> <record> <exited|indeterminate>
   local w=$1 task=$2 rec=$3 reason
-  reason="stale: $w (unread firstmate instruction: $rec is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)"
+  if [ "$4" = indeterminate ]; then
+    reason="stale: $w (unread firstmate instruction: $rec is unhandled and the doorbell was not typed because the runtime reports no agent in the pane and its processes could not show whether one is running; check the worker - the doorbell rings as soon as a live agent is confirmed there)"
+  else
+    reason="stale: $w (unread firstmate instruction: $rec is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker - the doorbell rings if a live agent returns to that pane)"
+  fi
   if [ ! -d "${rec%/*}" ] || [ ! -f "$rec" ]; then
     fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true
     return 0
   fi
   fm_wake_append stale "$w" "$reason" || exit 1
-  if ! fm_task_inbox_record_escalated "$STATE" "$task" "$rec"; then
+  if ! fm_task_inbox_record_unavailable "$STATE" "$task" "$rec"; then
     echo "error: stale wake was queued for $task but its inbox escalation marker could not be written" >&2
     exit 1
   fi
   wake "$reason"
+}
+
+# One pass over an endpoint the doorbell cannot reach (verdict exited or
+# indeterminate): the first pass surfaces it once, and a recheck pass that
+# still finds it unavailable only restarts the recheck spacing.
+inbox_steer_unavailable() {  # <window> <task> <record> <verb> <verdict>
+  if [ "$4" = recheck ]; then
+    fm_task_inbox_record_unavailable "$STATE" "$2" "$3" || true
+  else
+    inbox_steer_escalate_unavailable "$1" "$2" "$3" "$5"
+  fi
 }
 
 # Steering-inbox loss detection, one cheap check per recorded window per poll.
@@ -517,18 +532,20 @@ inbox_steer_escalate_unavailable() {  # <window> <task> <record>
 # policy owner) reports a due action, a busy pane just waits - the record is
 # durable and the worker will reach a turn boundary - an idle pane gets one
 # delivery attempt, and a spent attempt budget surfaces as an ordinary stale
-# wake for stuck-crewmate-recovery, and a pane whose agent is positively dead
-# or missing skips the ladder altogether: it is never typed into and surfaces
-# as that same stale wake exactly once. If the attempt's ladder write fails while
-# its record remains unhandled, that unwritable state surfaces through the same
-# stale path instead of silently re-ringing forever; acknowledgement or teardown
-# still makes the race quiet. The attempt is data-plane typing or a
+# wake for stuck-crewmate-recovery, and an endpoint the doorbell cannot reach
+# (fm_task_inbox_endpoint_verdict: exited or indeterminate) skips the ladder
+# altogether: it is never typed into and surfaces as that same stale wake
+# exactly once, then is rechecked once per grace period and rung - entering the
+# ordinary ladder - as soon as it reads reachable. If the attempt's ladder write
+# fails while its record remains unhandled, that unwritable state surfaces
+# through the same stale path instead of silently re-ringing forever;
+# acknowledgement or teardown still makes the race quiet. The attempt is data-plane typing or a
 # composer-protected skip, never a wake, so normal retries keep the watcher
 # blocking. Runs for secondmates
 # too: their pane-staleness exemption is about quiet panes being healthy,
 # while an unacknowledged instruction past the ladder is a stuck steer.
 inbox_steer_check() {  # <window> <task>
-  local w=$1 task=$2 action verb rec count tail40 reason ring_rc backend agent_state
+  local w=$1 task=$2 action verb rec count tail40 reason ring_rc backend endpoint
   action=$(fm_task_inbox_due_action "$STATE" "$task") || return 0
   verb=${action%% *}
   [ "$verb" != quiet ] || return 0
@@ -541,10 +558,10 @@ inbox_steer_check() {  # <window> <task>
       ;;
   esac
   backend=$(window_backend "$w")
-  agent_state=$(fm_backend_agent_state "$backend" "$w" 2>/dev/null || true)
-  case "$agent_state" in
-    dead|missing)
-      inbox_steer_escalate_unavailable "$w" "$task" "$rec"
+  endpoint=$(fm_task_inbox_endpoint_verdict "$backend" "$w")
+  case "$endpoint" in
+    exited|indeterminate)
+      inbox_steer_unavailable "$w" "$task" "$rec" "$verb" "$endpoint"
       return 0
       ;;
   esac
@@ -553,13 +570,13 @@ inbox_steer_check() {  # <window> <task>
     return 0
   fi
   case "$verb" in
-    ring)
+    ring|recheck)
       ring_rc=0
       fm_task_inbox_ring "$backend" "$w" "$rec" "$(window_label "$w")" || ring_rc=$?
-      if [ "$ring_rc" -eq 3 ]; then
-        inbox_steer_escalate_unavailable "$w" "$task" "$rec"
-        return 0
-      fi
+      case "$ring_rc" in
+        3) inbox_steer_unavailable "$w" "$task" "$rec" "$verb" exited; return 0 ;;
+        4) inbox_steer_unavailable "$w" "$task" "$rec" "$verb" indeterminate; return 0 ;;
+      esac
       if ! fm_task_inbox_record_ring "$STATE" "$task" "$rec"; then
         if [ ! -f "$rec" ]; then
           fm_task_inbox_due_action "$STATE" "$task" >/dev/null || true

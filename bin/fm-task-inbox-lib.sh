@@ -18,9 +18,10 @@
 # duplicated doorbell is a no-op by construction (the worker finds the inbox
 # empty or already handled), and a swallowed doorbell is detected by the
 # absence of the worker's acknowledgement and re-rung on a bounded schedule.
-# A positively dead or missing endpoint bypasses that schedule without being
+# An endpoint whose agent has exited bypasses that schedule without being
 # typed into, and its unhandled record surfaces through the ordinary stale wake
-# into stuck-crewmate-recovery.
+# into stuck-crewmate-recovery; see fm_task_inbox_endpoint_verdict for what
+# counts as exited and for the unavailable-endpoint recheck.
 #
 # Layout under <state-dir>:
 #   <task>.inbox/NNN.msg       one durable steer, numeric sequence, atomic rename
@@ -30,6 +31,9 @@
 #   <task>.inbox/.ring-state   watcher re-ring ladder: "<msg>\t<count>\t<epoch>"
 #   <task>.inbox/.escalated    oldest-message name already surfaced as stale,
 #                              so later polls suppress another escalation
+#   <task>.inbox/.unavailable  oldest-message name already surfaced as stale
+#                              because its endpoint was unavailable; its mtime
+#                              spaces the watcher's liveness rechecks
 #
 # Record format (fm_task_inbox_write / fm_task_inbox_body):
 #   schema=fm-task-inbox.v1
@@ -49,9 +53,14 @@
 # attempt may ring or be skipped to protect another draft in a proven pending
 # composer; an unsubmitted copy of this doorbell is retried. After
 # FM_TASK_INBOX_RING_MAX attempts without an acknowledgement it escalates. The
-# caller owns the busy and recovery-grade endpoint checks: a busy pane waits,
-# while a positively dead or missing endpoint skips delivery and the ladder and
-# escalates directly. This library owns only the schedule and escalation marker.
+# caller owns the busy and endpoint checks: a busy pane waits, while an
+# unavailable endpoint (fm_task_inbox_endpoint_verdict) skips delivery and the
+# ladder and escalates directly, once. An unavailable-endpoint escalation is not
+# final: once per grace period the ladder asks the caller to recheck that
+# endpoint, and the first recheck that finds it reachable rings and restarts the
+# ordinary ladder, so a record withheld from an agent that turns out live - or
+# comes back - is still announced. This library owns only the schedule and the
+# escalation markers.
 # If attempt bookkeeping cannot be persisted while the record remains unhandled,
 # the caller surfaces that failure instead of retrying silently; a concurrently
 # removed inbox is a quiet no-op. Escalation deliberately queues the wake before
@@ -270,14 +279,45 @@ fm_task_inbox_doorbell_line() {  # <record-path>
     "$quoted" "$quoted"
 }
 
-# Ring the doorbell, best-effort: one endpoint-liveness pre-check, one advisory
-# composer pre-check, then the backend's submit machinery with a minimal retry
-# budget, verdict discarded.
+# The doorbell's endpoint decision: would typing into <target> reach an agent?
+# Prints exactly one of:
+#   ring           no positive exit evidence. This includes an endpoint whose
+#                  classifier cannot see it (ambiguous, unreadable, unverified),
+#                  which still rings so a blind classifier never starves a live
+#                  worker; the `: ` doorbell prefix keeps a stray line inert.
+#   exited         the endpoint is authoritatively missing, or its processes
+#                  prove it is agent-free (a shell-only pane).
+#   indeterminate  the runtime reports no agent, but the pane's processes can
+#                  neither confirm nor refute one.
+# Only process evidence settles a `dead` endpoint. The runtime's registration
+# is bookkeeping: Herdr's `agent get` can answer agent_not_found for a pane
+# whose agent is running, and typed input reaches whatever process runs in the
+# pane, not the registration. So a `dead` read is rechecked through
+# fm_backend_agent_process_state and a verified harness process rings.
+fm_task_inbox_endpoint_verdict() {  # <backend> <target>
+  case "$(fm_backend_agent_state "$1" "$2" 2>/dev/null || true)" in
+    missing) printf 'exited' ;;
+    dead)
+      case "$(fm_backend_agent_process_state "$1" "$2" 2>/dev/null || true)" in
+        agent) printf 'ring' ;;
+        shell) printf 'exited' ;;
+        *) printf 'indeterminate' ;;
+      esac
+      ;;
+    *) printf 'ring' ;;
+  esac
+}
+
+# Ring the doorbell, best-effort: one endpoint pre-check
+# (fm_task_inbox_endpoint_verdict), one advisory composer pre-check, then the
+# backend's submit machinery with a minimal retry budget, verdict discarded.
 # Returns 0 rang, 1 skipped because the composer PROVENLY holds pending text
 # other than our own doorbell (the watcher re-rings later), 2 the backend send
-# failed, 3 skipped because the endpoint is positively dead or missing (nothing
-# typed; recovery owns the record). No return value is delivery proof; the
-# acknowledgement move is the only delivery signal.
+# failed, 3 skipped because the agent has exited or the endpoint is missing,
+# 4 skipped because the endpoint reports no agent and its processes could not
+# tell whether one is running. Nothing is typed on 3 or 4, and the watcher
+# rings the record once the endpoint reads reachable. No return value is
+# delivery proof; the acknowledgement move is the only delivery signal.
 # The skip is deliberately narrow: only an exact `pending` verdict can defer,
 # because there our Enter could submit someone's real half-typed content.
 # `pending-unproven` and `unknown` still ring - the worst outcome is a garbled
@@ -290,8 +330,9 @@ fm_task_inbox_doorbell_line() {  # <record-path>
 # a lost first Enter gets one confirmed retry.
 fm_task_inbox_ring() {  # <backend> <target> <record-path> [expected-label]
   local backend=$1 target=$2 rec=$3 label=${4:-} line cstate verdict
-  case "$(fm_backend_agent_state "$backend" "$target" 2>/dev/null || true)" in
-    dead|missing) return 3 ;;
+  case "$(fm_task_inbox_endpoint_verdict "$backend" "$target")" in
+    exited) return 3 ;;
+    indeterminate) return 4 ;;
   esac
   if ! line=$(fm_task_inbox_doorbell_line "$rec"); then
     return 2
@@ -366,13 +407,15 @@ fm_task_inbox_oldest_unhandled() {  # <state-dir> <task-id>
 #                             or already escalated for the current oldest)
 #   ring <record-path>        one doorbell re-ring is due
 #   escalate <record-path> <count>   attempt budget spent; surface as stale
+#   recheck <record-path>     the oldest was surfaced for an unavailable
+#                             endpoint; recheck it and ring once reachable
 # An empty inbox also resets the ladder bookkeeping so the next message starts
 # a fresh ladder.
 fm_task_inbox_due_action() {  # <state-dir> <task-id>
   local dir oldest base now grace max ladder rec_base count last
   dir=$(fm_task_inbox_dir "$1" "$2")
   if ! oldest=$(fm_task_inbox_oldest_unhandled "$1" "$2"); then
-    rm -f "$dir/.ring-state" "$dir/.escalated" 2>/dev/null || true
+    rm -f "$dir/.ring-state" "$dir/.escalated" "$dir/.unavailable" 2>/dev/null || true
     printf 'quiet'
     return 0
   fi
@@ -403,6 +446,14 @@ EOF
     printf 'quiet'
     return 0
   fi
+  if [ "$(cat "$dir/.unavailable" 2>/dev/null || true)" = "$base" ]; then
+    if [ "$(fm_path_age "$dir/.unavailable")" -lt "$grace" ]; then
+      printf 'quiet'
+    else
+      printf 'recheck %s' "$oldest"
+    fi
+    return 0
+  fi
   max=$(fm_task_inbox_ring_max)
   if [ "$count" -ge "$max" ]; then
     printf 'escalate %s %s' "$oldest" "$count"
@@ -418,8 +469,9 @@ EOF
 
 # Advance the ladder after a delivery attempt. A failed ring or a composer-
 # protected skip still consumes budget so neither an unreadable pane nor a
-# permanently blocked composer can retry silently forever. A positively dead or
-# missing endpoint never enters the ladder: the watcher escalates it directly.
+# permanently blocked composer can retry silently forever. An unavailable
+# endpoint never enters the ladder: the watcher escalates it directly, and an
+# attempt after its recheck found it reachable clears that unavailable marker.
 # A concurrently removed inbox is a successful no-op; otherwise failure means
 # the caller must surface the unwritable ladder while the record remains
 # unhandled.
@@ -435,6 +487,7 @@ EOF
   [ "$rec_base" = "$base" ] || count=0
   case "$count" in ''|*[!0-9]*) count=0 ;; esac
   [ -d "$dir" ] || return 0
+  rm -f "$dir/.unavailable" 2>/dev/null || true
   if ! { printf '%s\t%s\t%s\n' "$base" "$((count + 1))" "$(date +%s)" > "$dir/.ring-state"; } 2>/dev/null; then
     [ -d "$dir" ] || return 0
     return 1
@@ -450,6 +503,20 @@ fm_task_inbox_record_escalated() {  # <state-dir> <task-id> <record-path>
   dir=$(fm_task_inbox_dir "$1" "$2")
   [ -d "$dir" ] || return 0
   if ! { printf '%s\n' "${3##*/}" > "$dir/.escalated"; } 2>/dev/null; then
+    [ -d "$dir" ] || return 0
+    return 1
+  fi
+}
+
+# Mark the current oldest as surfaced for an unavailable endpoint, with the
+# same wake-before-marker ordering. Rewriting it after a recheck that still
+# finds the endpoint unavailable restarts the recheck spacing without another
+# wake; an attempt ring clears it (fm_task_inbox_record_ring).
+fm_task_inbox_record_unavailable() {  # <state-dir> <task-id> <record-path>
+  local dir
+  dir=$(fm_task_inbox_dir "$1" "$2")
+  [ -d "$dir" ] || return 0
+  if ! { printf '%s\n' "${3##*/}" > "$dir/.unavailable"; } 2>/dev/null; then
     [ -d "$dir" ] || return 0
     return 1
   fi
