@@ -1017,6 +1017,296 @@ test_own_and_absent_slot_claims_still_tear_down() {
   pass "fm-teardown: a task's own slot claim, and an unclaimed slot, both still tear down"
 }
 
+# --- Shared slots whose every record is finished ------------------------------
+#
+# A slot named by several records is retired record by record once every one
+# of them is provably non-live: each unforced teardown drops only its own
+# record, and the last one returns the slot. Liveness comes from the backend's
+# recovery-grade classifier, driven here by a tmux shim whose reads answer from
+# <case>/tmux-live (window names whose pane runs an agent) and
+# <case>/tmux-unreadable-<session> (a session whose inventory read fails
+# without a definitive absence). Reads are not logged, so runtime.log holds only
+# the commands that act on an endpoint or slot.
+write_classifier_tmux() {  # <case>
+  local dir=$1
+  cat > "$dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+target= fmt=
+case "\${1:-}" in
+  list-windows|display-message)
+    cmd=\$1
+    shift
+    while [ "\$#" -gt 0 ]; do
+      case "\$1" in
+        -t) target=\$2; shift 2 ;;
+        -F) fmt=\$2; shift 2 ;;
+        -*) shift ;;
+        *) fmt=\$1; shift ;;
+      esac
+    done
+    session=\${target#=}
+    session=\${session%%:*}
+    if [ "\$cmd" = list-windows ]; then
+      if [ -e '$dir'/tmux-unreadable-"\$session" ]; then
+        echo "lost server" >&2
+        exit 1
+      fi
+      cat '$dir/tmux-live' 2>/dev/null
+      exit 0
+    fi
+    if [ "\$fmt" = '#{pane_current_command}' ] \\
+      && grep -Fqx -- "\${target##*:}" '$dir/tmux-live' 2>/dev/null; then
+      echo claude
+    fi
+    exit 0
+    ;;
+esac
+printf 'tmux' >> "\${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "\$@" >> "\${FM_RUNTIME_LOG:?}"
+printf '\n' >> "\${FM_RUNTIME_LOG:?}"
+exit 0
+SH
+  chmod +x "$dir/fakebin/tmux"
+}
+
+# A local-only ship record on the case's pool slot, so its unforced teardown
+# runs the real landed-work refusals without reaching any remote.
+write_shared_slot_ship_meta() {  # <case> <id> [session]
+  local dir=$1 id=$2 session=${3:-firstmate}
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=$session:fm-$id" "endpoint_task_id=$id" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
+}
+
+make_shared_slot_case() {  # <name>
+  local dir
+  dir=$(make_case "$1")
+  mark_case_as_treehouse_pool "$dir"
+  rm -f "$dir/worktree/sentinel"
+  write_classifier_tmux "$dir"
+  printf '%s\n' "$dir"
+}
+
+run_unforced_case() {  # <case> <id>
+  local dir=$1 id=$2
+  FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+  FM_RUNTIME_LOG="$dir/runtime.log" PATH="$dir/fakebin:$PATH" \
+    "$TEARDOWN" "$id"
+}
+
+assert_shared_slot_refused() {  # <case> <id> <description>
+  local dir=$1 id=$2 description=$3 rc
+  set +e
+  run_unforced_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "$description: teardown unexpectedly succeeded"
+  assert_present "$dir/home/state/$id.meta" "$description: the record was removed before refusing"
+  assert_present "$dir/pool/1/project/.git" "$description: the slot's checkout was removed"
+  [ ! -s "$dir/runtime.log" ] \
+    || fail "$description: teardown acted on an endpoint or the slot: $(cat "$dir/runtime.log")"
+}
+
+test_shared_slot_with_a_live_record_still_refuses() {
+  local dir
+
+  # A finished record sharing its slot with a record whose agent is running.
+  dir=$(make_shared_slot_case shared-live-other)
+  write_shared_slot_ship_meta "$dir" done-task
+  write_shared_slot_ship_meta "$dir" running-task
+  printf 'fm-running-task\n' > "$dir/tmux-live"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with a live record"
+  assert_contains "$(cat "$dir/stderr")" \
+    "recorded worktree $(cd "$dir/worktree" && pwd -P) is also task running-task's recorded worktree" \
+    "the live-claimant refusal should keep its existing wording"
+  assert_contains "$(cat "$dir/stderr")" "not even with --force" \
+    "the live-claimant refusal should keep its existing wording"
+  assert_contains "$(cat "$dir/stderr")" "reads 'alive'" \
+    "the live-claimant refusal should name the endpoint verdict"
+  assert_present "$dir/home/state/running-task.meta" "the refusal removed the live record"
+
+  # One finished record among several does not license a live one: the
+  # verdict must hold for every record naming the slot.
+  dir=$(make_shared_slot_case shared-live-third)
+  write_shared_slot_ship_meta "$dir" done-task
+  write_shared_slot_ship_meta "$dir" other-done-task
+  write_shared_slot_ship_meta "$dir" running-task
+  printf 'fm-running-task\n' > "$dir/tmux-live"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with one live record among finished ones"
+  assert_contains "$(cat "$dir/stderr")" "running-task" \
+    "the refusal should name the live record"
+
+  # The record being torn down is itself one of the records naming the slot.
+  dir=$(make_shared_slot_case shared-live-self)
+  write_shared_slot_ship_meta "$dir" running-task
+  write_shared_slot_ship_meta "$dir" done-task
+  printf 'fm-running-task\n' > "$dir/tmux-live"
+  assert_shared_slot_refused "$dir" running-task "a live record sharing its slot with a finished one"
+  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'alive'" \
+    "the refusal should name this record's own live endpoint"
+
+  pass "fm-teardown: a slot shared with any live record still refuses without touching it"
+}
+
+test_shared_slot_of_finished_records_retires_until_the_last() {
+  local dir worker
+
+  dir=$(make_shared_slot_case shared-finished)
+  write_shared_slot_ship_meta "$dir" first-task
+  write_shared_slot_ship_meta "$dir" second-task
+  write_shared_slot_ship_meta "$dir" third-task
+  # The first record took the slot last, so its claim is the one on it.
+  claim_pool_slot "$dir" first-task
+  # A process under the slot that no record's endpoint accounts for: retiring
+  # a record must not reap the slot it leaves behind.
+  ( cd "$dir/worktree" && exec sleep 30 ) &
+  worker=$!
+
+  run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a finished record on a shared slot failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-task.meta" "the retired record was left behind"
+  assert_present "$dir/home/state/second-task.meta" "retiring one record removed another"
+  assert_present "$dir/home/state/third-task.meta" "retiring one record removed another"
+  assert_present "$dir/pool/1/project/.git" "retiring a record removed the shared slot's checkout"
+  kill -0 "$worker" 2>/dev/null || fail "retiring a record reaped processes under the shared slot"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a record returned the shared slot: $(cat "$dir/runtime.log")"
+  grep -Fq "tmux <kill-window> <-t> <=firstmate:=fm-first-task>" "$dir/runtime.log" \
+    || fail "retiring a record did not close its own endpoint: $(cat "$dir/runtime.log")"
+  assert_absent "$dir/pool/1/.fm-slot-owner" \
+    "the retired record's own claim was left to make the slot read as reassigned"
+  assert_contains "$(cat "$dir/stdout")" "pool slot $dir/worktree left for task(s) second-task, third-task" \
+    "the completion line should name the records the slot is left to"
+
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" second-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring the second finished record failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/second-task.meta" "the second retired record was left behind"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "a non-last record returned the shared slot: $(cat "$dir/runtime.log")"
+
+  # The last record naming the slot returns it through the ordinary path.
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" third-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the last record on the slot failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/third-task.meta" "the last record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the last record did not return the slot: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stdout")" "worktree $dir/worktree)" \
+    "the last record should complete through the ordinary return"
+  kill "$worker" 2>/dev/null || true
+  wait "$worker" 2>/dev/null || true
+
+  # A claim held by another of the finished records is theirs, never removed.
+  dir=$(make_shared_slot_case shared-finished-other-claim)
+  write_shared_slot_ship_meta "$dir" first-task
+  write_shared_slot_ship_meta "$dir" second-task
+  claim_pool_slot "$dir" second-task
+  run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a record whose slot another record claims failed: $(cat "$dir/stderr")"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=second-task" \
+    "retiring a record removed or rewrote another record's claim"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a record returned a slot another record claims: $(cat "$dir/runtime.log")"
+  : > "$dir/runtime.log"
+  run_unforced_case "$dir" second-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of the claiming last record failed: $(cat "$dir/stderr")"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the claiming last record did not return the slot: $(cat "$dir/runtime.log")"
+
+  pass "fm-teardown: finished records sharing a slot retire one by one and the last returns it"
+}
+
+test_shared_slot_retire_keeps_the_unlanded_work_refusals() {
+  local dir
+
+  # Uncommitted changes in the shared slot refuse the retire path.
+  dir=$(make_shared_slot_case shared-dirty)
+  write_shared_slot_ship_meta "$dir" first-task
+  write_shared_slot_ship_meta "$dir" second-task
+  : > "$dir/worktree/sentinel"
+  assert_shared_slot_refused "$dir" first-task "uncommitted changes in a shared slot"
+  assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
+    "the retire path should refuse on the uncommitted-changes check"
+
+  # Commits that never landed refuse the retire path.
+  dir=$(make_shared_slot_case shared-unlanded)
+  write_shared_slot_ship_meta "$dir" first-task
+  write_shared_slot_ship_meta "$dir" second-task
+  git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
+    commit --allow-empty -qm unlanded
+  assert_shared_slot_refused "$dir" first-task "unlanded commits in a shared slot"
+  assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
+    "the retire path should refuse on the landed-work check"
+
+  # The same unlanded work still refuses once this record is the slot's last.
+  rm -f "$dir/home/state/second-task.meta"
+  assert_shared_slot_refused "$dir" first-task "unlanded commits in a sole-record slot"
+  assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
+    "the ordinary path should refuse on the landed-work check"
+
+  pass "fm-teardown: retiring a record on a shared slot keeps every unlanded-work refusal"
+}
+
+test_shared_slot_with_an_undeterminable_record_refuses() {
+  local dir
+
+  # An inventory read that failed without a definitive answer proves nothing.
+  dir=$(make_shared_slot_case shared-unreadable)
+  write_shared_slot_ship_meta "$dir" done-task
+  write_shared_slot_ship_meta "$dir" unknown-task lostsession
+  : > "$dir/tmux-unreadable-lostsession"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with an unreadable endpoint"
+  assert_contains "$(cat "$dir/stderr")" "reads 'unreadable'" \
+    "the refusal should name the undeterminable verdict"
+
+  # A record whose endpoint cannot be validated names nothing to classify.
+  dir=$(make_shared_slot_case shared-no-endpoint)
+  write_shared_slot_ship_meta "$dir" done-task
+  fm_write_meta "$dir/home/state/windowless-task.meta" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with a record naming no endpoint"
+  assert_contains "$(cat "$dir/stderr")" "windowless-task" \
+    "the refusal should name the record without an endpoint"
+
+  # A backend with no recovery classifier cannot prove anything either.
+  dir=$(make_shared_slot_case shared-unverified)
+  write_shared_slot_ship_meta "$dir" done-task
+  fm_write_meta "$dir/home/state/zellij-task.meta" \
+    "backend=zellij" "window=lab:7" "endpoint_task_id=zellij-task" \
+    "zellij_session=lab" "zellij_tab_id=3" "zellij_pane_id=7" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with an unclassifiable backend"
+  assert_contains "$(cat "$dir/stderr")" "zellij-task's recorded endpoint reads 'unverified'" \
+    "the refusal should name the unclassifiable record"
+
+  # A secondmate home is never finished work, whatever its endpoint reads.
+  dir=$(make_shared_slot_case shared-secondmate)
+  write_shared_slot_ship_meta "$dir" done-task
+  fm_write_meta "$dir/home/state/mate.meta" \
+    "window=firstmate:fm-mate" "endpoint_task_id=mate" \
+    "worktree=$dir/worktree" "home=$dir/worktree" "project=$dir/project" "kind=secondmate"
+  assert_shared_slot_refused "$dir" done-task "a slot shared with a secondmate home"
+  assert_contains "$(cat "$dir/stderr")" "reads 'secondmate'" \
+    "the refusal should name the secondmate claim"
+
+  # --force never reaches the retire path: its refusal is unchanged even when
+  # every other record is provably finished.
+  dir=$(make_shared_slot_case shared-forced)
+  write_shared_slot_ship_meta "$dir" done-task
+  write_shared_slot_ship_meta "$dir" other-done-task
+  set +e
+  run_case "$dir" done-task > "$dir/stdout" 2> "$dir/stderr"
+  set -e
+  assert_present "$dir/home/state/done-task.meta" "--force retired a record on a shared slot"
+  [ ! -s "$dir/runtime.log" ] \
+    || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stderr")" "not even with --force" \
+    "--force should keep the existing refusal"
+
+  pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
+}
+
 # The tmux shim used by the endpoint-close tests below: every subcommand
 # reaches the real isolated server, so presence is always read from real tmux.
 # When FM_TEST_BLOCK_KILL is set, `kill-window` alone fails without forwarding,
@@ -1404,6 +1694,10 @@ test_cross_home_pool_slot_collision_refuses
 test_sole_slot_record_still_tears_down
 test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_own_and_absent_slot_claims_still_tear_down
+test_shared_slot_with_a_live_record_still_refuses
+test_shared_slot_of_finished_records_retires_until_the_last
+test_shared_slot_retire_keeps_the_unlanded_work_refusals
+test_shared_slot_with_an_undeterminable_record_refuses
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot
