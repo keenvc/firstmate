@@ -4984,9 +4984,11 @@ preserve_relaunch_meta() {
   # The deterministic Pi session id (pi_session_args owns the launch side).
   # Owned by the relaunch recompute like every key above it: a harness switch
   # away from Pi drops it, and a switch back to Pi re-derives it from the task
-  # id, so a stale id can never survive the harness that owned it. Gated on
-  # the same version probe as the launch flag, so the record never names a
-  # session the launch could not have selected.
+  # id, so a stale id can never survive the harness that owned it. When the
+  # version probe is inconclusive this launch selects no session, but a session
+  # the PREVIOUS incarnation recorded still holds the conversation and stays
+  # resumable on a later supporting-Pi relaunch, so that id is carried forward
+  # rather than erased; with no prior id there is nothing to name.
   case "$HARNESS:$KIND:${PI_SESSION_FLAG:-}" in
   pi:ship:--session-id | pi:scout:--session-id | pi-signed:ship:--session-id | pi-signed:scout:--session-id) echo "pi_session_id=$ID" ;;
   esac

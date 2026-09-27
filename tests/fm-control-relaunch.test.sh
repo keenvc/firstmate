@@ -1107,6 +1107,32 @@ test_pi_relaunch_on_an_adopted_tmux_window_resumes_the_recorded_session_id() {
   pass "fm-spawn --relaunch: a Pi task on an adopted tmux window resumes its recorded session id"
 }
 
+# A relaunch whose `pi --help` is inconclusive - a signed-out pi-signed wrapper
+# exits non-zero - cannot select a session, so this launch is correctly fresh.
+# The recorded id still names the session holding the conversation though, so
+# the republished record must carry it forward instead of erasing it; otherwise
+# the NEXT relaunch on a healthy Pi reads nothing and starts fresh a second
+# time, orphaning a session that was trivially resumable.
+test_pi_relaunch_with_an_inconclusive_probe_preserves_the_recorded_session_id() {
+  local dir out command
+  dir=$(new_case pi-degraded pr83)
+  add_ship_task "$dir" pr83 pi
+  printf 'pi_session_id=pr83\n' >> "$dir/home/state/pr83.meta"
+  printf 'pi' > "$dir/fake/becomes"
+  printf 'zsh' > "$dir/fake/command"
+  printf '#!/usr/bin/env bash\necho "error: not signed in" >&2\nexit 1\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_spawn "$dir" pr83 --relaunch)
+  assert_contains "$out" "spawned pr83 harness=pi" "the relaunch should complete"
+  command=$(cat "$dir/fake/literal")
+  assert_not_contains "$command" "--session-id" \
+    "an inconclusive probe cannot select a session, so the launch stays fresh"
+  [ "$(meta_field "$dir" pr83 pi_session_id)" = pr83 ] \
+    || fail "the record must keep the still-resumable session id, got '$(meta_field "$dir" pr83 pi_session_id)'"
+  pass "fm-spawn --relaunch: an inconclusive Pi probe keeps the recorded session id for the next relaunch"
+}
+
 # A task record's pi_session_id= belongs to the Pi harness that recorded it:
 # relaunching onto a different adapter drops it, so a later relaunch back to
 # Pi re-derives a fresh deterministic id instead of resuming a session the
@@ -2581,6 +2607,7 @@ test_ship_relaunch_ignores_the_crew_harness_config
 test_spawn_relaunch_without_a_harness_reuses_the_recorded_one
 test_spawn_relaunch_of_promoted_scout_uses_the_recorded_branch
 test_pi_relaunch_on_an_adopted_tmux_window_resumes_the_recorded_session_id
+test_pi_relaunch_with_an_inconclusive_probe_preserves_the_recorded_session_id
 test_relaunch_away_from_pi_drops_the_recorded_session_id
 test_relaunch_back_to_pi_rederives_the_recorded_session_id
 test_promoted_scout_relaunch_receives_the_current_delivery_contract

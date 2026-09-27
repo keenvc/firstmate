@@ -985,7 +985,7 @@ test_pi_tui_mode_probe_is_safe_for_old_and_new_pi() {
           "$harness $version launch must omit unsupported --tui-mode"
         assert_not_contains "$launch" "--session-id" \
           "$harness $version launch must omit unsupported --session-id"
-        assert_no_grep "^pi_session_id=" "$HOME_DIR/state/$id.meta" \
+        assert_no_grep "pi_session_id=" "$HOME_DIR/state/$id.meta" \
           "$harness $version record must not name a session the launch cannot select"
       else
         assert_contains "$launch" "'$FAKEBIN_DIR/$harness' --tui-mode regular" \
