@@ -1217,35 +1217,47 @@ test_shared_slot_of_finished_records_retires_until_the_last() {
   pass "fm-teardown: finished records sharing a slot retire one by one and the last returns it"
 }
 
-test_shared_slot_retire_keeps_the_unlanded_work_refusals() {
+test_shared_slot_retire_leaves_the_work_refusals_to_the_return() {
   local dir
 
-  # Uncommitted changes in the shared slot refuse the retire path.
+  # Work in a shared slot belongs to whoever returns that copy, not to every
+  # record naming it: a co-claimant still retires while the changes stay put,
+  # and the last record's return is what refuses on them.
   dir=$(make_shared_slot_case shared-dirty)
   write_shared_slot_ship_meta "$dir" first-task
   write_shared_slot_ship_meta "$dir" second-task
   : > "$dir/worktree/sentinel"
-  assert_shared_slot_refused "$dir" first-task "uncommitted changes in a shared slot"
+  run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a record on a dirty shared slot failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-task.meta" "the retired record was left behind"
+  assert_present "$dir/worktree/sentinel" \
+    "retiring a record discarded the shared slot's uncommitted changes"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a record returned the dirty shared slot: $(cat "$dir/runtime.log")"
+  : > "$dir/runtime.log"
+  assert_shared_slot_refused "$dir" second-task "uncommitted changes in a sole-record slot"
   assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
-    "the retire path should refuse on the uncommitted-changes check"
+    "the ordinary return should refuse on the uncommitted-changes check"
 
-  # Commits that never landed refuse the retire path.
+  # Commits that never landed are held by the same boundary.
   dir=$(make_shared_slot_case shared-unlanded)
   write_shared_slot_ship_meta "$dir" first-task
   write_shared_slot_ship_meta "$dir" second-task
   git -C "$dir/worktree" -c user.name=test -c user.email=test@example.invalid \
     commit --allow-empty -qm unlanded
-  assert_shared_slot_refused "$dir" first-task "unlanded commits in a shared slot"
+  run_unforced_case "$dir" first-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "retiring a record on a shared slot with unlanded work failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/first-task.meta" "the retired record was left behind"
+  assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
+    "retiring a record discarded the shared slot's unlanded commit"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "retiring a record returned the unlanded shared slot: $(cat "$dir/runtime.log")"
+  : > "$dir/runtime.log"
+  assert_shared_slot_refused "$dir" second-task "unlanded commits in a sole-record slot"
   assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
-    "the retire path should refuse on the landed-work check"
+    "the ordinary return should refuse on the landed-work check"
 
-  # The same unlanded work still refuses once this record is the slot's last.
-  rm -f "$dir/home/state/second-task.meta"
-  assert_shared_slot_refused "$dir" first-task "unlanded commits in a sole-record slot"
-  assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
-    "the ordinary path should refuse on the landed-work check"
-
-  pass "fm-teardown: retiring a record on a shared slot keeps every unlanded-work refusal"
+  pass "fm-teardown: retiring a record leaves the unlanded-work refusals to the slot's return"
 }
 
 test_shared_slot_with_an_undeterminable_record_refuses() {
@@ -1696,7 +1708,7 @@ test_reassigned_pool_slot_finishes_own_cleanup_without_touching_the_slot
 test_own_and_absent_slot_claims_still_tear_down
 test_shared_slot_with_a_live_record_still_refuses
 test_shared_slot_of_finished_records_retires_until_the_last
-test_shared_slot_retire_keeps_the_unlanded_work_refusals
+test_shared_slot_retire_leaves_the_work_refusals_to_the_return
 test_shared_slot_with_an_undeterminable_record_refuses
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts

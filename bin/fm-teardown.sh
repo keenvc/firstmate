@@ -135,13 +135,14 @@
 # fm_backend_agent_state on its validated recorded endpoint - the classifier
 # bin/fm-crew-state.sh trusts - never from a status line. Any other verdict, a
 # record whose endpoint cannot be validated, or a secondmate home refuses
-# exactly as a live claimant does. On that proof teardown runs every ordinary
-# refusal, including the uncommitted-changes and landed-work checks on the
-# slot, then retires only this record: its endpoint, records, checks, and
-# backlog close as usual, its own slot claim is dropped so the slot does not
-# read as reassigned, and the slot itself - its processes, copy, branch, and
-# pool lease - is left for the last record naming it, whose teardown then
-# returns it through the ordinary path.
+# exactly as a live claimant does. On that proof teardown retires only this
+# record: its endpoint, records, checks, and backlog close as usual, its own
+# slot claim is dropped so the slot does not read as reassigned, and the slot
+# itself - its processes, copy, branch, and pool lease - is neither inspected
+# nor touched. It is left for the last record naming it, whose teardown runs
+# the uncommitted-changes and landed-work checks on that copy before returning
+# it through the ordinary path, so those refusals guard the reset that would
+# actually discard work rather than every co-claimant's retirement.
 # These refusals are not relaxed by --force, and --force never takes that
 # retire path: --force authorizes discarding THIS task's unlanded work, never
 # another task's live work. Nothing of this task's own is removed by a refusal;
@@ -2493,9 +2494,9 @@ require_owned_worktree_slot_record() {  # <task-id> <worktree>
 }
 
 # The one ownership determination for this task's recorded slot. Every later
-# step that would touch $WT consults teardown_owns_worktree, and every step that
-# would only inspect it consults teardown_inspects_worktree, so a reassigned or
-# retained slot is handled consistently rather than by each step's own guess.
+# step that would read or touch $WT consults teardown_owns_worktree, so a
+# reassigned or retained slot is skipped consistently rather than by each step's
+# own guess.
 TEARDOWN_SLOT_REASSIGNED=0
 TEARDOWN_SLOT_REASSIGNED_TO=
 TEARDOWN_SLOT_REASSIGNED_HOME=
@@ -2517,12 +2518,6 @@ require_owned_task_worktree_slot() {
 
 teardown_owns_worktree() {
   [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ] && [ "$TEARDOWN_SLOT_RETAINED" != 1 ]
-}
-
-# A retained slot is still inspected: retiring a record never skips the
-# uncommitted-changes or landed-work refusals that returning it would run.
-teardown_inspects_worktree() {
-  [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ] || [ "$TEARDOWN_SLOT_RETAINED" = 1 ]
 }
 
 firstmate_home_has_treehouse_slot() {
@@ -3505,7 +3500,7 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   ORCA_PATH_MATCH_VERIFIED=1
 fi
 
-if teardown_inspects_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
+if teardown_owns_worktree && [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
     :
   else
