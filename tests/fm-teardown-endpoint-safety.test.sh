@@ -1170,8 +1170,6 @@ test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
     || fail "a shared slot whose every record is non-live was not returned: $(cat "$dir/runtime.log")"
   grep -Fq "tmux <kill-window> <-t> <=firstmate:=fm-first-task>" "$dir/runtime.log" \
     || fail "teardown did not close its own endpoint: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/stderr")" "also recorded by non-live task(s) second-task, third-task" \
-    "the note should name the records that share the copy"
   assert_contains "$(cat "$dir/stdout")" "worktree $dir/worktree)" \
     "a shared slot should complete through the ordinary return"
   assert_absent "$dir/pool/1/.fm-slot-owner" "the returned slot kept its spent claim"
@@ -1199,8 +1197,6 @@ test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
     "teardown removed or rewrote another record's claim"
   assert_contains "$(cat "$dir/stderr")" "left untouched" \
     "the reassigned slot should still report that it was left alone"
-  assert_not_contains "$(cat "$dir/stderr")" "so the slot is returned" \
-    "the shared-record note should not promise a return the claim check withholds"
   ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "teardown returned a slot another record claims: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
@@ -1533,8 +1529,6 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_absent "$dir/home/state/zellij-task.meta" "the record was left behind"
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "the shared slot was not returned: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/stderr")" "tear them down" \
-    "the note should say the remaining records must be torn down before the slot is reused"
   assert_present "$dir/home/state/done-task.meta" "the co-claimant record was removed"
 
   # The same for an own endpoint that cannot be read at all.

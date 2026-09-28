@@ -156,19 +156,16 @@
 # it names no step to clear it, because which record is the stale one is not
 # something teardown can read. This record's own endpoint is held to the weaker
 # test an unshared teardown of it already passes: only a running worker refuses,
-# because a shared copy cannot attribute in-flight work.
-# Returning a shared slot leaves the other records naming a copy that is back in
-# the pool, so the note printed on that path says they must be torn down before
-# it is spawned into again. "No work" is the ordinary
-# uncommitted-changes and landed-work refusals below, which a shared copy runs
-# regardless of kind: a scout's scratch carve-out never covers a copy another
-# record also names. A record is never removed without returning its slot unless
-# the claim proves the slot is no longer this record's, so every record that
-# still names the copy is on disk when these checks run.
+# because a shared copy cannot attribute in-flight work. "No work" is the
+# ordinary uncommitted-changes and landed-work refusals below, which a shared
+# copy runs regardless of kind: a scout's scratch carve-out never covers a copy
+# another record also names. A record is never removed without returning its
+# slot unless the claim proves the slot is no longer this record's, so every
+# record that still names the copy is on disk when these checks run.
 # These refusals are not relaxed by --force, and a co-claimant refuses under
 # --force exactly as before: --force authorizes discarding THIS task's unlanded
 # work, never work another record may own. Nothing of this task's own is removed
-# by a refusal; reconcile whichever record is wrong and re-run.
+# by a refusal.
 # Orca is not a pool slot and proves its path through
 # require_orca_worktree_path_match instead.
 # Orca tasks use the same safety checks, then close the recorded terminal and
@@ -2492,7 +2489,6 @@ require_exclusive_task_worktree_slot() {
     echo "A shared slot is returned only once no record naming it has a running worker; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
     return 1
   fi
-  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_SHARED_WITH; none of them names a live endpoint, so none refuses this teardown. Returning the slot leaves those records naming a copy that is back in the pool, so tear them down (bin/fm-teardown.sh for each of task(s) $TEARDOWN_SLOT_SHARED_WITH) before it is spawned into again; once another task takes the slot their teardown refuses behind it." >&2
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
