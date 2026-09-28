@@ -1,0 +1,35 @@
+# Final lab state after four reclaims of one task (task labscout1, backend tmux)
+
+## tmux windows on the lab socket
+firstmate:bash window_id=@0
+other:bash window_id=@4
+other:fm-labscout1 window_id=@6
+
+## state/labscout1.meta (record after the last reclaim)
+window=other:fm-labscout1
+endpoint_task_id=labscout1
+worktree=/tmp/fm-lab.Emxt7W/treehouse/.treehouse/labproj-45721d/1/labproj
+project=/tmp/fm-lab.Emxt7W/projects/labproj
+harness=claude
+kind=scout
+tasktmp=/tmp/fm-labscout1
+model=default
+effort=default
+busy_gen=g1790577268.2445190.28331
+spawn_gen=s1790577269.2433259.28594
+decisions_reviewed=1
+decision_keys=
+control_relaunch_tx=2426236.20260928T063425Z.9845
+
+## worktree HEAD (recorded before the endpoint was destroyed, then now)
+ccf2864fdc0a3c2b5cb0ce16c254497d60b9dd1f
+ccf2864fdc0a3c2b5cb0ce16c254497d60b9dd1f
+
+## uncommitted file staged before the destroy
+never committed
+?? .omc/
+?? uncommitted.txt
+
+## status log (the parked-gate line survived every reclaim)
+working [at=1790577082]: parked at a no-mistakes review gate
+done [at=1790577091]: worktree usable; HEAD 886fd3be0d375eca2e6461aeb43dbceb00864ad5 recorded in data/labscout1/report.md
