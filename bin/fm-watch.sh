@@ -697,6 +697,7 @@ signal_turnend_panes_churned() {  # <file> ...
     fi
   done
   for meta in "$STATE"/*.meta; do
+    watcher_beat
     [ -e "$meta" ] || continue
     rec_task=${meta##*/}
     rec_task=${rec_task%.meta}
@@ -742,6 +743,7 @@ signal_turnend_panes_churned() {  # <file> ...
     [ "${snapshot_kinds[$task_index]}" != secondmate ] || return 1
   done
   for ((i = 0; i < ${#signal_tasks[@]}; i++)); do
+    watcher_beat
     task=${signal_tasks[$i]}
     crew_is_provably_working "$task" && continue
     task_index=${signal_indexes[$i]}
@@ -756,6 +758,7 @@ signal_turnend_panes_churned() {  # <file> ...
   fi
   absorb_secs=$((10#$TURNEND_CHURN_ABSORB_SECS))
   for task_index in "${churn_indexes[@]}"; do
+    watcher_beat
     w=${snapshot_windows[$task_index]}
     key=${snapshot_keys[$task_index]}
     backend=${snapshot_backends[$task_index]}
@@ -818,6 +821,7 @@ signal_turnend_panes_churned() {  # <file> ...
 recorded_windows() {
   local meta w seen=
   for meta in "$STATE"/*.meta; do
+    watcher_beat
     [ -e "$meta" ] || continue
     w=$(fm_backend_target_of_meta "$meta")
     [ -n "$w" ] || continue

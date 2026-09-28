@@ -71,10 +71,12 @@ wait_live() {
 # ever ran - and then every "no wake, no marker" assertion passes vacuously
 # while every "marker written" assertion fails spuriously.
 # The liveness beacon is republished throughout every poll and names the cycle
-# number first (fm_beacon_cycle in tests/lib.sh reads it), so this drops any
-# beacon left by an earlier round, waits for THIS watcher to publish one, then
-# waits for its cycle number to advance (the next poll's top) - and the whole
-# cycle in between is what the caller's assertions describe.
+# number first (fm_beacon_cycle in tests/lib.sh reads it), so the first number
+# that reappears after the rm can be a cycle already half run. This therefore
+# drops any beacon left by an earlier round, records the first number THIS
+# watcher publishes, and waits for it to advance TWICE: the first advance is a
+# cycle top, the second is the next top, and the whole cycle between them - every
+# phase of it - is what the caller's assertions describe.
 # 0 if the watcher is still alive after a completed cycle, 1 if it exited.
 wait_poll_cycle() {  # <state> <pid> [limit-ticks]
   local state=$1 pid=$2 limit=${3:-300} beat first now i=0
@@ -91,7 +93,7 @@ wait_poll_cycle() {  # <state> <pid> [limit-ticks]
   while [ "$i" -lt "$limit" ]; do
     kill -0 "$pid" 2>/dev/null || return 1
     now=$(fm_beacon_cycle "$beat")
-    if [ -n "$now" ] && [ "$now" != "$first" ]; then
+    if [ -n "$now" ] && [ "$now" -ge $((first + 2)) ]; then
       return 0
     fi
     sleep 0.1
