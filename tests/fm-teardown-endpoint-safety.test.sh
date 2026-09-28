@@ -1214,6 +1214,36 @@ test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
   pass "fm-teardown: a shared slot whose every record is non-live and whose copy is clean is returned"
 }
 
+# A returned slot the pool has since handed to a live task: the claim proves it
+# is no longer this record's, so the record clears through the reassigned path
+# instead of colliding with the new occupant's record.
+test_retaken_slot_clears_its_leftover_record_through_the_claim() {
+  local dir
+
+  dir=$(make_shared_slot_case shared-retaken)
+  write_shared_slot_ship_meta "$dir" leftover-task
+  write_shared_slot_ship_meta "$dir" live-task
+  printf 'fm-live-task\n' > "$dir/tmux-live"
+  claim_pool_slot "$dir" live-task
+  : > "$dir/worktree/sentinel"
+
+  run_unforced_case "$dir" leftover-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "a leftover record on a retaken slot could not clear: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/leftover-task.meta" "the leftover record was not removed"
+  assert_present "$dir/home/state/live-task.meta" "the live occupant's record was removed"
+  assert_present "$dir/worktree/sentinel" "the retaken slot's copy was reset"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=live-task" \
+    "the live occupant's claim was removed or rewritten"
+  ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the retaken slot was returned to the pool: $(cat "$dir/runtime.log")"
+  ! grep -Fq "kill-window> <-t> <=firstmate:=fm-live-task" "$dir/runtime.log" \
+    || fail "teardown closed the live occupant's endpoint: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stderr")" "reassigned" \
+    "the run should report the reassignment rather than a collision"
+
+  pass "fm-teardown: a leftover record on a retaken slot clears through the claim"
+}
+
 test_shared_slot_with_work_in_its_copy_refuses_every_record() {
   local dir
 
@@ -1570,8 +1600,6 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "not even with --force" \
     "--force should keep the existing refusal"
-  assert_contains "$(cat "$dir/stderr")" "re-run teardown for done-task without it" \
-    "--force should name the unforced rerun that can clear a shared slot"
 
   pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
 }
@@ -1966,6 +1994,7 @@ test_own_and_absent_slot_claims_still_tear_down
 test_shared_slot_with_a_live_record_still_refuses
 test_shared_slot_of_finished_records_returns_once_every_record_is_non_live
 test_shared_slot_with_work_in_its_copy_refuses_every_record
+test_retaken_slot_clears_its_leftover_record_through_the_claim
 test_shared_slot_of_windowless_records_clears_in_any_order
 test_scout_copy_is_scratch_only_while_no_other_record_names_it
 test_shared_slot_with_an_undeterminable_record_refuses

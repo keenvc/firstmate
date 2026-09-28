@@ -109,7 +109,10 @@
 # status, records, checks, backlog - while every step that would read or touch
 # that slot is skipped: no process kill under it, no dirty or landed-work
 # inspection of it, no branch or hook removal in it, no Treehouse return, and
-# never the other task's claim. Skipping the inspection discards nothing of this
+# never the other task's claim. The claim is therefore read FIRST, and a claim
+# naming another task skips the record scan above too: a record naming a slot
+# this record no longer owns is that claimant's business, not a collision this
+# teardown may refuse on. Skipping the inspection discards nothing of this
 # task's: whatever unlanded work it had in that slot was already destroyed when
 # the pool handed the slot on. Refusing instead would strand the record, because
 # bin/fm-backend.sh's endpoint validation refuses an empty or missing worktree=
@@ -2425,7 +2428,6 @@ coclaimant_endpoint_state() {  # <meta> <task-id> <field>
 # runs regardless of kind - to decide whether the slot may be returned. Any
 # live or undeterminable co-claimant still refuses exactly as before.
 TEARDOWN_SLOT_SHARED_WITH=
-TEARDOWN_SLOT_COLLISION_RC=4
 require_exclusive_worktree_slot_record() {
   local record_meta=$1 record_id=$2 record_state=$3 worktree=$4 shared_ok=${5:-0}
   local slot state_dir other other_id field other_path other_slot endpoint_state
@@ -2461,7 +2463,7 @@ require_exclusive_worktree_slot_record() {
         if [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
-        return "$TEARDOWN_SLOT_COLLISION_RC"
+        return 1
       done
     done
   done
@@ -2469,16 +2471,10 @@ require_exclusive_worktree_slot_record() {
 }
 
 require_exclusive_task_worktree_slot() {
-  local slot own_state shared_ok=0 rc=0
+  local slot own_state shared_ok=0
   slot=$(teardown_live_slot_path) || return 0
   [ "$FORCE" = "--force" ] || shared_ok=1
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || rc=$?
-  if [ "$rc" != 0 ]; then
-    if [ "$rc" = "$TEARDOWN_SLOT_COLLISION_RC" ] && [ "$shared_ok" != 1 ]; then
-      echo "A slot whose every record is non-live and whose copy holds no work is cleared by the ordinary teardown of each of them; --force never takes that path, so re-run teardown for $ID without it." >&2
-    fi
-    return 1
-  fi
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || return 1
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
@@ -3439,8 +3435,10 @@ remove_secondmate_registry_entry() {
   return "$rc"
 }
 
-require_exclusive_task_worktree_slot || exit 1
 require_owned_task_worktree_slot || exit 1
+if [ "$TEARDOWN_SLOT_REASSIGNED" != 1 ]; then
+  require_exclusive_task_worktree_slot || exit 1
+fi
 
 validate_pr_poll_cleanup "$STATE" "$ID" || exit 1
 
