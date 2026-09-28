@@ -1,0 +1,19 @@
+watcher pid=3570370 freezing it and its per-cycle child mid-sweep (SIGSTOP)
+t=00s cycle=1 beacon_age=1s watcher_state=T
+t=06s cycle=1 beacon_age=7s watcher_state=T
+t=12s cycle=1 beacon_age=13s watcher_state=T
+t=18s cycle=1 beacon_age=19s watcher_state=T
+t=24s cycle=1 beacon_age=25s watcher_state=T
+--- guard predicate against the frozen watcher ---
+fm_watcher_healthy: UNHEALTHY
+--- real turn-end guard against the frozen watcher ---
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  TURN WOULD END BLIND - SUPERVISION IS OFF
+●  100 task(s) in flight, but no watcher is publishing liveness for this home (last beat: 31s ago).
+●  The Stop-owned auto-arm did not claim this home either, so recovery is NOT already under way.
+●  watcher supervision needs Stop-owned automatic recovery; inspect the hook registration and startup status before ending the turn.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+turnend-guard exit=2
+--- a re-arm over the frozen watcher ---
+watcher: lock held by live pid 3570370 but heartbeat is stale for 33s (>20s); inspect or stop that watcher before re-arming.
+re-arm exit=1

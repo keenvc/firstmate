@@ -1,0 +1,19 @@
+watch.sh sha: 6eb261599122
+windows=101 task-records=100
+watcher pid=341457 lock=341457 beacon=1
+--- beacon during the first real sweep (grace=20s, poll=5s) ---
+t=00s cycle=1 beacon_age=0s
+t=05s cycle=1 beacon_age=0s
+t=10s cycle=1 beacon_age=0s
+t=15s cycle=1 beacon_age=0s
+t=20s cycle=1 beacon_age=0s
+watcher still running (mid-sweep)
+--- guard predicate mid-sweep ---
+fm_watcher_healthy: HEALTHY
+--- real Stop-owned auto-arm (bin/fm-claude-stop-autoarm.sh) mid-sweep ---
+autoarm exit=0
+--- real turn-end guard (bin/fm-turnend-guard.sh --claude) mid-sweep ---
+turnend-guard exit=0
+--- watcher stderr ---
+--- watcher stdout ---
+LAB=/tmp/fm-lab.sVPPNy TAG=fixed done

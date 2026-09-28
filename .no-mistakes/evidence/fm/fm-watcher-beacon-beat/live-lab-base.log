@@ -1,0 +1,24 @@
+watch.sh sha: f68a70ef3752
+windows=101 task-records=100
+watcher pid=3133944 lock=3133944 beacon=
+--- beacon during the first real sweep (grace=20s, poll=5s) ---
+t=00s cycle= beacon_age=0s
+t=05s cycle= beacon_age=5s
+t=10s cycle= beacon_age=10s
+t=15s cycle= beacon_age=15s
+t=20s cycle= beacon_age=20s
+watcher still running (mid-sweep)
+--- guard predicate mid-sweep ---
+fm_watcher_healthy: UNHEALTHY
+--- real Stop-owned auto-arm (bin/fm-claude-stop-autoarm.sh) mid-sweep ---
+firstmate watcher auto-arm FAILED - the Stop-owned automatic supervision mechanism is broken after 2 bounded attempts, and no live watcher with a fresh beacon was verified.
+watcher: lock held by live pid 3133944 but heartbeat is stale for 26s (>20s); inspect or stop that watcher before re-arming.
+watcher: FAILED - watcher cycle exited 1 without an actionable reason
+Do not launch a manual background arm from this notice; investigate the automatic Stop hook and watcher startup before ending blind.
+autoarm exit=2 (124 = still following a healthy watcher when the 120s probe bound hit)
+--- real turn-end guard (bin/fm-turnend-guard.sh --claude) mid-sweep ---
+turnend-guard exit=0
+--- watcher stderr ---
+--- watcher stdout ---
+LAB=/tmp/fm-lab.oBC6Hd TAG=base done
+SCRIPT_EXIT=143
