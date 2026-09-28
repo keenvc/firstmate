@@ -22,8 +22,9 @@ set -u
 TMP_ROOT=$(fm_test_tmproot fm-spawn-pi-session)
 
 # new_case <name> <crew-harness> [pi-executable-name] -> sets the case globals.
-# The stub <pi-executable-name> records its arguments so the launch assertions
-# read the exact session flag the pane would have received.
+# The stub <pi-executable-name> exists only to answer the launch's `--help`
+# version probe; the launch itself is never executed, so every assertion reads
+# the composed launch line from the fake tmux's FM_FAKE_LAUNCH_LOG.
 new_case() {
   local name=$1 harness=$2 bin_name=${3:-pi}
   CASE="$TMP_ROOT/$name"
@@ -36,7 +37,6 @@ new_case() {
 case "\${1:-}" in
   --help) printf '%s\n' 'Options: --tui-mode <mode> --session-id <id>'; exit 0 ;;
 esac
-printf '%s\n' "\$*" >> '$CASE/pi-args'
 exit 0
 SH
   chmod +x "$FAKEBIN/$bin_name"

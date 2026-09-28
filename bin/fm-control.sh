@@ -78,7 +78,8 @@
 #              agent stops.
 #              --note is required for a ship or scout, whose replacement
 #              inherits the local copy but none of the worker's unsaid context;
-#              on pi/pi-signed the replacement also resumes the task's recorded
+#              on pi/pi-signed, when the resolved executable advertises
+#              --session-id, the replacement also resumes the task's recorded
 #              Pi session, so the conversation itself continues. A
 #              secondmate reconciles its own home's records at startup, so its
 #              standing charter is never rewritten.
@@ -224,7 +225,7 @@ shift 2
 if ! fm_control_verb_allowed "$VERB"; then
   {
     if [ "$VERB" = resume ]; then
-      echo "error: 'resume' is not a control verb: resuming an exited agent is not deterministic across the verified adapters (codex and grok need a session id printed at exit, opencode continues the most recent session for the cwd, and claude and kimi have no verified pane-resume contract). Use 'relaunch', which carries the brief plus a progress note into a fresh agent on any adapter - and on pi/pi-signed resumes the task's recorded session, so the conversation continues."
+      echo "error: 'resume' is not a control verb: resuming an exited agent is not deterministic across the verified adapters (codex and grok need a session id printed at exit, opencode continues the most recent session for the cwd, and claude and kimi have no verified pane-resume contract). Use 'relaunch', which carries the brief plus a progress note into a fresh agent on any adapter - and for a pi/pi-signed ship or scout whose executable advertises --session-id, resumes the task's recorded session so the conversation continues."
     else
       echo "error: '$VERB' is not a control verb"
     fi
