@@ -37,8 +37,10 @@
 #
 # THE REPORT IS THE DELIVERABLE
 # A sweep writes state/hold-reverify/docket.json (schema fm-hold-reverify-docket.v1)
-# listing every examined hold with its verdict, structured evidence, and a short
-# reason, and prints ONE line (the wake) only when the finding set changes.
+# listing every examined hold with its verdict and the structured fields that
+# decided it - the row's state and recorded hold reason, its recorded pull request
+# and that request's state, and whether the row records a merged completion - and
+# prints ONE line (the wake) only when the finding set changes.
 # state/.hold-reverify stores the last sweep's epoch and a digest of the
 # {id:verdict} set, mirroring state/.tool-updates, so a new or changed finding
 # wakes once while an unchanged sweep stays silent. A sweep killed by the

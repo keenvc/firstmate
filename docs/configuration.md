@@ -637,7 +637,7 @@ Aged holds come from the canonical local backlog projection (`fm-fleet-snapshot.
 `check` is a plain custom watcher check, so it stays in the check-fires-then-firstmate-decides flow that the process-event `when` adapter explicitly excludes for an action whose right form depends on what the condition finds.
 Arm it once per home with `bin/fm-hold-reverify.sh arm`, which writes `state/hold-reverify.check.sh` and binds its bytes with `bin/fm-check-register.sh` so the watcher dispatches it on its normal cadence and turns its one line into a `check:` wake.
 `disarm` removes the shim, its trust binding, and the report record.
-Each sweep writes `state/hold-reverify/docket.json` (schema `fm-hold-reverify-docket.v1`) with every examined hold's verdict, evidence, and reason, and prints one line only when the finding set changes.
+Each sweep writes `state/hold-reverify/docket.json` (schema `fm-hold-reverify-docket.v1`) with every examined hold's verdict and the structured evidence it was decided from, and prints one line only when the finding set changes.
 `state/.hold-reverify` records the sweep epoch and a digest of the `{id: verdict}` set, so a new or changed finding is reported once while an unchanged sweep stays silent.
 A sweep the watcher kills writes no record and is retried.
 
