@@ -2698,9 +2698,14 @@ $chunk
 EOF
   return 0
 }
-signal_crew_provably_working() {  # <file> ...
-  local f base dir task seen=""
+# An optional <progress-fn> (empty for none) is called before each file, so a
+# caller that publishes liveness (the watcher) can do so from this sweep: it runs
+# one bounded crew_absorb_class read per distinct task with nothing else between.
+signal_crew_provably_working() {  # <progress-fn> <file> ...
+  local progress=${1:-} f base dir task seen=""
+  [ "$#" -eq 0 ] || shift
   for f in "$@"; do
+    [ -z "$progress" ] || "$progress"
     base=${f##*/}
     dir=${f%/*}
     [ "$dir" != "$f" ] || dir=.

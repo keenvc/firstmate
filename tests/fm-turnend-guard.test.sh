@@ -430,11 +430,7 @@ test_hook_blocks_with_live_lock_and_stale_beacon() {
   wait "$pid" 2>/dev/null || true
   expect_code 2 "$status" "hook must block when a live watcher lock has an ancient beacon"
   assert_contains "$out" "$REQUIRED_REASON" "block reason must contain the exact required instruction"
-  assert_contains "$out" "a watcher process holds this home lock but is not publishing its liveness beacon" \
-    "a live lock holder with a stale beacon must be reported as running but not publishing"
-  assert_not_contains "$out" "no live watcher holds this home lock" \
-    "a live lock holder must not be reported as a missing watcher"
-  pass "fm-turnend-guard: blocks on a live watcher lock with an ancient beacon, naming it as not publishing"
+  pass "fm-turnend-guard: blocks on a live watcher lock with an ancient beacon"
 }
 
 test_hook_blocks_when_unhealthy_in_primary() {
@@ -445,10 +441,8 @@ test_hook_blocks_when_unhealthy_in_primary() {
   expect_code 2 "$status" "hook must block (exit 2) when in-flight work has no live watcher"
   assert_contains "$out" "$REQUIRED_REASON" "block reason must contain the exact required instruction"
   assert_contains "$out" "TURN WOULD END BLIND" "block banner must read as an alarm"
-  assert_contains "$out" "no live watcher holds this home lock (last beat: never)" \
-    "a home with no watcher must be reported as having no watcher"
-  assert_not_contains "$out" "is not publishing its liveness beacon" \
-    "a missing watcher must not be reported as a silent one"
+  assert_contains "$out" "no watcher is publishing liveness for this home (last beat: never)" \
+    "the block banner must state only what is observed about the beacon"
   pass "fm-turnend-guard: blocks with the exact required reason in the primary when unhealthy"
 }
 
@@ -493,7 +487,7 @@ test_hook_registered_check_only_blocks_with_check_banner() {
   register_custom_check "$dir/state" issue-comments
   out=$(run_hook "$dir" false); status=$?
   expect_code 2 "$status" "default hook mode must block a registered-check-only blind turn"
-  assert_contains "$out" "1 registered custom check(s), but no live watcher" "check-only blind stop must identify its supervision need"
+  assert_contains "$out" "1 registered custom check(s), but no watcher is publishing liveness for this home" "check-only blind stop must identify its supervision need"
   assert_not_contains "$out" "X-mode relay polling needs supervision" "check-only blind stop must not be misreported as relay polling"
   pass "fm-turnend-guard: registered-check-only supervision is named in the block banner"
 }

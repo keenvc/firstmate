@@ -203,18 +203,6 @@ fm_watcher_healthy() {
   return 0
 }
 
-# fm_watcher_present <state> <watch-path> [home]
-# True when a live, identity-matched watcher process holds this home's lock,
-# whatever its beacon says. Guard wording uses it only to tell "no watcher" from
-# "a watcher is running but not publishing liveness"; it never changes a guard,
-# arm, or eviction decision.
-fm_watcher_present() {
-  local state=$1 watch_path=$2 home=${3:-$FM_HOME} pid
-  pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
-  fm_pid_alive "$pid" || return 1
-  fm_watcher_lock_matches_pid "$state" "$watch_path" "$pid" "$home"
-}
-
 # fm_watcher_healthy above is the PID-STRICT primitive: true only when a live,
 # identity-matched watcher PROCESS holds this home's lock with a fresh beacon. The
 # arm layer (bin/fm-watch-arm.sh, bin/fm-claude-stop-autoarm.sh) needs exactly

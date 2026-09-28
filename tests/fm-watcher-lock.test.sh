@@ -321,31 +321,7 @@ test_guard_warnings() {
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   [ ! -s "$err" ] || fail "guard warned with a live watcher and fresh beacon: $(cat "$err")"
-
-  # (3) live watcher, stale beacon: the banner names a running watcher that is
-  # not publishing liveness, never a missing one.
-  dir=$(make_case guard-silent)
-  state="$dir/state"
-  err="$dir/guard.err"
-  printf 'project=x\n' > "$state/task.meta"
-  sleep 60 &
-  pid=$!
-  identity=$(FM_STATE_OVERRIDE="$state" bash -c '. "$1"; fm_pid_identity "$2"' _ "$LIB" "$pid") || fail "could not identify silent guard watcher"
-  mkdir -p "$state/.watch.lock"
-  printf '%s\n' "$pid" > "$state/.watch.lock/pid"
-  printf '%s\n' "$dir" > "$state/.watch.lock/fm-home"
-  printf '%s\n' "$WATCH" > "$state/.watch.lock/watcher-path"
-  printf '%s\n' "$identity" > "$state/.watch.lock/pid-identity"
-  printf '7\n' > "$state/.last-watcher-beat"
-  touch -t 202001010000 "$state/.last-watcher-beat"
-  PATH="$blind:$PATH" CLAUDECODE=1 PI_CODING_AGENT='' GROK_AGENT='' FM_HOME="$dir" FM_ROOT_OVERRIDE="$dir" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=300 "$ROOT/bin/fm-guard.sh" 2> "$err" >/dev/null || fail "guard failed"
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  grep -F 'WATCHER DOWN - SUPERVISION IS OFF' "$err" >/dev/null || fail "guard did not alarm on a silent watcher: $(cat "$err")"
-  grep -F "a watcher process holds this home lock but is not publishing its liveness beacon" "$err" >/dev/null \
-    || fail "guard did not name the running-but-silent watcher: $(cat "$err")"
-  ! grep -F 'no watcher has a fresh beacon' "$err" >/dev/null || fail "guard reported a silent watcher as missing"
-  pass "guard banner leads when down with pending wakes (repair-after-drain), names a silent watcher distinctly, and stays silent when live and fresh"
+  pass "guard banner leads when down with pending wakes (repair-after-drain) and stays silent when live and fresh"
 }
 
 test_lock_single_winner_under_concurrency() {
@@ -1400,11 +1376,6 @@ watcher_is_healthy() {  # <dir> <state> <grace>
     _ "$LIB" "$2" "$WATCH" "$3" "$1"
 }
 
-watcher_is_present() {  # <dir> <state>
-  FM_HOME="$1" FM_STATE_OVERRIDE="$2" bash -c '. "$1"; fm_watcher_present "$2" "$3" "$4"' \
-    _ "$LIB" "$2" "$WATCH" "$1"
-}
-
 slow_read_started() {  # <pid-file>
   [ -s "$1" ]
 }
@@ -1469,9 +1440,8 @@ test_long_sweep_keeps_beacon_fresh() {
 
 test_wedged_step_goes_stale_and_is_detected() {
   # A pane read that never returns blocks the watcher inside one step. The beacon
-  # must stop advancing, the guard predicate must read it unhealthy, the watcher
-  # must still read as present (running, not missing), and a re-arm must still
-  # refuse with the stale-heartbeat diagnosis.
+  # must stop advancing, the guard predicate must read it unhealthy, and a re-arm
+  # must still refuse with the stale-heartbeat diagnosis.
   local dir state fakebin pid grace=2 i age line out rc
   dir=$(make_case wedged-step)
   state="$dir/state"
@@ -1508,8 +1478,6 @@ test_wedged_step_goes_stale_and_is_detected() {
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"
     fail "the guard predicate read a wedged watcher as healthy"
   fi
-  watcher_is_present "$dir" "$state" \
-    || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "a wedged watcher did not read as present"; }
   out=$(PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_GUARD_GRACE=$grace \
     FM_WATCHER_STALL_BOUND=999999 "$WATCH" 2>&1); rc=$?
   kill "$pid" 2>/dev/null || true
@@ -1517,12 +1485,12 @@ test_wedged_step_goes_stale_and_is_detected() {
   stop_slow_reads "$dir/reads"
   [ "$rc" -eq 1 ] || fail "re-arm over a wedged watcher exited $rc, want 1: $out"
   assert_contains "$out" "lock held by live pid $pid but heartbeat is stale" "re-arm over a wedged watcher lost its stale diagnosis"
-  pass "a watcher blocked inside one step still goes stale, reads unhealthy but present, and re-arm still refuses"
+  pass "a watcher blocked inside one step still goes stale, reads unhealthy, and re-arm still refuses"
 }
 
 test_exited_watcher_is_detected_as_absent() {
   # A watcher that exits leaves a beacon that is still fresh for a while; the
-  # strict predicate must still read the home unhealthy and the watcher as absent.
+  # strict predicate must still read the home unhealthy.
   local dir state fakebin pid i status
   dir=$(make_case exited-watcher)
   state="$dir/state"
@@ -1545,9 +1513,6 @@ test_exited_watcher_is_detected_as_absent() {
   [ "$(beacon_age "$state")" -lt 300 ] || fail "the exited watcher's beacon was not fresh, so the case proved nothing"
   if watcher_is_healthy "$dir" "$state" 300; then
     fail "an exited watcher with a fresh leftover beacon read healthy"
-  fi
-  if watcher_is_present "$dir" "$state"; then
-    fail "an exited watcher read as present"
   fi
   pass "a watcher that exits is still detected as absent despite a fresh leftover beacon"
 }

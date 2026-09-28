@@ -571,31 +571,6 @@ test_failed_close_rewakes_with_failure_banner() {
   pass "auto-arm: bounded failure verification emits one automatic-mechanism alarm"
 }
 
-test_failed_close_with_silent_watcher_names_it_running() {
-  # A live identity-matched watcher holds the lock but has stopped publishing its
-  # beacon. The notice must say supervision is running but not proving liveness,
-  # not that the automatic mechanism is broken or the watcher is missing.
-  local dir out status pid identity
-  dir=$(make_primary_dir "$TMP_ROOT/failed-silent")
-  : > "$dir/state/task.meta"
-  write_arm_fixture "$dir" failed
-  sleep 60 &
-  pid=$!
-  identity=$(watcher_identity "$dir" "$pid") || fail "could not identify silent watcher holder"
-  record_watcher_lock "$dir" "$pid" "$identity"
-  printf '4\n' > "$dir/state/.last-watcher-beat"
-  touch -t 202001010000 "$dir/state/.last-watcher-beat"
-  out=$(run_autoarm "$dir" 2>/dev/null); status=$?
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  expect_code 2 "$status" "a silent watcher must still rewake as an alarm"
-  assert_contains "$out" "a watcher process holds this home lock but is not publishing its liveness beacon" \
-    "the notice must say a watcher is running but not publishing"
-  assert_not_contains "$out" "automatic supervision mechanism is broken" "a silent watcher must not be reported as a broken mechanism"
-  assert_not_contains "$out" "no live watcher with a fresh beacon was verified" "a silent watcher must not be reported as missing"
-  pass "auto-arm: a failure over a running watcher that stopped publishing names it as silent, not missing"
-}
-
 test_failed_cycles_notify_once_and_keep_retrying() {
   local dir out1 out2 status1 status2
   dir=$(make_primary_dir "$TMP_ROOT/failed-dedup")
@@ -1746,7 +1721,6 @@ test_actionable_close_with_live_successor_rewakes_once
 test_attached_cycle_end_starts_handling_successor
 test_unconfirmed_handling_successor_still_rewakes
 test_failed_close_rewakes_with_failure_banner
-test_failed_close_with_silent_watcher_names_it_running
 test_failed_cycles_notify_once_and_keep_retrying
 test_failure_notice_marker_write_refuses_delivery_and_retries
 test_unverified_clean_close_exhausts_retries

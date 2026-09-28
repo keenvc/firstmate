@@ -225,7 +225,7 @@ if [ "$(fm_path_age "$STATE/.last-watcher-beat")" -lt "$AFK_GRACE" ] \
 fi
 
 block_stop() {
-  local afk x_mode reason rule cause
+  local afk x_mode reason rule
   afk=0
   [ -e "$STATE/.afk" ] && afk=1
   x_mode=0
@@ -233,22 +233,17 @@ block_stop() {
   reason=$("$SCRIPT_DIR/fm-supervision-instructions.sh" --afk "$afk" --x-mode "$x_mode" --repair-line 2>/dev/null \
     || printf '%s\n' 'tasks in flight, no live watcher - repair missing watcher supervision according to the session-start operating block before ending the turn')
   rule='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
-  if fm_watcher_present "$STATE" "$WATCH" "$FM_HOME"; then
-    cause="a watcher process holds this home lock but is not publishing its liveness beacon (last beat: $FM_SUP_BEACON_DESC)"
-  else
-    cause="no live watcher holds this home lock (last beat: $FM_SUP_BEACON_DESC)"
-  fi
   {
     printf '●%s\n' "$rule"
     printf '●  TURN WOULD END BLIND - SUPERVISION IS OFF\n'
     if [ "$FM_SUP_IN_FLIGHT" -gt 0 ]; then
-      printf '●  %s task(s) in flight, but %s.\n' "$FM_SUP_IN_FLIGHT" "$cause"
+      printf '●  %s task(s) in flight, but no watcher is publishing liveness for this home (last beat: %s).\n' "$FM_SUP_IN_FLIGHT" "$FM_SUP_BEACON_DESC"
     elif [ "$FM_SUP_SOURCES" -gt 0 ]; then
-      printf '●  %s process-event source(s) registered, but %s.\n' "$FM_SUP_SOURCES" "$cause"
+      printf '●  %s process-event source(s) registered, but no watcher is publishing liveness for this home (last beat: %s).\n' "$FM_SUP_SOURCES" "$FM_SUP_BEACON_DESC"
     elif [ "$FM_SUP_CHECKS" -gt 0 ]; then
-      printf '●  %s registered custom check(s), but %s.\n' "$FM_SUP_CHECKS" "$cause"
+      printf '●  %s registered custom check(s), but no watcher is publishing liveness for this home (last beat: %s).\n' "$FM_SUP_CHECKS" "$FM_SUP_BEACON_DESC"
     else
-      printf '●  X-mode relay polling needs supervision, but %s.\n' "$cause"
+      printf '●  X-mode relay polling needs supervision, but no watcher is publishing liveness for this home (last beat: %s).\n' "$FM_SUP_BEACON_DESC"
     fi
     if [ "$CLAUDE_MODE" -eq 1 ]; then
       printf '●  The Stop-owned auto-arm did not claim this home either, so recovery is NOT already under way.\n'

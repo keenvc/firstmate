@@ -801,15 +801,15 @@ test_signal_crew_provably_working_classifier() {
   export FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh"
   export FM_FAKE_CREW_STATE_a='state: working · source: run-step · running'
   export FM_FAKE_CREW_STATE_b='state: done · source: run-step · run passed'
-  signal_crew_provably_working "$state/a.status" "$state/a.turn-ended" \
+  signal_crew_provably_working '' "$state/a.status" "$state/a.turn-ended" \
     || fail "a single provably-working crew (status+turn-end) was not benign"
-  ! signal_crew_provably_working "$state/a.status" "$state/b.turn-ended" \
+  ! signal_crew_provably_working '' "$state/a.status" "$state/b.turn-ended" \
     || fail "a coalesced batch including a stopped crew was treated as benign"
-  ! signal_crew_provably_working "$state/b.turn-ended" \
+  ! signal_crew_provably_working '' "$state/b.turn-ended" \
     || fail "a stopped crew's bare turn-end was treated as benign"
-  ! signal_crew_provably_working "$state/a.meta" \
+  ! signal_crew_provably_working '' "$state/a.meta" \
     || fail "a non-signal file resolved to a benign verdict"
-  ! signal_crew_provably_working \
+  ! signal_crew_provably_working '' \
     || fail "an empty signal file list was treated as benign"
   unset FM_FAKE_CREW_STATE_a FM_FAKE_CREW_STATE_b
   pass "signal_crew_provably_working: benign only when every referenced crew is provably working"
@@ -823,14 +823,14 @@ test_secondmate_status_routine_absorbed_routed_surfaced_classifier() {
   printf 'kind=secondmate\n' > "$state/sm.meta"
   # Unmarked routine progress from a PROVABLY working mate absorbs like any crew.
   printf 'working: step 2 of 5\npaused [at=1]: waiting on CI\n' > "$state/sm.status"
-  signal_crew_provably_working "$state/sm.status" \
+  signal_crew_provably_working '' "$state/sm.status" \
     || fail "a working secondmate's routine working/paused progress was not absorbed"
-  signal_crew_provably_working "$state/sm.turn-ended" \
+  signal_crew_provably_working '' "$state/sm.turn-ended" \
     || fail "a working secondmate's bare turn-end lost its ordinary absorb"
   # A terminal outcome surfaces even from a healthy mate: an unmarked resolved:
   # line self-closing a decision must still wake the primary.
   printf 'working: routine\nresolved: took A\n' > "$state/sm.status"
-  ! signal_crew_provably_working "$state/sm.status" \
+  ! signal_crew_provably_working '' "$state/sm.status" \
     || fail "a healthy secondmate's unmarked resolved: line was absorbed as routine progress"
   # Parent-directed content surfaces regardless of busy evidence: decisions,
   # blockers, terminal outcomes, notes, correlation-marked lines (both forms the
@@ -841,20 +841,20 @@ test_secondmate_status_routine_absorbed_routed_surfaced_classifier() {
       'working [corr=0123456789abcdef]: mirrored remote line' \
       'shrug: an unknown verb'; do
     printf 'working: routine\n%s\nworking: routine again\n' "$line" > "$state/sm.status"
-    ! signal_crew_provably_working "$state/sm.status" \
+    ! signal_crew_provably_working '' "$state/sm.status" \
       || fail "a busy secondmate's '$line' was absorbed as routine progress"
   done
   # Routine progress from a mate that is NOT provably working still surfaces.
   export FM_FAKE_CREW_STATE_sm='state: unknown · source: none · idle worker'
   printf 'working: step 3 of 5\n' > "$state/sm.status"
-  ! signal_crew_provably_working "$state/sm.status" \
+  ! signal_crew_provably_working '' "$state/sm.status" \
     || fail "an unproven secondmate's routine progress was absorbed"
   # An ordinary crewmate keeps the plain provably-working rule: the marker and
   # verb read is keyed on recorded kind, not on task naming or content guessing.
   export FM_FAKE_CREW_STATE_crew='state: working · source: run-step · running'
   printf 'kind=ship\n' > "$state/crew.meta"
   printf 'working: progress\n' > "$state/crew.status"
-  signal_crew_provably_working "$state/crew.status" \
+  signal_crew_provably_working '' "$state/crew.status" \
     || fail "the secondmate rule leaked onto an ordinary crewmate status"
   unset FM_FAKE_CREW_STATE_sm FM_FAKE_CREW_STATE_crew
   pass "a secondmate's unmarked routine progress absorbs when provably working; routed, terminal, note, marked, and unknown lines surface"
