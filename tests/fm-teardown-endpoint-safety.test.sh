@@ -1195,6 +1195,10 @@ test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
     || fail "teardown of a record whose slot another record claims failed: $(cat "$dir/stderr")"
   assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=second-task" \
     "teardown removed or rewrote another record's claim"
+  assert_contains "$(cat "$dir/stderr")" "left untouched" \
+    "the reassigned slot should still report that it was left alone"
+  assert_not_contains "$(cat "$dir/stderr")" "so the slot is returned" \
+    "the shared-record note should not promise a return the claim check withholds"
   ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "teardown returned a slot another record claims: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
@@ -1219,6 +1223,10 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record() {
   assert_shared_slot_refused "$dir" first-task "uncommitted changes in a shared copy"
   assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
     "the refusal should name the uncommitted-changes check"
+  assert_contains "$(cat "$dir/stderr")" "second-task" \
+    "the refusal should name the record that shares the copy"
+  assert_not_contains "$(cat "$dir/stderr")" "--force" \
+    "the shared-copy refusal should not name a remedy --force refuses"
   assert_present "$dir/worktree/sentinel" \
     "the refusal discarded the shared copy's uncommitted changes"
   : > "$dir/runtime.log"
@@ -1248,6 +1256,10 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record() {
   assert_shared_slot_refused "$dir" first-task "unlanded commits in a shared copy"
   assert_contains "$(cat "$dir/stderr")" "has work not yet merged" \
     "the refusal should name the landed-work check"
+  assert_contains "$(cat "$dir/stderr")" "second-task" \
+    "the landed-work refusal should name the record that shares the copy"
+  assert_not_contains "$(cat "$dir/stderr")" "--force" \
+    "the landed-work refusal on a shared copy should not name a remedy --force refuses"
   assert_contains "$(git -C "$dir/worktree" log -1 --format=%s)" unlanded \
     "the refusal discarded the shared copy's unlanded commit"
 
@@ -1323,7 +1335,7 @@ test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
   write_shared_slot_ship_meta "$dir" ship-task
   : > "$dir/worktree/sentinel"
   assert_shared_slot_refused "$dir" scout-task "a scout sharing a dirty copy"
-  assert_contains "$(cat "$dir/stderr")" "cannot be shown to have written" \
+  assert_contains "$(cat "$dir/stderr")" "cannot be shown to be task scout-task's" \
     "the refusal should say the changes cannot be attributed to this record"
   assert_contains "$(cat "$dir/stderr")" "ship-task" \
     "the refusal should name the record that shares the copy"
@@ -1469,6 +1481,8 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "not even with --force" \
     "--force should keep the existing refusal"
+  assert_contains "$(cat "$dir/stderr")" "re-run teardown for done-task without it" \
+    "--force should name the unforced rerun that can clear a shared slot"
 
   pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
 }

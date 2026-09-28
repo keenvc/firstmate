@@ -1872,6 +1872,19 @@ teardown_treehouse_return() {
   return 1
 }
 
+# The remedy a work refusal may name. Discarding this task's own work needs
+# --force and nothing else, but a copy another record still names refuses under
+# --force too (require_exclusive_worktree_slot_record), and the work in it
+# cannot be shown to be this task's, so on that path the only reachable remedy
+# is to land or move the work, or to reconcile the records that share the copy.
+teardown_work_refusal_remedy() {  # <remedy-when-this-record-alone-names-the-copy>
+  if [ -n "$TEARDOWN_SLOT_SHARED_WITH" ]; then
+    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so the work in it cannot be shown to be task $ID's and no teardown of $ID may discard it: land or move that work, or reconcile whichever of those records is wrong (bin/fm-crew-state.sh), then re-run teardown." >&2
+  else
+    echo "$1" >&2
+  fi
+}
+
 validate_worktree_teardown_safety() {
   local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch
   [ -d "$WT" ] || return 0
@@ -1884,25 +1897,17 @@ validate_worktree_teardown_safety() {
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
     echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
-    echo "Restore the git index state, or get the captain's explicit OK to discard, then --force." >&2
+    teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force."
     return 1
   fi
   dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' | head -1 || true)
-
-  if [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] && [ -n "$dirty" ]; then
-    echo "REFUSED: pool slot copy $WT has uncommitted changes that task $ID cannot be shown to have written." >&2
-    echo "uncommitted changes present" >&2
-    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so it may hold their work." >&2
-    echo "Land or move that work, or reconcile whichever of those records is wrong (bin/fm-crew-state.sh), then re-run teardown." >&2
-    return 1
-  fi
 
   if ! unpushed_raw=$(git -C "$WT" log --oneline HEAD --not --remotes -- 2>/dev/null); then
     if worktree_safety_blocked_by_lock "commits not on a remote"; then
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
     echo "REFUSED: cannot inspect worktree $WT for commits not on a remote." >&2
-    echo "Restore the git index state, or get the captain's explicit OK to discard, then --force." >&2
+    teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force."
     return 1
   fi
   unpushed=$(printf '%s\n' "$unpushed_raw" | head -5)
@@ -1914,7 +1919,7 @@ validate_worktree_teardown_safety() {
         return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
       fi
       echo "REFUSED: cannot inspect worktree $WT for commits not on $DEFAULT." >&2
-      echo "Restore the git index state, or get the captain's explicit OK to discard, then --force." >&2
+      teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force."
       return 1
     fi
     unmerged=$(printf '%s\n' "$unmerged_raw" | head -5)
@@ -1922,13 +1927,13 @@ validate_worktree_teardown_safety() {
       echo "REFUSED: local-only worktree $WT has work not yet merged into $DEFAULT and not on any remote." >&2
       [ -n "$dirty" ] && echo "uncommitted changes present" >&2
       [ -n "$unmerged" ] && printf 'commits not yet on %s:\n%s\n' "$DEFAULT" "$unmerged" >&2
-      echo "Merge the branch into local $DEFAULT first (bin/fm-merge-local.sh after the captain approves), or push to a fork/remote, or get the captain's explicit OK to discard, then --force." >&2
+      teardown_work_refusal_remedy "Merge the branch into local $DEFAULT first (bin/fm-merge-local.sh after the captain approves), or push to a fork/remote, or get the captain's explicit OK to discard, then --force."
       return 1
     fi
   elif [ -n "$dirty" ]; then
     echo "REFUSED: worktree $WT has uncommitted changes." >&2
     echo "uncommitted changes present" >&2
-    echo "Commit them (or get the captain's explicit OK to discard, then --force)." >&2
+    teardown_work_refusal_remedy "Commit them (or get the captain's explicit OK to discard, then --force)."
     return 1
   elif [ -n "$unpushed" ]; then
     branch=${TEARDOWN_WORKTREE_BRANCH_FOR_SAFETY:-}
@@ -1939,7 +1944,7 @@ validate_worktree_teardown_safety() {
     if ! work_is_landed "$branch"; then
       echo "REFUSED: worktree $WT has work not on any remote and not landed." >&2
       printf 'unpushed commits:\n%s\n' "$unpushed" >&2
-      echo "Push the branch, land its PR, or get the captain's explicit OK to discard, then --force." >&2
+      teardown_work_refusal_remedy "Push the branch, land its PR, or get the captain's explicit OK to discard, then --force."
       return 1
     fi
   fi
@@ -2428,7 +2433,7 @@ require_exclusive_worktree_slot_record() {
         other_slot=$(canonical_existing_dir "$other_path") || continue
         [ "$other_slot" = "$slot" ] || continue
         endpoint_state=
-        if [ "$shared_ok" = 1 ] && [ ! "$other" -ef "$record_meta" ]; then
+        if [ "$shared_ok" = 1 ]; then
           endpoint_state=$(coclaimant_endpoint_state "$other" "$other_id" "$field")
           case "$endpoint_state" in
             dead|missing)
@@ -2440,6 +2445,9 @@ require_exclusive_worktree_slot_record() {
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
         echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
+        if [ "$shared_ok" != 1 ]; then
+          echo "A slot whose every record is non-live and whose copy holds no work is cleared by the ordinary teardown of each of them; --force never takes that path, so re-run teardown for $record_id without it." >&2
+        fi
         if [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
@@ -2458,7 +2466,7 @@ require_exclusive_task_worktree_slot() {
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
-  if [ "$TEARDOWN_WINDOWLESS" = 1 ] || [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
+  if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
     own_state=missing
   else
     own_state=$(fm_backend_agent_state "$BACKEND" "$T" 2>/dev/null) || own_state=unreadable
@@ -2471,7 +2479,7 @@ require_exclusive_task_worktree_slot() {
       return 1
       ;;
   esac
-  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_SHARED_WITH; none of them names live work, so the slot is returned if the copy proves to hold none either." >&2
+  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_SHARED_WITH; none of them names a live endpoint, so none of them refuses this teardown on its own account." >&2
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote
