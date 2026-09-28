@@ -632,7 +632,7 @@ It never calls `answer` and never closes or annotates a call, so only the captai
 A hold is `dead` when shipped reality resolves the subject - its recorded pull request is merged, or its row records a merged completion.
 It is `still_live` when the recorded pull request is open, `not_a_decision` when the row carries no live captain question (already Done, or no hold reason), and `unestablishable` otherwise.
 `dead` is never inferred from absence or from an unreadable source, and a closed-unmerged pull request stays `unestablishable` rather than reading as dead.
-Aged holds come from the canonical local backlog projection (`fm-fleet-snapshot.sh --contribution-input`), and a recorded pull request is read through `bin/fm-pr-lib.sh`; no second backlog parser and no redundant `origin/main` clone fetch are involved.
+Aged holds come from the canonical local backlog projection (`fm-fleet-snapshot.sh --backlog-json`, which omits task metadata and merge-authority resolution), and a recorded pull request is read through `bin/fm-pr-lib.sh`; no second backlog parser and no redundant `origin/main` clone fetch are involved.
 
 `check` is a plain custom watcher check, so it stays in the check-fires-then-firstmate-decides flow that the process-event `when` adapter explicitly excludes for an action whose right form depends on what the condition finds.
 Arm it once per home with `bin/fm-hold-reverify.sh arm`, which writes `state/hold-reverify.check.sh` and binds its bytes with `bin/fm-check-register.sh` so the watcher dispatches it on its normal cadence and turns its one line into a `check:` wake.

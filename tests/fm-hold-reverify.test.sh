@@ -340,6 +340,54 @@ test_sweep_defers_beyond_the_hold_cap() {
   pass "fm-hold-reverify: the hold cap bounds the sweep and discloses what it deferred"
 }
 
+test_cap_defers_the_newest_aged_hold_not_the_oldest() {
+  local home out
+  home=$(make_home cap-order)
+  write_backlog "$home" <<EOF
+## In flight
+
+## Queued
+
+- [ ] h-youngest - Youngest aged call (repo: sample) (kind: captain) (since 2026-08-01) (hold: pick) (hold-kind: captain)
+  Captain hold set: 2026-08-01T00:00:00Z
+- [ ] h-middle - Middle aged call (repo: sample) (kind: captain) (since 2026-04-01) (hold: pick) (hold-kind: captain)
+  Captain hold set: 2026-04-01T00:00:00Z
+- [ ] h-oldest - Oldest aged call (repo: sample) (kind: captain) (since 2026-01-01) (hold: pick) (hold-kind: captain)
+  Captain hold set: $OLD_HOLD_SET
+
+## Done
+EOF
+  out="$home/out"
+  expect_code 0 "$(run_check "$home" "$out" FM_HOLD_REVERIFY_MAX_HOLDS=2)" "ordered cap sweep exit"
+  jq -e --arg oldest h-oldest --arg middle h-middle --arg youngest h-youngest '
+    (.findings | map(.id)) as $ids
+    | ($ids | index($oldest)) != null and ($ids | index($middle)) != null
+    and ($ids | index($youngest)) == null and .deferred == 1' \
+    "$home/state/hold-reverify/docket.json" >/dev/null \
+    || fail "the cap must examine the oldest holds and defer the newest"
+  pass "fm-hold-reverify: the hold cap defers the newest aged holds, not the oldest"
+}
+
+test_recorded_merged_completion_reports_dead() {
+  local home out
+  home=$(make_home merged-completion)
+  write_backlog "$home" <<EOF
+## In flight
+
+## Queued
+
+- [ ] h-landed - Landed without a readable PR (repo: sample) (kind: captain) (since 2026-01-01) (merged 2026-02-01) (hold: approve) (hold-kind: captain)
+  Captain hold set: $OLD_HOLD_SET
+
+## Done
+EOF
+  out="$home/out"
+  expect_code 0 "$(run_check "$home" "$out")" "merged-completion sweep exit"
+  assert_equals dead "$(docket_verdict "$home" h-landed)" \
+    "a recorded merged completion is shipped reality even without a forge read"
+  pass "fm-hold-reverify: a recorded merged completion reports dead"
+}
+
 test_aged_holds_report_when_task_metadata_would_exceed_the_projection_bound() {
   local home out wrapper
   home=$(make_home slow-meta)
@@ -397,33 +445,6 @@ SH
   pass "fm-hold-reverify: an unreadable projection is reported once"
 }
 
-# --- classify seam -----------------------------------------------------------
-
-test_classify_prints_the_verdict_for_facts() {
-  local home facts
-  home=$(make_home classify)
-  facts="$home/facts.json"
-
-  printf '%s\n' '{"state":"queued","hold_reason":"q","pr_state":"merged","completion_merged":false}' > "$facts"
-  assert_equals dead "$("$CHECK" classify "$facts")" "merged facts classify dead"
-
-  printf '%s\n' '{"state":"queued","hold_reason":"q","pr_state":"open","completion_merged":false}' > "$facts"
-  assert_equals still_live "$("$CHECK" classify "$facts")" "open facts classify still_live"
-
-  printf '%s\n' '{"state":"queued","hold_reason":"","pr_state":"none","completion_merged":false}' > "$facts"
-  assert_equals not_a_decision "$("$CHECK" classify "$facts")" "a questionless record is not a decision"
-
-  printf '%s\n' '{"state":"done","hold_reason":"q","pr_state":"none","completion_merged":false}' > "$facts"
-  assert_equals not_a_decision "$("$CHECK" classify "$facts")" "a closed record is not a live decision"
-
-  printf '%s\n' '{"state":"queued","hold_reason":"q","pr_state":"closed","completion_merged":true}' > "$facts"
-  assert_equals dead "$("$CHECK" classify "$facts")" "a recorded merged completion is dead"
-
-  printf '%s\n' '{"state":"queued","hold_reason":"q","pr_state":"none","completion_merged":false}' > "$facts"
-  assert_equals unestablishable "$("$CHECK" classify "$facts")" "facts with no evidence are unestablishable"
-  pass "fm-hold-reverify: classify reports the right verdict for each fact shape"
-}
-
 # --- arming ------------------------------------------------------------------
 
 test_arm_writes_and_registers_and_disarm_removes() {
@@ -467,8 +488,9 @@ test_young_hold_is_not_examined
 test_repeat_is_silent_and_change_wakes
 test_cadence_gate_suppresses_until_the_interval_elapses
 test_sweep_defers_beyond_the_hold_cap
+test_cap_defers_the_newest_aged_hold_not_the_oldest
+test_recorded_merged_completion_reports_dead
 test_aged_holds_report_when_task_metadata_would_exceed_the_projection_bound
 test_unreadable_projection_reports_once
-test_classify_prints_the_verdict_for_facts
 test_arm_writes_and_registers_and_disarm_removes
 test_help_and_usage
