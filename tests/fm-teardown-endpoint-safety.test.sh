@@ -1512,6 +1512,28 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_shared_slot_refused "$dir" done-task "a slot shared with an unclassifiable backend"
   assert_contains "$(cat "$dir/stderr")" "zellij-task's recorded endpoint reads 'unverified'" \
     "the refusal should name the unclassifiable record"
+  assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
+    "the refusal should say why that verdict can never be cleared"
+  assert_not_contains "$(cat "$dir/stderr")" "Reconcile whichever record is wrong" \
+    "an unverified verdict should not be given a reconcile that provably cannot clear it"
+
+  # The same verdict on this record's own endpoint: the slot stays held, and
+  # the refusal says so rather than naming a reconcile that cannot move it.
+  dir=$(make_shared_slot_case shared-own-unverified)
+  write_shared_slot_ship_meta "$dir" done-task
+  fm_write_meta "$dir/home/state/zellij-task.meta" \
+    "backend=zellij" "window=lab:7" "endpoint_task_id=zellij-task" \
+    "zellij_session=lab" "zellij_tab_id=3" "zellij_pane_id=7" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
+  assert_shared_slot_refused "$dir" zellij-task "a record whose own backend cannot be classified"
+  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unverified'" \
+    "the refusal should name this record's own unclassifiable verdict"
+  assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
+    "the own-endpoint refusal should say why that verdict can never be cleared"
+  assert_not_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh" \
+    "an unverified own endpoint should not be given a reconcile that provably cannot clear it"
+  assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
+    "an unverified own endpoint should not be told to stop a worker that cannot be read"
 
   # This record's own endpoint cannot be read either way: there is no worker to
   # stop, so the refusal names the reconcile path that can actually clear it.
