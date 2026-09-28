@@ -146,8 +146,10 @@
 # A slot several finished records still name is shared, not contested, so an
 # unforced teardown returns it instead of stranding every record naming it -
 # but on one rule, and nothing weaker: every record naming the copy, this one
-# included, must be provably non-live AND the copy must hold no work. Liveness
-# is `dead` or `missing` from bin/fm-backend.sh's recovery-grade
+# included, must be provably non-live AND the copy must hold no work. A copy
+# that still holds work therefore stays refused for every record naming it;
+# that population is not unblocked here. Liveness is `dead` or `missing` from
+# bin/fm-backend.sh's recovery-grade
 # fm_backend_agent_state on the record's validated recorded endpoint - the
 # classifier bin/fm-crew-state.sh trusts - never a status line. A record of the
 # exact windowless shape (no window, no backend but tmux, no foreign endpoint
@@ -169,12 +171,10 @@
 # by a refusal.
 # Known and accepted limits of that rule: a copy several finished records name
 # stays refused while it holds uncommitted changes or unlanded work, so those
-# records clear only once that work is landed or moved; a slot named by a record
-# whose backend has no recovery classifier stays refused, because no verdict
-# short of dead or missing is accepted; and a co-claimant's no-mistakes run
-# parked in a copy this teardown returns is killed with the slot rather than
-# concluded - conclusion is identity-bound to this task - so that record's own
-# later teardown finds the copy gone. No work is lost in any of the three: the
+# records clear only once that work is landed or moved - the shared-slot rule
+# unblocks finished records on a CLEAN copy and nothing else; and a slot named
+# by a record whose backend has no recovery classifier stays refused, because no
+# verdict short of dead or missing is accepted. No work is lost in either: the
 # return only happens on a clean, landed copy every record of which is non-live.
 # Orca is not a pool slot and proves its path through
 # require_orca_worktree_path_match instead.
@@ -2464,7 +2464,10 @@ require_exclusive_worktree_slot_record() {
           endpoint_state=$(coclaimant_endpoint_state "$other" "$other_id" "$field")
           case "$endpoint_state" in
             dead|missing)
-              shared_with="${shared_with:+$shared_with, }$other_id"
+              case ", $shared_with," in
+                *", $other_id,"*) ;;
+                *) shared_with="${shared_with:+$shared_with, }$other_id" ;;
+              esac
               continue
               ;;
           esac
