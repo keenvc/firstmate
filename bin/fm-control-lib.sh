@@ -40,11 +40,12 @@
 # `resume` is deliberately NOT a verb: it is not deterministic across the
 # verified adapters (docs/agent-control.md owns the per-adapter resume facts).
 # `relaunch` uses the brief on disk rather than a harness-private session as
-# its durable instruction, and for pi/pi-signed it ALSO resumes the task's own
-# recorded Pi session (bin/fm-spawn.sh's pi_session_args composes that from
-# the task record's pi_session_id=, with the relaunch-time exception below
-# ahead of it): a reference the endpoint's runtime bound as its status
-# authority is returned to a replacement with that adapter.
+# its durable instruction, and for a pi/pi-signed ship or scout whose resolved
+# executable advertises --session-id it ALSO resumes the task's own recorded Pi
+# session, but only when the record already names one (bin/fm-spawn.sh's
+# pi_session_args composes that from the task record's pi_session_id=, with the
+# relaunch-time exception below ahead of it): a reference the endpoint's runtime
+# bound as its status authority is returned to a replacement with that adapter.
 
 # The complete control-plane verb allowlist, one per line.
 fm_control_verbs() {
