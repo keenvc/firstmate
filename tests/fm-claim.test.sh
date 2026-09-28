@@ -221,9 +221,11 @@ case "$OUT" in
 *) fail "list did not include the recorded claim: '$OUT'" ;;
 esac
 
-# A corrupt record fails closed rather than being trusted.
-CORRUPT=$(find "$FM_CLAIM_ROOT" -name '*.claim' | head -n 1)
-[ -n "$CORRUPT" ] || fail "no claim file was created to corrupt"
+# A corrupt record fails closed rather than being trusted. Three claims exist
+# here, so pick the one whose documented key= line names this target instead
+# of trusting directory order, which differs between filesystems.
+CORRUPT=$(grep -l '^key=pr:github.com/owner/repo#11$' "$FM_CLAIM_ROOT"/*.claim 2>/dev/null | head -n 1)
+[ -n "$CORRUPT" ] || fail "no claim record for owner/repo#11 was found to corrupt"
 printf 'garbage\n' >"$CORRUPT"
 run "$CLAIM" status "owner/repo#11"
 assert_rc 5
