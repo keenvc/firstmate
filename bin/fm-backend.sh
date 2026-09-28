@@ -1014,8 +1014,8 @@ fm_backend_agent_alive() {  # <backend> <target>
 # Herdr also reads `dead` when `agent get` finds no registration, and Herdr can
 # lose that registration while the agent keeps running, so the Herdr answer is
 # its pane process view (fm_backend_herdr_pane_process_state). Tmux's `dead`
-# is already read from the pane's foreground process group, so its answer is
-# that same read.
+# is already read from the pane's foreground process group, so a tmux endpoint
+# the caller asks about is process-proven agent-free already.
 fm_backend_agent_process_state() {  # <backend> <target>
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
@@ -1024,14 +1024,7 @@ fm_backend_agent_process_state() {  # <backend> <target>
       fm_backend_herdr_parse_target "$target" || { printf 'unreadable'; return 0; }
       fm_backend_herdr_pane_process_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE"
       ;;
-    tmux)
-      case "$(fm_backend_tmux_agent_state "$target")" in
-        alive) printf 'agent' ;;
-        dead) printf 'shell' ;;
-        ambiguous) printf 'other' ;;
-        *) printf 'unreadable' ;;
-      esac
-      ;;
+    tmux) printf 'shell' ;;
     *) printf 'unverified' ;;
   esac
 }
