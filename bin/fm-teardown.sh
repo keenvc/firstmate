@@ -141,10 +141,9 @@
 # descendant Treehouse slot before touching any child.
 # A slot several finished records still name is shared, not contested, so an
 # unforced teardown returns it instead of stranding every record naming it -
-# but on one rule, and nothing weaker: every OTHER record naming the copy must
-# be provably non-live, this record's own worker must not be running, AND the
-# copy must hold no work. Liveness is `dead` or `missing` from
-# bin/fm-backend.sh's recovery-grade
+# but on one rule, and nothing weaker: every record naming the copy, this one
+# included, must be provably non-live AND the copy must hold no work. Liveness
+# is `dead` or `missing` from bin/fm-backend.sh's recovery-grade
 # fm_backend_agent_state on the record's validated recorded endpoint - the
 # classifier bin/fm-crew-state.sh trusts - never a status line. A record of the
 # exact windowless shape (no window, no backend but tmux, no foreign endpoint
@@ -154,14 +153,12 @@
 # claimant does. The refusal stops at the first record that blocks it and
 # reports that record and its verdict - not every record naming the copy - and
 # it names no step to clear it, because which record is the stale one is not
-# something teardown can read. This record's own endpoint is held to the weaker
-# test an unshared teardown of it already passes: only a running worker refuses,
-# because a shared copy cannot attribute in-flight work. "No work" is the
-# ordinary uncommitted-changes and landed-work refusals below, which a shared
-# copy runs regardless of kind: a scout's scratch carve-out never covers a copy
-# another record also names. A record is never removed without returning its
-# slot unless the claim proves the slot is no longer this record's, so every
-# record that still names the copy is on disk when these checks run.
+# something teardown can read. "No work" is the ordinary uncommitted-changes
+# and landed-work refusals below, which a shared copy runs regardless of kind:
+# a scout's scratch carve-out never covers a copy another record also names.
+# A record is never removed without returning its slot unless the claim proves
+# the slot is no longer this record's, so every record that still names the
+# copy is on disk when these checks run.
 # These refusals are not relaxed by --force, and a co-claimant refuses under
 # --force exactly as before: --force authorizes discarding THIS task's unlanded
 # work, never work another record may own. Nothing of this task's own is removed
@@ -2480,15 +2477,20 @@ require_exclusive_task_worktree_slot() {
     return 1
   fi
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
-  # A shared copy cannot attribute in-flight work, so this record's own worker
-  # must not be running. Every verdict short of a running worker is what an
-  # unshared teardown of this same record proceeds on.
-  own_state=$(fm_backend_agent_state "$BACKEND" "$T" 2>/dev/null) || own_state=unreadable
-  if [ "$own_state" = alive ]; then
-    echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own worker is still running; nothing was changed." >&2
-    echo "A shared slot is returned only once no record naming it has a running worker; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
-    return 1
+  # Every record naming the slot must be non-live, this one included: its own
+  # endpoint goes through the same classifier (a windowless record names none).
+  if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
+    own_state=missing
+  else
+    own_state=$(fm_backend_agent_state "$BACKEND" "$T" 2>/dev/null) || own_state=unreadable
   fi
+  case "$own_state" in
+    dead|missing) ;;
+    *)
+      echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
+      return 1
+      ;;
+  esac
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote

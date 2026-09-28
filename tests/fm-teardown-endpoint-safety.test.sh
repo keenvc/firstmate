@@ -1143,10 +1143,8 @@ test_shared_slot_with_a_live_record_still_refuses() {
   write_shared_slot_ship_meta "$dir" done-task
   printf 'fm-running-task\n' > "$dir/tmux-live"
   assert_shared_slot_refused "$dir" running-task "a live record sharing its slot with a finished one"
-  assert_contains "$(cat "$dir/stderr")" "own worker is still running" \
-    "the refusal should name this record's own running worker"
-  assert_contains "$(cat "$dir/stderr")" "bin/fm-control.sh running-task exit" \
-    "a live own endpoint should be told to stop its worker"
+  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'alive'" \
+    "the refusal should name this record's own verdict"
 
   pass "fm-teardown: a slot shared with any live record still refuses without touching it"
 }
@@ -1515,32 +1513,29 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_not_contains "$(cat "$dir/stderr")" "bin/fm-teardown.sh zellij-task" \
     "the refusal should not advise tearing a record down it cannot know is the stale one"
 
-  # That record's own unclassifiable verdict does not refuse: an unshared
-  # teardown of it proceeds on the same verdict, so a shared slot whose other
-  # records are dead or missing is returned.
+  # This record's own endpoint is held to the same proof as every other record
+  # naming the copy: an unclassifiable backend refuses.
   dir=$(make_shared_slot_case shared-own-unverified)
   write_shared_slot_ship_meta "$dir" done-task
   fm_write_meta "$dir/home/state/zellij-task.meta" \
     "backend=zellij" "window=lab:7" "endpoint_task_id=zellij-task" \
     "zellij_session=lab" "zellij_tab_id=3" "zellij_pane_id=7" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
-  run_unforced_case "$dir" zellij-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "a record whose own backend cannot be classified could not clear a shared slot: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/zellij-task.meta" "the record was left behind"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the shared slot was not returned: $(cat "$dir/runtime.log")"
-  assert_present "$dir/home/state/done-task.meta" "the co-claimant record was removed"
+  assert_shared_slot_refused "$dir" zellij-task "a record whose own backend cannot be classified"
+  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unverified'" \
+    "the refusal should name this record's own verdict"
+  assert_present "$dir/home/state/done-task.meta" "the refusal removed the co-claimant record"
 
   # The same for an own endpoint that cannot be read at all.
   dir=$(make_shared_slot_case shared-own-unreadable)
   write_shared_slot_ship_meta "$dir" done-task
   write_shared_slot_ship_meta "$dir" own-task lostsession
   : > "$dir/tmux-unreadable-lostsession"
-  run_unforced_case "$dir" own-task > "$dir/stdout" 2> "$dir/stderr" \
-    || fail "a record whose own endpoint cannot be read could not clear a shared slot: $(cat "$dir/stderr")"
-  assert_absent "$dir/home/state/own-task.meta" "the record was left behind"
-  grep -Fq "treehouse <return>" "$dir/runtime.log" \
-    || fail "the shared slot was not returned: $(cat "$dir/runtime.log")"
+  assert_shared_slot_refused "$dir" own-task "a record whose own endpoint cannot be read"
+  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unreadable'" \
+    "the refusal should name this record's own verdict"
+  assert_contains "$(cat "$dir/stderr")" "done-task" \
+    "the refusal should name the record that shares the slot"
 
   # A secondmate home is never finished work, whatever its endpoint reads.
   dir=$(make_shared_slot_case shared-secondmate)
