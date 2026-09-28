@@ -1388,8 +1388,6 @@ test_forced_secondmate_child_slot_collision_reports_only_the_conflict() {
     "the descendant refusal should name the child record it refused on"
   assert_contains "$(cat "$dir/stderr")" "also task other-task's recorded worktree" \
     "the descendant refusal should name the record it collided with"
-  assert_not_contains "$(cat "$dir/stderr")" "re-run teardown for $child without it" \
-    "the descendant refusal should not tell the operator to drop a flag from a command they never ran"
   assert_present "$mate/state/$child.meta" "the descendant refusal removed the child record"
   assert_present "$dir/home/state/$parent.meta" \
     "the descendant refusal removed the secondmate's own record"
@@ -1560,8 +1558,6 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "not even with --force" \
     "--force should keep the existing refusal"
-  assert_contains "$(cat "$dir/stderr")" "re-run teardown for done-task without it" \
-    "--force should name the unforced rerun that can clear a shared slot"
 
   pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
 }

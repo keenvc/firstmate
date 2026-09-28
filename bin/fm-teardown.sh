@@ -2471,11 +2471,7 @@ require_exclusive_task_worktree_slot() {
   local slot own_state shared_ok=0
   slot=$(teardown_live_slot_path) || return 0
   [ "$FORCE" = "--force" ] || shared_ok=1
-  if ! require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok"; then
-    [ "$shared_ok" = 1 ] \
-      || echo "A slot whose every record is non-live and whose copy holds no work is cleared by the ordinary teardown of each of them; --force never takes that path, so re-run teardown for $ID without it." >&2
-    return 1
-  fi
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || return 1
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
