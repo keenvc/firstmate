@@ -1,0 +1,144 @@
+
+
+ This is very revealing. Look at the meta writer:
+
+ ```
+   case "$HARNESS:$KIND" in
+   pi:ship | pi:scout | pi-signed:ship | pi-signed:scout)
+     if [ -n "$RELAUNCH_PI_SESSION_ID" ]; then
+       echo "pi_session_id=$RELAUNCH_PI_SESSION_ID"
+     elif [ -n "${PI_SESSION_FLAG:-}" ]; then
+       echo "pi_session_id=$PI_SESSION_ID"
+     fi
+     ;;
+   esac
+ ```
+
+ So it records pi_session_id=$PI_SESSION_ID only when PI_SESSION_FLAG is
+ non-empty (i.e., when --help advertises --session-id). And the launch passes
+ the flag only then too. So the record and the launch are consistent. If
+ PI_SESSION_FLAG is empty, neither records nor passes. Good.
+
+ BUT session B is a UUID session while the record says
+ pi_session_id=live-pi-1.s1790570136.3749442.21252. Wait, was B even started by
+ fm-spawn? Hmm.
+
+ Hold on. Let me reconsider. Maybe B was NOT started by fm-spawn but was
+ started by the "pi-signed" or by the FM_PI prerequisite / sessionstart
+ supervisor. Look at session A: it was started 04:26:37 and got the brief. B:
+ 04:35:37 with UUID.
+
+ Actually! Look at the process list — there's a process:
+
+ ```
+   122004  108152  ... node
+ /home/azureuser/fm-homes/domains/.pi/extensions/lib/fm-sessionstart-supervisor
+ .mjs /home/azureuser/fm-homes/domains/bin/fm-sessionstart-run.sh --source
+ resume --pi-prerequisite
+ ```
+
+ That's another home.
+
+ Hmm, let me think about the numbers. The spawn_gen in the record at 04:35:35
+ is s1790570136.3749442.21252. Note 3749442 is a bash PID and 21252 a random.
+ The PI_SESSION_ID = live-pi-1.s1790570136.3749442.21252.
+
+ Now B's session started 04:35:37.672 and its id is UUID. If B was launched by
+ fm-spawn with --session-id live-pi-1.s1790570136.3749442.21252, Pi would
+ create that file. So either:
+ 1. B wasn't launched by fm-spawn's Pi path (e.g., launched manually/directly),
+    or
+ 2. PI_SESSION_FLAG was empty at spawn time, so no flag was passed — but then
+    the record would NOT have pi_session_id set. Yet it does have pi_session_id
+    set. Hmm, unless the record's pi_session_id was written by a DIFFERENT
+    mechanism (e.g., left over from before, or set by relaunch).
+
+ Wait — actually, re-read the meta writer: on relaunch, RELAUNCH_PI_SESSION_ID
+ is the id captured from the prior record. If the prior record (before the
+ switch back to Pi) had pi_session_id=... hmm, but the comment says a harness
+ switch away from Pi drops it. Let's trace:
+
+ - At 04:32, switched away from Pi. That relaunch had to_harness = something
+   else, and the Pi session id key was dropped (per comment "a harness switch
+   away from Pi drops it").
+ - At 04:35, switched back to Pi. That's a relaunch (RELAUNCH=1) from harness
+   != pi to harness pi. According to the code, after the switch back,
+   RELAUNCH_PI_SESSION_ID — what is it? The caller captures "the id the task's
+   PRIOR record carries". The prior record (non-Pi harness) doesn't carry
+   pi_session_id, so RELAUNCH_PI_SESSION_ID is empty. Then meta writer: elif [
+   -n "$PI_SESSION_FLAG" ]; then echo pi_session_id=$PI_SESSION_ID. So it
+   records the new incarnation id = live-pi-1.s1790570136.3749442.21252.
+
+ And the launch: pi_session_args with RELAUNCH=1, recorded-id empty. It calls
+ relaunch_resume_args first (runtime-bound), then [ -n "$8" ] || return 0
+ (session flag present), then case ship/scout, then [ -n "$7" ] || return 0 —
+ recorded id empty → returns 0 (no flag). So a relaunch with no recorded id and
+ no runtime-bound reference launches FRESH without --session-id, even though it
+ records the new pi_session_id!
+
+ That's exactly the case B: launch fresh without --session-id (→ UUID session),
+ but the record names the new incarnation id
+ live-pi-1.s1790570136.3749442.21252. This is BY DESIGN per the header comment:
+ "An empty recorded id means there is nothing to resume, so the relaunch path
+ returns before emitting: the flag would otherwise reach the launch line with a
+ quoted empty value... which is the fresh launch a pre-field record and a
+ switch back to Pi are supposed to get."
+
+ Hmm wait, but the meta writer records PI_SESSION_ID in that case. So the
+ record ends up naming an id the launch did NOT use. Is that intentional? The
+ comment on the meta says: "a relaunch with nothing to resume launches fresh
+ and records the new incarnation id for its next relaunch." So yes: the launch
+ opens a fresh (random/UUID) Pi session, and the record stores a synthetic id
+ <task-id>.<spawn_gen> for the next relaunch to resume. But the next relaunch
+ would then pass --session-id live-pi-1.s1790570136.3749442.21252, and since
+ that session doesn't exist, Pi creates a NEW session with that id — skipping
+ B's conversation!
+
+ That's exactly what happened with C: the second relaunch passed --session-id
+ live-pi-1.s1790570136.3749442.21252, Pi had no such session (B was UUID), so
+ Pi created session C with that id, starting fresh. So the conversation B was
+ lost, and C is a fresh brief — no continuity.
+
+ Wait, but is that really the intended contract? Let me re-read the header
+ comment at the top of the file (line 176-182) and the test. The header says:
+ "A fresh ship or scout spawn passes --session-id <task-id>.<spawn-gen>... A
+ relaunch of a ship or scout resumes the id the task's PRIOR record carries...
+ An empty recorded id means there is nothing to resume... the flag would
+ otherwise reach the launch line with a quoted empty value, which is a
+ malformed argument rather than the fresh launch a pre-field record and a
+ switch back to Pi are supposed to get."
+
+ Hmm. So the design intentionally does NOT pass --session-id on a relaunch with
+ no recorded id, producing a fresh random session. But then it RECORDS
+ pi_session_id=$PI_SESSION_ID (the synthetic new-incarnation id) because
+ PI_SESSION_FLAG is non-empty. That seems like a bug: the record names an id
+ that doesn't correspond to any real session. Then the next relaunch will
+ "resume" that synthetic id, which doesn't exist, so Pi creates a new session
+ named with it — again fresh, but at least deterministic.
+
+ Actually, wait. Is it a bug? Consider: the first relaunch (switch back to Pi)
+ launches fresh with UUID session B, records synthetic id X. The second
+ relaunch passes X → Pi creates session named X (since X doesn't exist), fresh
+ again. So each relaunch after a switch-back loses the previous conversation.
+ The record's X is never the actual session. This means the record lies.
+
+ But hold on — maybe Pi, when given --session-id X where X doesn't exist,
+ creates a session with that id. That's what we see in C. And B's actual
+ session (UUID) is orphaned. So yes, conversation continuity is broken across
+ this particular path (harness switch back to Pi). The contract as documented
+ in the header says the record "always names the session the launch chose"
+ (line ~4830 comment: "Both the launch flag and the record below use this one
+ value, so the record always names the session the launch chose."). That
+ comment is about fresh spawn. But in the relaunch-with-no-recorded-id path,
+ the record does NOT name the session the launch chose — the launch chose a
+ random UUID and the record names the synthetic id. That's an inconsistency.
+
+ Hmm, but actually maybe the design intends: a relaunch with no recorded id
+ should launch fresh WITHOUT a flag (so Pi generates a UUID), and the meta
+ writer should NOT record PI_SESSION_ID either (leaving it
+
+── ⠼ Working ───────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+/tmp/fm-lab.qrYLah/treehouse/.treehouse/demo-816e8c/1/demo (detached)
+↑59k ↓11k R280k CH96.0% $0.022 6.3%/1.0M (auto)  accounts/fireworks/models/deeps

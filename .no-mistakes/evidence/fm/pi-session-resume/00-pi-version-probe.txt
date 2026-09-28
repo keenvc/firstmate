@@ -1,0 +1,9 @@
+# The version probe against the REAL installed Pi (the flag this change gates on)
+
+$ pi --version
+0.87.1
+
+$ pi --help | grep -E -- "--(tui-mode|session|session-id)"
+  --session <path|id>            Use specific session file or partial UUID
+  --session-id <id>              Use exact project session ID, creating it if missing
+  --tui-mode <mode>              TUI mode: regular (default) or fullscreen

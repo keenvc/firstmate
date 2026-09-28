@@ -1,0 +1,19 @@
+# Relaunch continuity: same Pi session transcript across the replacement agent
+
+$ bin/fm-control.sh live-pi-1 relaunch --note "lane closed; resume the saved Pi session"
+relaunched live-pi-1 harness=pi from=pi model=default effort=default backend=tmux endpoint=fmses:fm-live-pi-1 worktree=/tmp/fm-lab.qrYLah/treehouse/.treehouse/demo-816e8c/1/demo
+
+state/live-pi-1.meta after relaunch:
+pi_session_id=live-pi-1.s1790569596.2313238.6035
+busy_gen=g1790569689.2588903.11091
+spawn_gen=s1790569689.2583343.4981
+control_relaunch_tx=2571373.20260928T042806Z.14327
+
+Pi session store for the worktree (still ONE file, the pre-relaunch one):
+2026-09-28T04-26-37-866Z_live-pi-1.s1790569596.2313238.6035.jsonl
+
+pre-relaunch transcript bytes: 188917 -> post-relaunch: 320755
+byte-for-byte prefix check of the pre-relaunch snapshot against the live file: PREFIX-MATCH (appended, never recreated)
+
+session header line:
+{"type":"session","version":3,"id":"live-pi-1.s1790569596.2313238.6035","timestamp":"2026-09-28T04:26:37.866Z","cwd":"/tmp/fm-lab.qrYLah/treehouse/.treehouse/demo-816e8c/1/demo"}

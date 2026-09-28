@@ -1,0 +1,23 @@
+# Live Pi scout spawn in a disposable lab home (real tmux socket, real treehouse, real pi)
+
+$ bin/fm-spawn.sh live-pi-1 $LAB/projects/demo --scout --harness pi
+spawned live-pi-1 harness=pi kind=scout window=fmses:fm-live-pi-1 worktree=/tmp/fm-lab.qrYLah/treehouse/.treehouse/demo-816e8c/1/demo
+
+$ cat $FM_HOME/state/live-pi-1.meta
+window=fmses:fm-live-pi-1
+endpoint_task_id=live-pi-1
+worktree=/tmp/fm-lab.qrYLah/treehouse/.treehouse/demo-816e8c/1/demo
+project=/tmp/fm-lab.qrYLah/projects/demo
+harness=pi
+kind=scout
+pi_session_id=live-pi-1.s1790569596.2313238.6035
+tasktmp=/tmp/fm-live-pi-1
+model=default
+effort=default
+busy_gen=g1790569596.2326053.31190
+spawn_gen=s1790569596.2313238.6035
+
+$ ls ~/.pi/agent/sessions/<worktree-scoped>/   # the session the REAL pi opened
+2026-09-28T04-26-37-866Z_live-pi-1.s1790569596.2313238.6035.jsonl
+
+recorded pi_session_id = live-pi-1.s1790569596.2313238.6035

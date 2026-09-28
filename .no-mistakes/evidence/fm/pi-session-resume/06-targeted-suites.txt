@@ -1,0 +1,26 @@
+# Repository suites that own the Pi session contract (targeted runs)
+
+$ bin/fm-test-run.sh tests/fm-spawn-pi-session.test.sh
+ok - fm-spawn: a fresh pi ship runs the task's own persistent session and records it
+ok - fm-spawn: a fresh pi-signed ship runs the task's own persistent session and records it
+ok - fm-spawn: a fresh pi scout runs the task's own persistent session and records it
+ok - fm-spawn: a pi secondmate keeps its own session lifecycle, with no incarnation-scoped id
+ok - fm-spawn: re-spawning a torn-down task id opens a new Pi session, not the abandoned one
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0
+
+$ bin/fm-test-run.sh tests/fm-control-relaunch.test.sh   # 80 ok, 0 failures, 0 gate skips
+ok - fm-spawn --relaunch: a Pi task on an adopted tmux window resumes its recorded session id
+ok - fm-spawn --relaunch: an inconclusive Pi probe keeps the recorded session id for the next relaunch
+ok - fm-control relaunch: switching away from Pi drops the recorded session id
+ok - fm-control relaunch: switching to Pi records a new incarnation session id for its next relaunch
+ok - fm-spawn --relaunch: resumes the bound Pi session only for a Pi registration
+ok - reclaim: a Pi relaunch onto a destroyed pane resumes the task's recorded session id
+ok - reclaim: a survived pane's runtime-bound session outranks the recorded id
+ok - reclaim: an adopted pane with no readable session resumes the recorded id
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=113638
+
+$ bin/fm-test-run.sh tests/fm-spawn-dispatch-profile.test.sh   # 69 ok, 0 failures
+ok - pi receives --model and --thinking max profile flags
+ok - Pi launch probing omits --tui-mode and --session-id on older Pi and preserves them on supporting Pi
+ok - pi-signed shares Pi launch semantics while preserving its configured and recorded identity
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=178741
