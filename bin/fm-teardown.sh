@@ -137,9 +137,10 @@
 # descendant Treehouse slot before touching any child.
 # A slot several finished records still name is shared, not contested, so an
 # unforced teardown returns it instead of stranding every record naming it -
-# but on one rule, and nothing weaker: every record naming the copy, this one
-# included, must be provably non-live AND the copy must hold no work. Liveness
-# is `dead` or `missing` from bin/fm-backend.sh's recovery-grade
+# but on one rule, and nothing weaker: every OTHER record naming the copy must
+# be provably non-live, this record's own worker must not be running, AND the
+# copy must hold no work. Liveness is `dead` or `missing` from
+# bin/fm-backend.sh's recovery-grade
 # fm_backend_agent_state on the record's validated recorded endpoint - the
 # classifier bin/fm-crew-state.sh trusts - never a status line. A record of the
 # exact windowless shape (no window, no backend but tmux, no foreign endpoint
@@ -147,10 +148,14 @@
 # down, so such records clear in any order. Any other verdict, any record whose
 # endpoint cannot be validated, or a secondmate home refuses exactly as a live
 # claimant does, and the refusal names the co-claimant and its verdict so the
-# operator knows which record to reconcile first. A backend with no recovery
-# classifier always reads `unverified`, which no rerun changes; what clears that
-# refusal is reconciling a record off the slot, never the verdict, and the
-# refusal says so. "No work" is the ordinary
+# operator knows which record to tear down first - the one supported step that
+# clears the refusal, since a backend with no recovery classifier always reads
+# `unverified` and no rerun changes that verdict. This record's own endpoint is
+# held to the weaker test an unshared teardown of it already passes: only a
+# running worker refuses, because a shared copy cannot attribute in-flight work.
+# Returning a shared slot leaves the other records naming a copy that is back in
+# the pool, so the note says they must be torn down before it is spawned into
+# again. "No work" is the ordinary
 # uncommitted-changes and landed-work refusals below, which a shared copy runs
 # regardless of kind: a scout's scratch carve-out never covers a copy another
 # record also names. A record is never removed without returning its slot unless
@@ -1886,7 +1891,7 @@ teardown_treehouse_return() {
 teardown_work_refusal_remedy() {  # <remedy-when-this-record-alone-names-the-copy> [<remedy-that-survives-sharing>]
   if [ -n "$TEARDOWN_SLOT_SHARED_WITH" ]; then
     [ -z "${2:-}" ] || echo "$2" >&2
-    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so the work in it cannot be shown to be task $ID's and no teardown of $ID may discard it: land or move that work, or reconcile whichever of those records is wrong (bin/fm-crew-state.sh), then re-run teardown." >&2
+    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so the work in it cannot be shown to be task $ID's and no teardown of $ID may discard it: land or move that work, or tear those records down first (bin/fm-teardown.sh for each of them), then re-run teardown." >&2
   else
     echo "$1" >&2
   fi
@@ -2454,9 +2459,9 @@ require_exclusive_worktree_slot_record() {
         fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
-        echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
+        echo "Tear whichever of the two records is stale down first (bin/fm-teardown.sh $other_id), then re-run teardown for $record_id." >&2
         if [ "$endpoint_state" = unverified ]; then
-          echo "Task $other_id's recorded endpoint reads 'unverified': its recorded backend has no recovery classifier, so no rerun changes that verdict - taking one of these records off $slot is what clears this refusal." >&2
+          echo "Task $other_id's recorded endpoint reads 'unverified': its recorded backend has no recovery classifier, so no rerun changes that verdict - only tearing that record down clears this refusal." >&2
         elif [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
@@ -2477,31 +2482,16 @@ require_exclusive_task_worktree_slot() {
     return 1
   fi
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
-  # Every record naming the slot must be non-live, this one included: its own
-  # endpoint goes through the same classifier (a windowless record names none).
-  if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
-    own_state=missing
-  else
-    own_state=$(fm_backend_agent_state "$BACKEND" "$T" 2>/dev/null) || own_state=unreadable
+  # A shared copy cannot attribute in-flight work, so this record's own worker
+  # must not be running. Every verdict short of a running worker is what an
+  # unshared teardown of this same record proceeds on.
+  own_state=$(fm_backend_agent_state "$BACKEND" "$T" 2>/dev/null) || own_state=unreadable
+  if [ "$own_state" = alive ]; then
+    echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own worker is still running; nothing was changed." >&2
+    echo "A shared slot is returned only once no record naming it has a running worker; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
+    return 1
   fi
-  case "$own_state" in
-    dead|missing) ;;
-    *)
-      echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
-      if [ "$own_state" = alive ]; then
-        echo "A shared slot is returned only once every record naming it is non-live; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
-      else
-        if [ "$own_state" = unverified ]; then
-          echo "A shared slot is returned only once every record naming it is non-live, and $ID's recorded backend has no recovery classifier, so no rerun changes that verdict." >&2
-        else
-          echo "A shared slot is returned only once every record naming it is non-live, and no worker state can be read for $ID at all, so stopping a worker cannot clear this." >&2
-        fi
-        echo "Reconcile whichever record naming $slot is wrong (bin/fm-crew-state.sh $ID, and the same for task(s) $TEARDOWN_SLOT_SHARED_WITH), then re-run teardown: a slot no other record names never reaches this gate." >&2
-      fi
-      return 1
-      ;;
-  esac
-  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_SHARED_WITH; none of them names a live endpoint, so none of them refuses this teardown on its own account." >&2
+  echo "note: task $ID's recorded worktree $slot is also recorded by non-live task(s) $TEARDOWN_SLOT_SHARED_WITH; none of them names a live endpoint, so none refuses this teardown. Returning the slot leaves those records naming a copy that is back in the pool, so tear them down (bin/fm-teardown.sh for each of task(s) $TEARDOWN_SLOT_SHARED_WITH) before it is spawned into again; once another task takes the slot their teardown refuses behind it." >&2
 }
 
 # Positive slot ownership, read from the claim the task that took the slot wrote

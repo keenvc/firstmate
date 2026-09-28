@@ -1143,8 +1143,8 @@ test_shared_slot_with_a_live_record_still_refuses() {
   write_shared_slot_ship_meta "$dir" done-task
   printf 'fm-running-task\n' > "$dir/tmux-live"
   assert_shared_slot_refused "$dir" running-task "a live record sharing its slot with a finished one"
-  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'alive'" \
-    "the refusal should name this record's own live endpoint"
+  assert_contains "$(cat "$dir/stderr")" "own worker is still running" \
+    "the refusal should name this record's own running worker"
   assert_contains "$(cat "$dir/stderr")" "bin/fm-control.sh running-task exit" \
     "a live own endpoint should be told to stop its worker"
 
@@ -1368,7 +1368,7 @@ test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
 # Forced secondmate cleanup checks its descendants' pool slots through the same
 # co-claimant scan, for a record the operator never named. The flag guidance
 # belongs to the task they did name, so it must not surface here.
-test_forced_secondmate_child_slot_collision_names_only_reconcile() {
+test_forced_secondmate_child_slot_collision_omits_the_flag_guidance() {
   local dir mate parent=mate-task child=child-task rc
 
   dir=$(make_shared_slot_case secondmate-child-slot-collision)
@@ -1390,8 +1390,10 @@ test_forced_secondmate_child_slot_collision_names_only_reconcile() {
   rc=$?
   set -e
   [ "$rc" -ne 0 ] || fail "forced secondmate cleanup returned a pool slot its child shares"
-  assert_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh $child" \
-    "the descendant refusal should name the reconcile path for the child record"
+  assert_contains "$(cat "$dir/stderr")" "$child's recorded worktree" \
+    "the descendant refusal should name the child record it refused on"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-teardown.sh other-task" \
+    "the descendant refusal should name tearing the co-claimant record down"
   assert_not_contains "$(cat "$dir/stderr")" "re-run teardown for $child without it" \
     "the descendant refusal should not tell the operator to drop a flag from a command they never ran"
   assert_present "$mate/state/$child.meta" "the descendant refusal removed the child record"
@@ -1399,7 +1401,7 @@ test_forced_secondmate_child_slot_collision_names_only_reconcile() {
     "the descendant refusal removed the secondmate's own record"
   assert_present "$dir/pool/1/project/.git" "the descendant refusal reset the shared slot"
 
-  pass "fm-teardown: a forced secondmate's descendant slot collision names only the reconcile path"
+  pass "fm-teardown: a forced secondmate's descendant slot collision names only its own clearing step"
 }
 
 write_windowless_ship_meta() {  # <case> <id>
@@ -1514,46 +1516,41 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     "the refusal should name the unclassifiable record"
   assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
     "the refusal should say why that verdict can never be cleared"
-  assert_contains "$(cat "$dir/stderr")" "Reconcile whichever record is wrong" \
-    "the refusal should still name reconciling a record off the slot, which does clear it"
-  assert_contains "$(cat "$dir/stderr")" "is what clears this refusal" \
-    "the refusal should say that taking a record off the slot is what clears it"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-teardown.sh zellij-task" \
+    "the refusal should name tearing that record down, the step that clears it"
+  assert_contains "$(cat "$dir/stderr")" "only tearing that record down clears this refusal" \
+    "the refusal should say what clears it"
+  assert_not_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh" \
+    "no refusal should name a read-only reporter as its remedy"
 
-  # The same verdict on this record's own endpoint: the slot stays held, and
-  # the refusal says so rather than naming a reconcile that cannot move it.
+  # That record's own unclassifiable verdict does not refuse: an unshared
+  # teardown of it proceeds on the same verdict, so a shared slot whose other
+  # records are dead or missing is returned.
   dir=$(make_shared_slot_case shared-own-unverified)
   write_shared_slot_ship_meta "$dir" done-task
   fm_write_meta "$dir/home/state/zellij-task.meta" \
     "backend=zellij" "window=lab:7" "endpoint_task_id=zellij-task" \
     "zellij_session=lab" "zellij_tab_id=3" "zellij_pane_id=7" \
     "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
-  assert_shared_slot_refused "$dir" zellij-task "a record whose own backend cannot be classified"
-  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unverified'" \
-    "the refusal should name this record's own unclassifiable verdict"
-  assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
-    "the own-endpoint refusal should say why that verdict can never be cleared"
-  assert_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh zellij-task" \
-    "the own-endpoint refusal should name reconciling a record off the slot"
-  assert_contains "$(cat "$dir/stderr")" "a slot no other record names never reaches this gate" \
-    "the own-endpoint refusal should say what clears it"
-  assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
-    "an unverified own endpoint should not be told to stop a worker that cannot be read"
+  run_unforced_case "$dir" zellij-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "a record whose own backend cannot be classified could not clear a shared slot: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/zellij-task.meta" "the record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the shared slot was not returned: $(cat "$dir/runtime.log")"
+  assert_contains "$(cat "$dir/stderr")" "tear them down" \
+    "the note should say the remaining records must be torn down before the slot is reused"
+  assert_present "$dir/home/state/done-task.meta" "the co-claimant record was removed"
 
-  # This record's own endpoint cannot be read either way: there is no worker to
-  # stop, so the refusal names the reconcile path that can actually clear it.
+  # The same for an own endpoint that cannot be read at all.
   dir=$(make_shared_slot_case shared-own-unreadable)
   write_shared_slot_ship_meta "$dir" done-task
   write_shared_slot_ship_meta "$dir" own-task lostsession
   : > "$dir/tmux-unreadable-lostsession"
-  assert_shared_slot_refused "$dir" own-task "a record whose own endpoint cannot be read"
-  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unreadable'" \
-    "the refusal should name this record's own undeterminable verdict"
-  assert_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh own-task" \
-    "an unreadable own endpoint should be told to reconcile the records naming the slot"
-  assert_contains "$(cat "$dir/stderr")" "done-task" \
-    "the refusal should name the record that shares the slot"
-  assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
-    "an unreadable own endpoint should not be told to stop a worker that cannot be read"
+  run_unforced_case "$dir" own-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "a record whose own endpoint cannot be read could not clear a shared slot: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/own-task.meta" "the record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "the shared slot was not returned: $(cat "$dir/runtime.log")"
 
   # A secondmate home is never finished work, whatever its endpoint reads.
   dir=$(make_shared_slot_case shared-secondmate)
@@ -1977,7 +1974,7 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record
 test_shared_slot_of_windowless_records_clears_in_any_order
 test_scout_copy_is_scratch_only_while_no_other_record_names_it
 test_shared_slot_with_an_undeterminable_record_refuses
-test_forced_secondmate_child_slot_collision_names_only_reconcile
+test_forced_secondmate_child_slot_collision_omits_the_flag_guidance
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot
