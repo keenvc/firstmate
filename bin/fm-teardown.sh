@@ -2425,6 +2425,7 @@ coclaimant_endpoint_state() {  # <meta> <task-id> <field>
 # runs regardless of kind - to decide whether the slot may be returned. Any
 # live or undeterminable co-claimant still refuses exactly as before.
 TEARDOWN_SLOT_SHARED_WITH=
+TEARDOWN_SLOT_COLLISION_RC=4
 require_exclusive_worktree_slot_record() {
   local record_meta=$1 record_id=$2 record_state=$3 worktree=$4 shared_ok=${5:-0}
   local slot state_dir other other_id field other_path other_slot endpoint_state
@@ -2460,7 +2461,7 @@ require_exclusive_worktree_slot_record() {
         if [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
-        return 1
+        return "$TEARDOWN_SLOT_COLLISION_RC"
       done
     done
   done
@@ -2468,10 +2469,16 @@ require_exclusive_worktree_slot_record() {
 }
 
 require_exclusive_task_worktree_slot() {
-  local slot own_state shared_ok=0
+  local slot own_state shared_ok=0 rc=0
   slot=$(teardown_live_slot_path) || return 0
   [ "$FORCE" = "--force" ] || shared_ok=1
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || return 1
+  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || rc=$?
+  if [ "$rc" != 0 ]; then
+    if [ "$rc" = "$TEARDOWN_SLOT_COLLISION_RC" ] && [ "$shared_ok" != 1 ]; then
+      echo "A slot whose every record is non-live and whose copy holds no work is cleared by the ordinary teardown of each of them; --force never takes that path, so re-run teardown for $ID without it." >&2
+    fi
+    return 1
+  fi
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
@@ -2484,6 +2491,11 @@ require_exclusive_task_worktree_slot() {
     dead|missing) ;;
     *)
       echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
+      case "$own_state" in
+        alive|ambiguous)
+          echo "Close $ID's own endpoint (bin/fm-control.sh $ID exit), then re-run teardown." >&2
+          ;;
+      esac
       return 1
       ;;
   esac
@@ -3918,5 +3930,8 @@ elif teardown_owns_worktree; then
   echo "teardown $ID complete (window ${T:-none}, worktree $WT)"
 else
   echo "teardown $ID complete (window ${T:-none}; pool slot $WT left to task $TEARDOWN_SLOT_REASSIGNED_TO${TEARDOWN_SLOT_REASSIGNED_HOME:+ (home $TEARDOWN_SLOT_REASSIGNED_HOME)}, which it was reassigned to)"
+fi
+if teardown_owns_worktree && [ -n "$TEARDOWN_SLOT_SHARED_WITH" ]; then
+  echo "note: pool slot $WT is back in the pool and task(s) $TEARDOWN_SLOT_SHARED_WITH still record it; tear them down before it is spawned into again." >&2
 fi
 backlog_refresh_reminder

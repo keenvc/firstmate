@@ -1145,6 +1145,8 @@ test_shared_slot_with_a_live_record_still_refuses() {
   assert_shared_slot_refused "$dir" running-task "a live record sharing its slot with a finished one"
   assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'alive'" \
     "the refusal should name this record's own verdict"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-control.sh running-task exit" \
+    "a verdict closing the endpoint can change should name that step"
 
   pass "fm-teardown: a slot shared with any live record still refuses without touching it"
 }
@@ -1170,6 +1172,10 @@ test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
     || fail "teardown did not close its own endpoint: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stdout")" "worktree $dir/worktree)" \
     "a shared slot should complete through the ordinary return"
+  assert_contains "$(cat "$dir/stderr")" "still record it; tear them down" \
+    "the return should say the remaining records must be torn down before the slot is reused"
+  assert_contains "$(cat "$dir/stderr")" "task(s) second-task, third-task" \
+    "the return note should name the records still holding the copy"
   assert_absent "$dir/pool/1/.fm-slot-owner" "the returned slot kept its spent claim"
 
   # The records left behind name a slot that is back in the pool; each still
@@ -1195,6 +1201,8 @@ test_shared_slot_of_finished_records_returns_once_every_record_is_non_live() {
     "teardown removed or rewrote another record's claim"
   assert_contains "$(cat "$dir/stderr")" "left untouched" \
     "the reassigned slot should still report that it was left alone"
+  assert_not_contains "$(cat "$dir/stderr")" "back in the pool" \
+    "a slot that was not returned should not be reported as back in the pool"
   ! grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "teardown returned a slot another record claims: $(cat "$dir/runtime.log")"
   : > "$dir/runtime.log"
@@ -1522,6 +1530,8 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_shared_slot_refused "$dir" zellij-task "a record whose own backend cannot be classified"
   assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unverified'" \
     "the refusal should name this record's own verdict"
+  assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
+    "closing the endpoint cannot change an unverified verdict, so no step should be named"
   assert_present "$dir/home/state/done-task.meta" "the refusal removed the co-claimant record"
 
   # The same for an own endpoint that cannot be read at all.
@@ -1532,6 +1542,8 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_shared_slot_refused "$dir" own-task "a record whose own endpoint cannot be read"
   assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unreadable'" \
     "the refusal should name this record's own verdict"
+  assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
+    "closing the endpoint cannot change an unreadable verdict, so no step should be named"
   assert_contains "$(cat "$dir/stderr")" "done-task" \
     "the refusal should name the record that shares the slot"
 
@@ -1558,6 +1570,8 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "not even with --force" \
     "--force should keep the existing refusal"
+  assert_contains "$(cat "$dir/stderr")" "re-run teardown for done-task without it" \
+    "--force should name the unforced rerun that can clear a shared slot"
 
   pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
 }
