@@ -626,9 +626,9 @@ A budget that is not a whole number from 1 to 120 is still refused outright.
 ## Captain-hold re-verification
 
 A captain call is an ordinary backlog task held for the captain, and its list rots with age: hundreds of holds had never been re-checked, so the captain's list was mostly ghosts and every count of remaining work was wrong.
-`bin/fm-hold-reverify.sh` re-checks each aged hold against shipped reality and reports it in the reconciliation vocabulary `captain-hold-lifecycle` already owns: `dead`, `still_live`, `not_a_decision`, or `unestablishable`.
+`bin/fm-hold-reverify.sh` re-checks each aged hold against shipped reality and reports it with one of four verdicts: `dead`, `still_live`, `not_a_decision`, or `unestablishable`.
 It reports only.
-It never calls `answer` and never closes or annotates a call, so only the captain's own words or an explicit evidence-backed reconciliation can resolve one.
+It never calls `answer` and never closes or annotates a call, so only the captain's own words or an explicit evidence-backed reconciliation - the seam the `captain-hold-lifecycle` skill owns - can resolve one.
 A hold is `dead` when shipped reality resolves the subject - its recorded pull request is merged, or its row records a merged completion.
 It is `still_live` when the recorded pull request is open, `not_a_decision` when the row carries no live captain question (already Done, or no hold reason), and `unestablishable` otherwise.
 `dead` is never inferred from absence or from an unreadable source, and a closed-unmerged pull request stays `unestablishable` rather than reading as dead.

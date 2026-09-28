@@ -15,7 +15,8 @@
 # remaining work was wrong. The rot concentrates in age.
 #
 # This script re-checks each aged captain hold against shipped reality and reports
-# it in the SAME reconciliation vocabulary captain-hold-lifecycle already owns:
+# it with one of four verdicts, each a proposal for the reconciliation seam
+# captain-hold-lifecycle owns rather than a closure:
 # dead / still_live / not_a_decision / unestablishable. It reports only. It never
 # calls `answer` and never calls `reconcile close`/`reconcile note`, so it can
 # never close a captain call; only the captain's own words or an explicit
