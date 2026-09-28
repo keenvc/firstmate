@@ -1249,6 +1249,22 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record() {
   [ ! -s "$dir/runtime.log" ] \
     || fail "--force acted on a copy another record names: $(cat "$dir/runtime.log")"
 
+  # A shared copy whose index cannot be read: no reconcile and no landing can
+  # clear that, so the refusal must keep naming the repair that can.
+  dir=$(make_shared_slot_case shared-unreadable-index)
+  write_shared_slot_ship_meta "$dir" first-task
+  write_shared_slot_ship_meta "$dir" second-task
+  printf 'not-an-index' > "$(cd "$dir/worktree" && git rev-parse --absolute-git-dir)/index"
+  assert_shared_slot_refused "$dir" first-task "a shared copy whose index cannot be read"
+  assert_contains "$(cat "$dir/stderr")" "cannot inspect worktree" \
+    "the refusal should name the inspection that failed"
+  assert_contains "$(cat "$dir/stderr")" "Restore the git index state" \
+    "a shared copy should still be told to repair the index it cannot read"
+  assert_contains "$(cat "$dir/stderr")" "second-task" \
+    "the refusal should name the record that shares the copy"
+  assert_not_contains "$(cat "$dir/stderr")" "--force" \
+    "the shared-copy refusal should not name a remedy --force refuses"
+
   # Commits that never landed are held by the same boundary.
   dir=$(make_shared_slot_case shared-unlanded)
   write_shared_slot_ship_meta "$dir" first-task

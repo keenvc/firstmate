@@ -1876,10 +1876,13 @@ teardown_treehouse_return() {
 # The remedy a work refusal may name. Discarding this task's own work needs
 # --force and nothing else, but a copy another record still names refuses under
 # --force too (require_exclusive_worktree_slot_record), and the work in it
-# cannot be shown to be this task's, so on that path the only reachable remedy
-# is to land or move the work, or to reconcile the records that share the copy.
-teardown_work_refusal_remedy() {  # <remedy-when-this-record-alone-names-the-copy>
+# cannot be shown to be this task's, so on that path landing or moving the work,
+# or reconciling the records that share the copy, replaces the forced discard.
+# A remedy that is not the forced discard survives sharing and is named first:
+# repairing an unreadable git index clears a refusal no reconcile can.
+teardown_work_refusal_remedy() {  # <remedy-when-this-record-alone-names-the-copy> [<remedy-that-survives-sharing>]
   if [ -n "$TEARDOWN_SLOT_SHARED_WITH" ]; then
+    [ -z "${2:-}" ] || echo "$2" >&2
     echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so the work in it cannot be shown to be task $ID's and no teardown of $ID may discard it: land or move that work, or reconcile whichever of those records is wrong (bin/fm-crew-state.sh), then re-run teardown." >&2
   else
     echo "$1" >&2
@@ -1898,7 +1901,8 @@ validate_worktree_teardown_safety() {
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
     echo "REFUSED: cannot inspect worktree $WT for uncommitted changes." >&2
-    teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force."
+    teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force." \
+      "Restore the git index state, then re-run teardown."
     return 1
   fi
   dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' | head -1 || true)
@@ -1908,7 +1912,8 @@ validate_worktree_teardown_safety() {
       return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
     fi
     echo "REFUSED: cannot inspect worktree $WT for commits not on a remote." >&2
-    teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force."
+    teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force." \
+      "Restore the git index state, then re-run teardown."
     return 1
   fi
   unpushed=$(printf '%s\n' "$unpushed_raw" | head -5)
@@ -1920,7 +1925,8 @@ validate_worktree_teardown_safety() {
         return "$TEARDOWN_WORKTREE_SAFETY_LOCK_BLOCKED"
       fi
       echo "REFUSED: cannot inspect worktree $WT for commits not on $DEFAULT." >&2
-      teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force."
+      teardown_work_refusal_remedy "Restore the git index state, or get the captain's explicit OK to discard, then --force." \
+        "Restore the git index state, then re-run teardown."
       return 1
     fi
     unmerged=$(printf '%s\n' "$unmerged_raw" | head -5)
