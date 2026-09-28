@@ -1101,7 +1101,7 @@ test_pi_relaunch_on_an_adopted_tmux_window_resumes_the_recorded_session_id() {
   assert_not_contains "$command" "--session '" \
     "the tmux backend has no runtime session reference to pass"
   [ "$(meta_field "$dir" pr80 pi_session_id)" = pr80 ] \
-    || fail "the republished record must keep the deterministic session id"
+    || fail "the republished record must keep the recorded session id"
   [ "$(meta_field "$dir" pr80 window)" = "fmses:fm-pr80" ] \
     || fail "an adopted relaunch must keep its endpoint"
   pass "fm-spawn --relaunch: a Pi task on an adopted tmux window resumes its recorded session id"
@@ -1135,7 +1135,7 @@ test_pi_relaunch_with_an_inconclusive_probe_preserves_the_recorded_session_id() 
 
 # A task record's pi_session_id= belongs to the Pi harness that recorded it:
 # relaunching onto a different adapter drops it, so a later relaunch back to
-# Pi re-derives a fresh deterministic id instead of resuming a session the
+# Pi derives a fresh incarnation id instead of resuming a session the
 # intermediate agent never wrote.
 test_relaunch_away_from_pi_drops_the_recorded_session_id() {
   local dir out
@@ -1156,7 +1156,7 @@ test_relaunch_away_from_pi_drops_the_recorded_session_id() {
   pass "fm-control relaunch: switching away from Pi drops the recorded session id"
 }
 
-# And switching BACK to Pi records the deterministic id in the republished
+# And switching BACK to Pi records a new incarnation id in the republished
 # record, so the NEXT relaunch resumes it - while the switch launch itself
 # stays a fresh session, because no Pi session was recorded to resume.
 test_relaunch_back_to_pi_rederives_the_recorded_session_id() {
@@ -1177,7 +1177,7 @@ test_relaunch_back_to_pi_rederives_the_recorded_session_id() {
   command=$(cat "$dir/fake/literal")
   assert_not_contains "$command" "--session-id" \
     "with no recorded Pi session there is nothing to resume; the switch launch is fresh"
-  pass "fm-control relaunch: switching to Pi records the task's deterministic session id for its next relaunch"
+  pass "fm-control relaunch: switching to Pi records a new incarnation session id for its next relaunch"
 }
 
 
@@ -2247,7 +2247,7 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
 }
 
 # A Pi crewmate spawned after pi_session_id= existed runs the task's own
-# deterministic session. A destroyed pane takes the registration with it, so
+# recorded session. A destroyed pane takes the registration with it, so
 # the runtime has nothing to report and the recorded id is what the replacement
 # resumes - the conversation continues instead of being re-read from scratch.
 test_herdr_pi_rebind_resumes_the_recorded_session_id() {
@@ -2270,7 +2270,7 @@ test_herdr_pi_rebind_resumes_the_recorded_session_id() {
   assert_not_contains "$command" "--session '" \
     "with no runtime-bound reference there is no --session <ref> to pass"
   [ "$(meta_field "$dir" pr90 pi_session_id)" = pr90 ] \
-    || fail "the rebound record must keep the deterministic session id"
+    || fail "the rebound record must keep the recorded session id"
   [ "$(meta_field "$dir" pr90 window)" = 'fmlab:%9' ] \
     || fail "the rebind should publish the fresh pane, got $(meta_field "$dir" pr90 window)"
   pass "reclaim: a Pi relaunch onto a destroyed pane resumes the task's recorded session id"
@@ -2278,7 +2278,7 @@ test_herdr_pi_rebind_resumes_the_recorded_session_id() {
 
 # When the pane DID survive, its Herdr registration is still the status
 # authority, and a readable Pi reference outranks the recorded id: the two name
-# the same session for a task spawned with the deterministic id, and the bound
+# the same session for a task whose record names one, and the bound
 # reference cannot mismatch whatever the authority actually holds.
 test_herdr_pi_adopted_pane_prefers_the_runtime_bound_session() {
   local dir out rc=0 command

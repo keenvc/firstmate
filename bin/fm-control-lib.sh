@@ -268,7 +268,8 @@ fm_control_exit_command() {  # <harness>
 # shell quoting belongs to the owner of the launch line (bin/fm-spawn.sh).
 #
 # This table answers only what the ENDPOINT's runtime reports. A task record
-# can also carry a deterministic pi_session_id= for a Pi lane spawned after
+# can also carry a recorded pi_session_id= (<task-id>.<spawn-gen>) for a Pi
+# lane spawned after
 # that field existed; bin/fm-spawn.sh's pi_session_args reads it as the
 # fallback when this table has nothing to return (the common case where the
 # recorded endpoint, and the registration with it, no longer exist).

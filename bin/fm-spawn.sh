@@ -2618,7 +2618,7 @@ relaunch_resume_args() {  # <harness> <backend> <target>
 # session resumed from the recorded id the two name the same session anyway.
 # The runtime-reported reference is #5161's own behavior and is gated on the
 # adapter pair alone, so a pi/pi-signed secondmate relaunch keeps it too; the
-# DETERMINISTIC id is the crewmate/scout contract, and a secondmate (whose
+# RECORDED id is the crewmate/scout contract, and a secondmate (whose
 # home owns its session lifecycle), any other harness, and a relaunch of a
 # task with no recorded id and no runtime-bound reference keep today's fresh
 # session exactly as they were.

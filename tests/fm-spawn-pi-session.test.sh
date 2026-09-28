@@ -8,7 +8,7 @@
 #   2. A fresh pi-signed spawn does the same under its own executable name.
 #   3. A fresh pi scout records it too.
 #   4. A secondmate on pi does neither: its session lifecycle is its own
-#      home's, and the deterministic id is a crewmate/scout contract.
+#      home's, and the incarnation-scoped id is a crewmate/scout contract.
 #   5. Re-spawning the same task id into the same copy path after teardown gets
 #      a DIFFERENT session, so it cannot inherit the abandoned attempt's turns.
 #
@@ -140,7 +140,7 @@ test_respawn_after_teardown_does_not_inherit_the_previous_session() {
   pass "fm-spawn: re-spawning a torn-down task id opens a new Pi session, not the abandoned one"
 }
 
-test_pi_secondmate_spawn_gets_no_deterministic_session() {
+test_pi_secondmate_spawn_gets_no_incarnation_session() {
   local out rc id=pi-sm1 sm
   new_case fresh-pi-sm pi
   printf 'pi\n' > "$HOME_DIR/config/secondmate-harness"
@@ -154,14 +154,14 @@ test_pi_secondmate_spawn_gets_no_deterministic_session() {
     fm_test_run_spawn "$HOME_DIR" "$WT" "$FAKEBIN" "$id" "$sm" --secondmate); rc=$?
   expect_code 0 "$rc" "a pi secondmate spawn should succeed"$'\n'"$out"
   [ -z "$(meta_field "$id" pi_session_id)" ] \
-    || fail "a secondmate record must not carry the deterministic session id"
+    || fail "a secondmate record must not carry an incarnation-scoped session id"
   assert_not_contains "$(cat "$CASE/launch.log")" "--session-id" \
-    "a secondmate owns its session lifecycle; the deterministic id is not passed"
-  pass "fm-spawn: a pi secondmate keeps its own session lifecycle, with no deterministic id"
+    "a secondmate owns its session lifecycle; the incarnation-scoped id is not passed"
+  pass "fm-spawn: a pi secondmate keeps its own session lifecycle, with no incarnation-scoped id"
 }
 
 test_fresh_pi_ship_spawn_records_and_runs_its_own_session
 test_fresh_pi_signed_ship_spawn_records_and_runs_its_own_session
 test_fresh_pi_scout_spawn_records_and_runs_its_own_session
-test_pi_secondmate_spawn_gets_no_deterministic_session
+test_pi_secondmate_spawn_gets_no_incarnation_session
 test_respawn_after_teardown_does_not_inherit_the_previous_session
