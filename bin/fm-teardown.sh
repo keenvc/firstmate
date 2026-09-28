@@ -147,10 +147,10 @@
 # down, so such records clear in any order. Any other verdict, any record whose
 # endpoint cannot be validated, or a secondmate home refuses exactly as a live
 # claimant does, and the refusal names the co-claimant and its verdict so the
-# operator knows which record to reconcile first - except `unverified`, which a
-# backend with no recovery classifier always reads and no operator action
-# clears: that refusal says the slot stays held instead of naming a reconcile
-# that cannot move it. "No work" is the ordinary
+# operator knows which record to reconcile first. A backend with no recovery
+# classifier always reads `unverified`, which no rerun changes; what clears that
+# refusal is reconciling a record off the slot, never the verdict, and the
+# refusal says so. "No work" is the ordinary
 # uncommitted-changes and landed-work refusals below, which a shared copy runs
 # regardless of kind: a scout's scratch carve-out never covers a copy another
 # record also names. A record is never removed without returning its slot unless
@@ -2454,13 +2454,11 @@ require_exclusive_worktree_slot_record() {
         fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
+        echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
         if [ "$endpoint_state" = unverified ]; then
-          echo "Task $other_id's recorded endpoint reads 'unverified': its recorded backend has no recovery classifier, so whether that task still holds this slot cannot be established and the slot stays held. No reconcile and no rerun changes that verdict." >&2
-        else
-          echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
-          if [ -n "$endpoint_state" ]; then
-            echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
-          fi
+          echo "Task $other_id's recorded endpoint reads 'unverified': its recorded backend has no recovery classifier, so no rerun changes that verdict - taking one of these records off $slot is what clears this refusal." >&2
+        elif [ -n "$endpoint_state" ]; then
+          echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
         return 1
       done
@@ -2492,10 +2490,13 @@ require_exclusive_task_worktree_slot() {
       echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
       if [ "$own_state" = alive ]; then
         echo "A shared slot is returned only once every record naming it is non-live; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
-      elif [ "$own_state" = unverified ]; then
-        echo "$ID's recorded backend has no recovery classifier, so $ID's own hold on the slot cannot be established and the slot stays held. No reconcile and no rerun changes that verdict." >&2
       else
-        echo "A shared slot is returned only once every record naming it is non-live, and no worker state can be read for $ID at all, so stopping a worker cannot clear this. Reconcile whichever record naming $slot is wrong (bin/fm-crew-state.sh $ID, and the same for task(s) $TEARDOWN_SLOT_SHARED_WITH), then re-run teardown: a slot no other record names never reaches this gate." >&2
+        if [ "$own_state" = unverified ]; then
+          echo "A shared slot is returned only once every record naming it is non-live, and $ID's recorded backend has no recovery classifier, so no rerun changes that verdict." >&2
+        else
+          echo "A shared slot is returned only once every record naming it is non-live, and no worker state can be read for $ID at all, so stopping a worker cannot clear this." >&2
+        fi
+        echo "Reconcile whichever record naming $slot is wrong (bin/fm-crew-state.sh $ID, and the same for task(s) $TEARDOWN_SLOT_SHARED_WITH), then re-run teardown: a slot no other record names never reaches this gate." >&2
       fi
       return 1
       ;;

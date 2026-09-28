@@ -1514,8 +1514,10 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     "the refusal should name the unclassifiable record"
   assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
     "the refusal should say why that verdict can never be cleared"
-  assert_not_contains "$(cat "$dir/stderr")" "Reconcile whichever record is wrong" \
-    "an unverified verdict should not be given a reconcile that provably cannot clear it"
+  assert_contains "$(cat "$dir/stderr")" "Reconcile whichever record is wrong" \
+    "the refusal should still name reconciling a record off the slot, which does clear it"
+  assert_contains "$(cat "$dir/stderr")" "is what clears this refusal" \
+    "the refusal should say that taking a record off the slot is what clears it"
 
   # The same verdict on this record's own endpoint: the slot stays held, and
   # the refusal says so rather than naming a reconcile that cannot move it.
@@ -1530,8 +1532,10 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     "the refusal should name this record's own unclassifiable verdict"
   assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
     "the own-endpoint refusal should say why that verdict can never be cleared"
-  assert_not_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh" \
-    "an unverified own endpoint should not be given a reconcile that provably cannot clear it"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh zellij-task" \
+    "the own-endpoint refusal should name reconciling a record off the slot"
+  assert_contains "$(cat "$dir/stderr")" "a slot no other record names never reaches this gate" \
+    "the own-endpoint refusal should say what clears it"
   assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
     "an unverified own endpoint should not be told to stop a worker that cannot be read"
 
