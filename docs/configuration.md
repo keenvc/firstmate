@@ -1107,7 +1107,6 @@ See [`docs/examples/crew-dispatch.json`](examples/crew-dispatch.json) for a star
 
 This file is local to each home and is not part of secondmate inherited configuration, because its rules are written for that home's own project domain.
 Propagation never writes, replaces, or removes a secondmate home's copy, so each secondmate keeps its own dispatch profile or none.
-A home without the file resolves its crewmates and scouts through the static crew harness above.
 
 ## Typed dispatch resolution (.env TYPESAFE_API_KEY)
 
