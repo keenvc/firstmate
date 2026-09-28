@@ -206,7 +206,7 @@ With `state/.afk` absent the daemon lock proves nothing and the strict watcher p
 
 ### Guard grace and the poll cadence
 
-`bin/fm-watch.sh` republishes `state/.last-watcher-beat` at the top of each cycle, just before its terminal wait (`event_wait_or_sleep`), and before each item of the per-task sweeps its `watcher_beat` calls mark.
+`bin/fm-watch.sh` republishes `state/.last-watcher-beat` at the top of each cycle, between the main loop's phases, before each item of the per-task sweeps its `watcher_beat` calls mark, and just before its terminal wait (`event_wait_or_sleep`).
 `watcher_beat` in `bin/fm-watch.sh` owns that contract, and its call sites are that contract rather than a rule about which sweeps qualify.
 A marked sweep therefore keeps the beacon fresh however long it runs, while a step that blocks stops publishing and goes stale; a healthy watcher's beacon can still legitimately age up to `FM_POLL` seconds across the terminal wait.
 
