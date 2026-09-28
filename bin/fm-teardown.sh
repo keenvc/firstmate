@@ -92,8 +92,10 @@
 # not genuinely this task's destroys another worker's live work. Before the first
 # cleanup step, teardown verifies record exclusivity: no OTHER task record in
 # this home or any locally registered Firstmate home may name the same live path
-# in its worktree= or home=. One live path with two task records is the reuse
-# collision itself, whichever record is stale.
+# in its worktree= or home=, unless every record that does is provably non-live
+# and the copy holds no work - the shared-slot rule below. Short of that, one
+# live path with two task records is the reuse collision itself, whichever
+# record is stale.
 # That scan alone cannot prove THIS record is the current owner, because the task
 # that took the slot next may leave no record it can reach - its own worker may
 # have exited and its record been cleaned up, or it may live in a home this
@@ -116,8 +118,10 @@
 # repair the claim file at the printed path and re-run - never remove it, since
 # an absent claim proceeds and would return a slot that may be another task's. An
 # absent claim - a slot taken before claims existed, or already returned - keeps
-# exactly the record-scan protection it had before, because refusing it would
-# strand every task in flight across that change on no evidence at all.
+# exactly the protection the record scan above establishes: either no other
+# record names the slot, or every record that does is provably non-live and the
+# copy holds no work. Refusing it would strand every task in flight across that
+# change on no evidence at all.
 # Why Treehouse's own state cannot answer this for crewmate slots, and why the
 # claim file sits on top of it, is owned by bin/fm-wake-lib.sh's slot-owner
 # claim comment.
@@ -147,12 +151,12 @@
 # keys) names no endpoint and reads `missing` whichever record is being torn
 # down, so such records clear in any order. Any other verdict, any record whose
 # endpoint cannot be validated, or a secondmate home refuses exactly as a live
-# claimant does, and the refusal reports the conflict - which records name the
-# copy and what each one classified as - without naming a step to clear it,
-# because which record is the stale one is not something teardown can read.
-# This record's own endpoint is
-# held to the weaker test an unshared teardown of it already passes: only a
-# running worker refuses, because a shared copy cannot attribute in-flight work.
+# claimant does. The refusal stops at the first record that blocks it and
+# reports that record and its verdict - not every record naming the copy - and
+# it names no step to clear it, because which record is the stale one is not
+# something teardown can read. This record's own endpoint is held to the weaker
+# test an unshared teardown of it already passes: only a running worker refuses,
+# because a shared copy cannot attribute in-flight work.
 # Returning a shared slot leaves the other records naming a copy that is back in
 # the pool, so the note printed on that path says they must be torn down before
 # it is spawned into again. "No work" is the ordinary
