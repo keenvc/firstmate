@@ -610,10 +610,10 @@ fm_touch_epoch() {
 # fm_beacon_cycle <beacon>: the poll-cycle number state/.last-watcher-beat names,
 # or empty when no watcher has published one yet.
 #
-# bin/fm-watch.sh republishes the beacon from each step of a cycle (watcher_beat
-# owns that contract), so an mtime advance no longer marks a cycle boundary and
-# only this number changing does. Read it wherever a case needs "a whole poll
-# cycle ran"; mtime still answers "how fresh is it".
+# bin/fm-watch.sh republishes the beacon mid-cycle wherever watcher_beat is called
+# (that function owns the contract), so an mtime advance no longer marks a cycle
+# boundary and only this number changing does. Read it wherever a case needs "a
+# whole poll cycle ran"; mtime still answers "how fresh is it".
 fm_beacon_cycle() {
   local cycle=
   read -r cycle _ 2>/dev/null < "$1" || true

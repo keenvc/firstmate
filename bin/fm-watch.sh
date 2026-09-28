@@ -266,11 +266,11 @@ fi
 # turn-ended signature, annotation staleness checks, and guarded bookkeeping writes.
 
 POLL=${FM_POLL:-15}                   # seconds between cycles
-# The liveness beacon is republished from each step of a cycle - including
-# immediately before the terminal wait below (event_wait_or_sleep) and at the top
-# of the next one - so a healthy cycle's beacon can legitimately age up to POLL
-# seconds across that wait, no matter how long a sweep runs; watcher_beat below
-# owns that contract. fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
+# The liveness beacon is republished wherever watcher_beat below is called -
+# including immediately before the terminal wait (event_wait_or_sleep) and at the
+# top of the next cycle - so a healthy cycle's beacon can legitimately age up to
+# POLL seconds across that wait, no matter how long a marked sweep runs;
+# watcher_beat below owns that contract. fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
 # transitively above) is the single owner of the max(300, poll+60)
 # derivation - see docs/turnend-guard.md "Guard grace and the poll cadence".
 # This recomputes the library default above now that the real configured
@@ -1984,9 +1984,12 @@ age_of() {  # seconds since file mtime; "due immediately" if missing
 
 # Liveness beacon (state/.last-watcher-beat) read by the guards and the arm
 # layer. Only the lock-holding watcher publishes it, and only where its own cycle
-# has just made progress: the top of each cycle, each phase boundary, each item of
-# every per-task sweep, and just before the terminal wait. A cycle that is slow
-# because the fleet is large therefore keeps the beacon fresh, while a watcher
+# has just made progress: the top of each cycle, each phase boundary, the items of
+# the per-task sweeps whose loops call this below, and just before the terminal
+# wait. Those call sites are the whole contract, not a rule about which sweeps
+# qualify, so a stretch of work with no call between beats does not publish.
+# A marked sweep that is slow because the fleet is large keeps the beacon fresh,
+# while a watcher
 # blocked inside any single step stops publishing and goes stale exactly as
 # before; nothing here runs on a timer or from a helper process. The file holds
 # the cycle number so a reader can tell a new cycle from a mid-cycle beat; every
