@@ -62,9 +62,9 @@
 #
 # WHAT IT READS
 # Aged holds come from the canonical local backlog projection rather than a second
-# parser: `fm-fleet-snapshot.sh --contribution-input` reuses the canonical backlog
-# parser WITHOUT observing workers or other homes, so the sweep stays local and
-# bounded. A hold's recorded pull request is read through bin/fm-pr-lib.sh, which
+# parser: `fm-fleet-snapshot.sh --backlog-json` reuses the canonical backlog
+# parser WITHOUT task metadata, worker observations, or other homes, so the
+# sweep stays local and bounded. A hold's recorded pull request is read through bin/fm-pr-lib.sh, which
 # is the same gh-then-gh-axi path every other surface uses. A redundant local
 # origin/main fetch is deliberately NOT performed: the forge merge state and the
 # row's own recorded completion are the authoritative landing signals, and a clone
@@ -183,8 +183,10 @@ if [ "$BUDGET_SECS" -gt "$BUDGET_MAX" ]; then
   BUDGET_CUT_FROM=$BUDGET_SECS
   BUDGET_SECS=$BUDGET_MAX
 fi
-# The local projection is a fast bounded child of the same sweep budget, so it
-# can never consume more than the sweep has left.
+# The backlog-only projection is a bounded child of the same sweep budget. At
+# large fleet sizes the contribution-input pair can spend most of its time on
+# per-task merge-authority resolution the sweep never reads; backlog-json avoids
+# that work (sub-second on the home that timed out at five seconds before).
 SNAPSHOT_BOUND=5
 [ "$SNAPSHOT_BOUND" -le "$BUDGET_SECS" ] || SNAPSHOT_BOUND=$BUDGET_SECS
 
@@ -343,10 +345,10 @@ snapshot_holds() {
   local snapshot
   snapshot=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
     FM_CONFIG_OVERRIDE="$CONFIG" \
-    fm_run_timed "$SNAPSHOT_BOUND" "$SNAPSHOT_BIN" --contribution-input 2>/dev/null) || return 1
+    fm_run_timed "$SNAPSHOT_BOUND" "$SNAPSHOT_BIN" --backlog-json 2>/dev/null) || return 1
   [ -n "$snapshot" ] || return 1
   printf '%s\n' "$snapshot" | jq -c --argjson age "$AGE_DAYS" '
-    (.backlog.records // [])[]
+    (.records // [])[]
     | select(.structured == true)
     | select(.hold_kind == "captain")
     | select(.hold_age_days != null and .hold_age_days >= $age)

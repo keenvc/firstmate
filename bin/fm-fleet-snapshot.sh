@@ -107,6 +107,9 @@
 #
 # --contribution-input prints only the canonical backlog/tasks ownership pair,
 # without worker observations or cross-home collection, for the home-local poll.
+# --backlog-json prints only the canonical backlog projection, without task
+# metadata or merge-authority resolution, for home-local consumers that read
+# backlog rows alone.
 # Compatibility: JSON is the primary machine-readable surface.
 # Human views must render this output instead of parsing state files again.
 set -u
@@ -232,6 +235,9 @@ Print a structured snapshot of the firstmate fleet.
 JSON is the stable machine-readable output contract. The default snapshot
 refreshes only its parent-side remote-summary cache as an observational side effect.
 
+--backlog-json emits the canonical local backlog projection only, without task
+metadata or cross-home collection.
+
 --contribution-input emits the canonical local backlog/tasks ownership pair only,
 without worker observations or cross-home collection.
 
@@ -283,6 +289,7 @@ OUTPUT_MODE=json
 case "${1:---json}" in
   --json) ;;
   --secondmate-home-summary) OUTPUT_MODE=secondmate-home-summary ;;
+  --backlog-json) OUTPUT_MODE=backlog-json ;;
   --contribution-input) OUTPUT_MODE=contribution-input ;;
   -h|--help) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
@@ -1971,6 +1978,11 @@ contribution_tasks_json() {
       --arg merge_authority "$merge_authority" '{id:$id,kind:$kind,pr:{url:$url,head:$head},merge_authority:$merge_authority}'
   done | jq -s .
 }
+
+if [ "$OUTPUT_MODE" = backlog-json ]; then
+  printf '%s\n' "$BACKLOG_JSON"
+  exit 0
+fi
 
 if [ "$OUTPUT_MODE" = contribution-input ]; then
   # Reuse the canonical backlog parser, without observing workers or other homes.

@@ -340,6 +340,42 @@ test_sweep_defers_beyond_the_hold_cap() {
   pass "fm-hold-reverify: the hold cap bounds the sweep and discloses what it deferred"
 }
 
+test_aged_holds_report_when_task_metadata_would_exceed_the_projection_bound() {
+  local home out wrapper
+  home=$(make_home slow-meta)
+  set_pr "$home" 107 MERGED true
+  write_backlog "$home" <<EOF
+## In flight
+
+## Queued
+
+- [ ] h-slowmeta - Ship it https://github.com/o/r/pull/107 (repo: sample) (kind: captain) (since 2026-01-01) (hold: approve) (hold-kind: captain)
+  Captain hold set: $OLD_HOLD_SET
+
+## Done
+EOF
+  wrapper="$home/wrapper-snapshot.sh"
+  cat > "$wrapper" <<SH
+#!/usr/bin/env bash
+case "\${1:-}" in
+  --contribution-input) sleep 10; printf '{}\n'; exit 0 ;;
+  --backlog-json)
+    exec env FM_HOME="\$FM_HOME" FM_SNAPSHOT_NOW="$FIXED_NOW" "$ROOT/bin/fm-fleet-snapshot.sh" --backlog-json
+    ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$wrapper"
+  out="$home/out"
+  expect_code 0 "$(run_check "$home" "$out" FM_HOLD_REVERIFY_SNAPSHOT_BIN="$wrapper")" \
+    "slow contribution-input sweep exit"
+  assert_equals dead "$(docket_verdict "$home" h-slowmeta)" \
+    "aged captain holds must report through the backlog-only projection"
+  assert_contains "$(cat "$out")" "1 dead" \
+    "the sweep surfaces findings instead of a projection failure"
+  pass "fm-hold-reverify: aged holds report when task metadata would exceed the projection bound"
+}
+
 test_unreadable_projection_reports_once() {
   local home out broken status
   home=$(make_home broken)
@@ -431,6 +467,7 @@ test_young_hold_is_not_examined
 test_repeat_is_silent_and_change_wakes
 test_cadence_gate_suppresses_until_the_interval_elapses
 test_sweep_defers_beyond_the_hold_cap
+test_aged_holds_report_when_task_metadata_would_exceed_the_projection_bound
 test_unreadable_projection_reports_once
 test_classify_prints_the_verdict_for_facts
 test_arm_writes_and_registers_and_disarm_removes
