@@ -1368,7 +1368,7 @@ test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
 # Forced secondmate cleanup checks its descendants' pool slots through the same
 # co-claimant scan, for a record the operator never named. The flag guidance
 # belongs to the task they did name, so it must not surface here.
-test_forced_secondmate_child_slot_collision_omits_the_flag_guidance() {
+test_forced_secondmate_child_slot_collision_reports_only_the_conflict() {
   local dir mate parent=mate-task child=child-task rc
 
   dir=$(make_shared_slot_case secondmate-child-slot-collision)
@@ -1392,8 +1392,8 @@ test_forced_secondmate_child_slot_collision_omits_the_flag_guidance() {
   [ "$rc" -ne 0 ] || fail "forced secondmate cleanup returned a pool slot its child shares"
   assert_contains "$(cat "$dir/stderr")" "$child's recorded worktree" \
     "the descendant refusal should name the child record it refused on"
-  assert_contains "$(cat "$dir/stderr")" "bin/fm-teardown.sh other-task" \
-    "the descendant refusal should name tearing the co-claimant record down"
+  assert_contains "$(cat "$dir/stderr")" "also task other-task's recorded worktree" \
+    "the descendant refusal should name the record it collided with"
   assert_not_contains "$(cat "$dir/stderr")" "re-run teardown for $child without it" \
     "the descendant refusal should not tell the operator to drop a flag from a command they never ran"
   assert_present "$mate/state/$child.meta" "the descendant refusal removed the child record"
@@ -1401,7 +1401,7 @@ test_forced_secondmate_child_slot_collision_omits_the_flag_guidance() {
     "the descendant refusal removed the secondmate's own record"
   assert_present "$dir/pool/1/project/.git" "the descendant refusal reset the shared slot"
 
-  pass "fm-teardown: a forced secondmate's descendant slot collision names only its own clearing step"
+  pass "fm-teardown: a forced secondmate's descendant slot collision reports the conflict and nothing else"
 }
 
 write_windowless_ship_meta() {  # <case> <id>
@@ -1513,15 +1513,11 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     "worktree=$dir/worktree" "project=$dir/project" "kind=ship" "mode=local-only"
   assert_shared_slot_refused "$dir" done-task "a slot shared with an unclassifiable backend"
   assert_contains "$(cat "$dir/stderr")" "zellij-task's recorded endpoint reads 'unverified'" \
-    "the refusal should name the unclassifiable record"
-  assert_contains "$(cat "$dir/stderr")" "no recovery classifier" \
-    "the refusal should say why that verdict can never be cleared"
-  assert_contains "$(cat "$dir/stderr")" "bin/fm-teardown.sh zellij-task" \
-    "the refusal should name tearing that record down, the step that clears it"
-  assert_contains "$(cat "$dir/stderr")" "only tearing that record down clears this refusal" \
-    "the refusal should say what clears it"
+    "the refusal should name the unclassifiable record and its verdict"
   assert_not_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh" \
-    "no refusal should name a read-only reporter as its remedy"
+    "the refusal should not name a read-only reporter as a remedy"
+  assert_not_contains "$(cat "$dir/stderr")" "bin/fm-teardown.sh zellij-task" \
+    "the refusal should not advise tearing a record down it cannot know is the stale one"
 
   # That record's own unclassifiable verdict does not refuse: an unshared
   # teardown of it proceeds on the same verdict, so a shared slot whose other
@@ -1974,7 +1970,7 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record
 test_shared_slot_of_windowless_records_clears_in_any_order
 test_scout_copy_is_scratch_only_while_no_other_record_names_it
 test_shared_slot_with_an_undeterminable_record_refuses
-test_forced_secondmate_child_slot_collision_omits_the_flag_guidance
+test_forced_secondmate_child_slot_collision_reports_only_the_conflict
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot

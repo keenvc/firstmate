@@ -147,15 +147,15 @@
 # keys) names no endpoint and reads `missing` whichever record is being torn
 # down, so such records clear in any order. Any other verdict, any record whose
 # endpoint cannot be validated, or a secondmate home refuses exactly as a live
-# claimant does, and the refusal names the co-claimant and its verdict so the
-# operator knows which record to tear down first - the one supported step that
-# clears the refusal, since a backend with no recovery classifier always reads
-# `unverified` and no rerun changes that verdict. This record's own endpoint is
+# claimant does, and the refusal reports the conflict - which records name the
+# copy and what each one classified as - without naming a step to clear it,
+# because which record is the stale one is not something teardown can read.
+# This record's own endpoint is
 # held to the weaker test an unshared teardown of it already passes: only a
 # running worker refuses, because a shared copy cannot attribute in-flight work.
 # Returning a shared slot leaves the other records naming a copy that is back in
-# the pool, so the note says they must be torn down before it is spawned into
-# again. "No work" is the ordinary
+# the pool, so the note printed on that path says they must be torn down before
+# it is spawned into again. "No work" is the ordinary
 # uncommitted-changes and landed-work refusals below, which a shared copy runs
 # regardless of kind: a scout's scratch carve-out never covers a copy another
 # record also names. A record is never removed without returning its slot unless
@@ -1884,14 +1884,14 @@ teardown_treehouse_return() {
 # The remedy a work refusal may name. Discarding this task's own work needs
 # --force and nothing else, but a copy another record still names refuses under
 # --force too (require_exclusive_worktree_slot_record), and the work in it
-# cannot be shown to be this task's, so on that path landing or moving the work,
-# or reconciling the records that share the copy, replaces the forced discard.
+# cannot be shown to be this task's, so on that path landing or moving the work
+# replaces the forced discard.
 # A remedy that is not the forced discard survives sharing and is named first:
 # repairing an unreadable git index clears a refusal no reconcile can.
 teardown_work_refusal_remedy() {  # <remedy-when-this-record-alone-names-the-copy> [<remedy-that-survives-sharing>]
   if [ -n "$TEARDOWN_SLOT_SHARED_WITH" ]; then
     [ -z "${2:-}" ] || echo "$2" >&2
-    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so the work in it cannot be shown to be task $ID's and no teardown of $ID may discard it: land or move that work, or tear those records down first (bin/fm-teardown.sh for each of them), then re-run teardown." >&2
+    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so the work in it cannot be shown to be task $ID's and no teardown of $ID may discard it: land or move that work, then re-run teardown." >&2
   else
     echo "$1" >&2
   fi
@@ -2459,10 +2459,7 @@ require_exclusive_worktree_slot_record() {
         fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
-        echo "Tear whichever of the two records is stale down first (bin/fm-teardown.sh $other_id), then re-run teardown for $record_id." >&2
-        if [ "$endpoint_state" = unverified ]; then
-          echo "Task $other_id's recorded endpoint reads 'unverified': its recorded backend has no recovery classifier, so no rerun changes that verdict - only tearing that record down clears this refusal." >&2
-        elif [ -n "$endpoint_state" ]; then
+        if [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
         return 1
