@@ -2621,9 +2621,9 @@ relaunch_resume_args() {  # <harness> <backend> <target>
 #
 # Prints the arguments with the single leading space that appends them to the
 # launch line, so an empty result leaves every other launch byte-identical.
-# A malformed recorded id is treated as absent rather than passed through:
-# a task id is [A-Za-z0-9._-] only, so anything else cannot be one this
-# script recorded.
+# A record that names no session resumes nothing rather than selecting an
+# empty one, which is what keeps a pre-field record and a switch back to Pi
+# on the fresh launch they had before.
 pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <recorded-id> <session-flag>
   local resume
   case "$1" in
@@ -2641,9 +2641,7 @@ pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <
     ship | scout) ;;
     *) return 0 ;;
     esac
-    case "$7" in
-    '' | *[!A-Za-z0-9._-]*) return 0 ;;
-    esac
+    [ -n "$7" ] || return 0
     printf -- ' %s %s' "$8" "$(shell_quote "$7")"
     return 0
   fi
