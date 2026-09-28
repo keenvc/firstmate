@@ -568,7 +568,11 @@ if [ ! -e "$FAILURE_NOTICE" ]; then
     exit 0
   fi
   {
-    printf 'firstmate watcher auto-arm FAILED - the Stop-owned automatic supervision mechanism is broken after %s bounded attempts, and no live watcher with a fresh beacon was verified.\n' "$attempt"
+    if fm_watcher_present "$STATE" "$SCRIPT_DIR/fm-watch.sh" "$FM_HOME"; then
+      printf 'firstmate watcher auto-arm FAILED after %s bounded attempts: a watcher process holds this home lock but is not publishing its liveness beacon, so supervision is running but not proving progress.\n' "$attempt"
+    else
+      printf 'firstmate watcher auto-arm FAILED - the Stop-owned automatic supervision mechanism is broken after %s bounded attempts, and no live watcher with a fresh beacon was verified.\n' "$attempt"
+    fi
     [ -n "$OUT" ] && grep -E '^(watcher:|signal:|stale:|check:|heartbeat|supervision-host)' "$OUT" 2>/dev/null | head -8
     [ "$HOST_MODE" -eq 0 ] || printf 'The supervision host (docs/supervision-host.md) ran these cycles; its last one exited %s without a wake.\n' "$HOST_RC"
     printf 'Do not launch a manual background arm from this notice; investigate the automatic Stop hook and watcher startup before ending blind.\n'

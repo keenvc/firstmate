@@ -240,6 +240,8 @@ elif [ "$watcher_healthy" = false ]; then
       printf '●  WATCHER DOWN - SUPERVISION IS OFF\n'
       if [ "$watcher_down_reason" = no-watcher ]; then
         watcher_cause=$(printf 'no live watcher process holds this home lock (last beat: %s)' "$beacon_desc")
+      elif fm_watcher_present "$STATE" "$WATCH" "$FM_HOME"; then
+        watcher_cause=$(printf 'a watcher process holds this home lock but is not publishing its liveness beacon (last beat: %s, grace %ss)' "$beacon_desc" "$GRACE")
       else
         watcher_cause=$(printf 'no watcher has a fresh beacon (last beat: %s, grace %ss)' "$beacon_desc" "$GRACE")
       fi

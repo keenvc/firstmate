@@ -123,8 +123,8 @@ fm_path_age() {
 }
 
 # fm_poll_derived_grace [poll-seconds]
-# Default guard-grace derivation: max(300, poll + 60). A watcher touches its
-# liveness beacon once per poll cycle, so a fixed 300s grace stops correctly
+# Default guard-grace derivation: max(300, poll + 60). A healthy watcher's
+# beacon can age up to one poll during its terminal wait, so a fixed 300s grace stops correctly
 # bounding staleness once the poll cadence reaches or exceeds it; growing the
 # default with the cadence while keeping the historical 300s floor for the
 # common short-poll case fixes that without a caller-specific constant.
@@ -201,6 +201,18 @@ fm_watcher_healthy() {
   # shellcheck disable=SC2034 # Read by callers after fm_watcher_healthy returns.
   FM_WATCHER_HEALTHY_IDENTITY=$identity
   return 0
+}
+
+# fm_watcher_present <state> <watch-path> [home]
+# True when a live, identity-matched watcher process holds this home's lock,
+# whatever its beacon says. Guard wording uses it only to tell "no watcher" from
+# "a watcher is running but not publishing liveness"; it never changes a guard,
+# arm, or eviction decision.
+fm_watcher_present() {
+  local state=$1 watch_path=$2 home=${3:-$FM_HOME} pid
+  pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
+  fm_pid_alive "$pid" || return 1
+  fm_watcher_lock_matches_pid "$state" "$watch_path" "$pid" "$home"
 }
 
 # fm_watcher_healthy above is the PID-STRICT primitive: true only when a live,
