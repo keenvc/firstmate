@@ -268,11 +268,13 @@ fm_control_exit_command() {  # <harness>
 # shell quoting belongs to the owner of the launch line (bin/fm-spawn.sh).
 #
 # This table answers only what the ENDPOINT's runtime reports. A task record
-# can also carry a recorded pi_session_id= (<task-id>.<spawn-gen>) for a Pi
-# lane spawned after
-# that field existed; bin/fm-spawn.sh's pi_session_args reads it as the
-# fallback when this table has nothing to return (the common case where the
-# recorded endpoint, and the registration with it, no longer exist).
+# can also carry a recorded pi_session_id= for a Pi lane spawned after
+# that field existed - the incarnation id <task-id>.<spawn-gen>, or the
+# reference a previous relaunch was handed here, since the record names the
+# session that relaunch actually ran; bin/fm-spawn.sh's pi_session_args reads it
+# as the fallback when this table has nothing to return (the common case where
+# the recorded endpoint, and the registration with it, no longer exist), passing
+# a path-shaped value with this same flag.
 fm_control_relaunch_resume_flag() {  # <harness> <registered-agent>
   case "${1-}" in
     pi|pi-signed)

@@ -59,7 +59,7 @@ Removing a worktree, closing an endpoint, or discarding work stays with [`bin/fm
 It is not deterministic across the verified adapters: codex, grok, gemini, and devin resume only from a session id printed at exit, opencode continues the most recent session for the cwd, and claude, omp, kimi, and agy have no verified general pane-resume contract.
 Pi and pi-signed are the exception: a ship or scout spawned on them runs a persistent session of its own (`--session-id <task-id>.<spawn-gen>`, incarnation-scoped, recorded as `pi_session_id=` in the task record) whenever the resolved executable advertises that flag, so a later relaunch resumes exactly the session that record names - but it is delivered through `relaunch`, not a verb.
 `relaunch` uses the brief on disk - not a harness-private session - as the durable instruction when the backend can prove the old agent stopped and the composer is empty; Devin on Herdr currently fails that composer check and refuses.
-A relaunch also carries one session reference: the endpoint runtime's own bound session when it recorded one, otherwise the task's recorded `pi_session_id` - see [the relaunch transaction](#transactional-relaunch) - but that is a relaunch input, not a caller-facing verb.
+A relaunch also carries one session reference: the endpoint runtime's own bound session when it recorded one, otherwise the task's recorded `pi_session_id`, and the republished record names whichever of the two it ran - see [the relaunch transaction](#transactional-relaunch) - but that is a relaunch input, not a caller-facing verb.
 
 ## Transactional relaunch
 

@@ -2307,6 +2307,53 @@ test_herdr_pi_adopted_pane_prefers_the_runtime_bound_session() {
   pass "reclaim: a survived pane's runtime-bound session outranks the recorded id"
 }
 
+# The record must name the session the relaunch ACTUALLY ran. When the survived
+# pane binds a session that is NOT the one the record names, the bound reference
+# wins the launch - and a record left naming the value it outranked would send
+# the NEXT relaunch, once that pane is gone, into a conversation the replacement
+# was never running. So the republished record carries the reference that ran,
+# and the following relaunch resumes it - as `--session`, because a bound
+# reference can be a session PATH and `--session-id` takes an id.
+test_herdr_pi_bound_session_becomes_the_recorded_session() {
+  local dir out rc=0 command bound=/tmp/pi-bound-pr93.jsonl
+  herdr_case_or_skip pi-rebind-record pr93 fmlab '%7' || {
+    echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
+    return 0
+  }
+  dir=$HERDR_CASE_DIR
+  rm -f "$dir/fake/herdr-stopped"
+  sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/pr93.meta"
+  printf 'pi_session_id=pr93-stale\n' >> "$dir/home/state/pr93.meta"
+  printf '{"result":{"agent":{"agent":"pi","agent_status":"idle","agent_session":{"kind":"path","value":"%s"}}}}\n' \
+    "$bound" > "$dir/fake/herdr-agent-registration"
+  printf '#!/usr/bin/env bash\nprintf "Options: --tui-mode --session-id\\n"\n' > "$dir/fakebin/pi"
+  chmod +x "$dir/fakebin/pi"
+
+  out=$(run_spawn "$dir" pr93 --relaunch) || rc=$?
+  expect_code 0 "$rc" "an adopted pane should relaunch in place"$'\n'"$out"
+  command=$(cat "$dir/fake/launched-command")
+  assert_contains "$command" "--session '$bound'" \
+    "the launch must run the session the pane's authority is bound to"
+  [ "$(meta_field "$dir" pr93 pi_session_id)" = "$bound" ] \
+    || fail "the record must name the session that ran, got '$(meta_field "$dir" pr93 pi_session_id)'"
+
+  # The pane is destroyed with its registration, which is the fallback case: the
+  # runtime now reports nothing, so the record is all that is left to resume.
+  rm -f "$dir/fake/herdr-agent-registration" "$dir/fake/herdr-agent-live"
+  : > "$dir/fake/launched-command"
+  rc=0
+  out=$(run_spawn "$dir" pr93 --relaunch) || rc=$?
+  expect_code 0 "$rc" "the agent-free pane should relaunch again"$'\n'"$out"
+  command=$(cat "$dir/fake/launched-command")
+  assert_contains "$command" "--session '$bound'" \
+    "the next relaunch must resume the conversation the replacement was running"
+  assert_not_contains "$command" "--session-id" \
+    "a recorded session PATH is resumed by reference, not as an id"
+  [ "$(meta_field "$dir" pr93 pi_session_id)" = "$bound" ] \
+    || fail "the fallback relaunch must keep the reference it resumed, got '$(meta_field "$dir" pr93 pi_session_id)'"
+  pass "reclaim: the record follows the bound session, so the next relaunch resumes what actually ran"
+}
+
 # A survived pane whose registration is unreadable or foreign (here: no
 # registered session at all) has no runtime reference to preserve, so the
 # recorded id resumes the conversation and the launch is no longer fresh.
@@ -2648,6 +2695,7 @@ test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
 test_herdr_pi_rebind_resumes_the_recorded_session_id
 test_herdr_pi_adopted_pane_prefers_the_runtime_bound_session
+test_herdr_pi_bound_session_becomes_the_recorded_session
 test_herdr_pi_adopted_pane_falls_back_to_the_recorded_session_id
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server
