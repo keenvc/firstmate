@@ -3,7 +3,6 @@
 #
 # Usage:
 #   fm-hold-reverify.sh [check]              run one bounded re-verification sweep
-#   fm-hold-reverify.sh classify <facts.json> print the verdict for one hold's facts
 #   fm-hold-reverify.sh arm                  write and register the standing check
 #   fm-hold-reverify.sh disarm               remove the standing check
 #   fm-hold-reverify.sh --help               print this help
@@ -16,7 +15,8 @@
 # remaining work was wrong. The rot concentrates in age.
 #
 # This script re-checks each aged captain hold against shipped reality and reports
-# it in the SAME reconciliation vocabulary captain-hold-lifecycle already owns:
+# it with one of four verdicts, each a proposal for the reconciliation seam
+# captain-hold-lifecycle owns rather than a closure:
 # dead / still_live / not_a_decision / unestablishable. It reports only. It never
 # calls `answer` and never calls `reconcile close`/`reconcile note`, so it can
 # never close a captain call; only the captain's own words or an explicit
@@ -37,8 +37,10 @@
 #
 # THE REPORT IS THE DELIVERABLE
 # A sweep writes state/hold-reverify/docket.json (schema fm-hold-reverify-docket.v1)
-# listing every examined hold with its verdict, structured evidence, and a short
-# reason, and prints ONE line (the wake) only when the finding set changes.
+# listing every examined hold with its verdict and the structured fields that
+# decided it - the row's state and recorded hold reason, its recorded pull request
+# and that request's state, and whether the row records a merged completion - and
+# prints ONE line (the wake) only when the finding set changes.
 # state/.hold-reverify stores the last sweep's epoch and a digest of the
 # {id:verdict} set, mirroring state/.tool-updates, so a new or changed finding
 # wakes once while an unchanged sweep stays silent. A sweep killed by the
@@ -62,9 +64,9 @@
 #
 # WHAT IT READS
 # Aged holds come from the canonical local backlog projection rather than a second
-# parser: `fm-fleet-snapshot.sh --contribution-input` reuses the canonical backlog
-# parser WITHOUT observing workers or other homes, so the sweep stays local and
-# bounded. A hold's recorded pull request is read through bin/fm-pr-lib.sh, which
+# parser: `fm-fleet-snapshot.sh --backlog-json` reuses the canonical backlog
+# parser WITHOUT task metadata, worker observations, or other homes, so the
+# sweep stays local and bounded. A hold's recorded pull request is read through bin/fm-pr-lib.sh, which
 # is the same gh-then-gh-axi path every other surface uses. A redundant local
 # origin/main fetch is deliberately NOT performed: the forge merge state and the
 # row's own recorded completion are the authoritative landing signals, and a clone
@@ -113,7 +115,6 @@ usage() {
   cat <<'EOF'
 Usage:
   fm-hold-reverify.sh [check]               run one bounded re-verification sweep
-  fm-hold-reverify.sh classify <facts.json> print the verdict for one hold's facts
   fm-hold-reverify.sh arm                   write and register state/hold-reverify.check.sh
   fm-hold-reverify.sh disarm                remove the standing check, its trust binding, and the record
   fm-hold-reverify.sh --help                print this help
@@ -183,10 +184,17 @@ if [ "$BUDGET_SECS" -gt "$BUDGET_MAX" ]; then
   BUDGET_CUT_FROM=$BUDGET_SECS
   BUDGET_SECS=$BUDGET_MAX
 fi
-# The local projection is a fast bounded child of the same sweep budget, so it
-# can never consume more than the sweep has left.
-SNAPSHOT_BOUND=5
-[ "$SNAPSHOT_BOUND" -le "$BUDGET_SECS" ] || SNAPSHOT_BOUND=$BUDGET_SECS
+# The backlog-only projection is a bounded child of the same sweep budget. At
+# large fleet sizes the contribution-input pair can spend most of its time on
+# per-task merge-authority resolution the sweep never reads; backlog-json avoids
+# that work (sub-second on the home that timed out at five seconds before).
+# FM_HOLD_REVERIFY_BUDGET_SECS governs the projection bound; reserve probe time
+# inside the sweep budget the same way BUDGET_MAX reserves it for FM_CHECK_TIMEOUT.
+SNAPSHOT_BOUND=$BUDGET_SECS
+if [ "$SNAPSHOT_BOUND" -gt "$((BUDGET_SECS - PROBE_MIN_SECS))" ]; then
+  SNAPSHOT_BOUND=$((BUDGET_SECS - PROBE_MIN_SECS))
+fi
+[ "$SNAPSHOT_BOUND" -ge 1 ] || SNAPSHOT_BOUND=1
 
 # --- small helpers ----------------------------------------------------------
 
@@ -291,13 +299,15 @@ gather_facts() {
   reason=$(printf '%s\n' "$hold" | jq -r '.hold_reason // ""')
   pr_url=$(printf '%s\n' "$hold" | jq -r '.pr_url // ""')
   merged=$(printf '%s\n' "$hold" | jq -r 'if .completion_merged == true then "true" else "false" end')
-  if [ -n "$pr_url" ]; then
+  if [ "$state" = "done" ] || [ -z "$reason" ]; then
+    pr_state=none
+  elif [ -n "$pr_url" ]; then
     if fm_pr_url_parse "$pr_url" && [ "$FM_PR_PROVIDER" = github ] \
       && [ -n "$FM_PR_OWNER" ] && [ -n "$FM_PR_REPO" ] && [ -n "$FM_PR_NUMBER" ]; then
       owner=$FM_PR_OWNER
       repo=$FM_PR_REPO
       number=$FM_PR_NUMBER
-      if out=$(read_record_bounded "$owner" "$repo" "$number" "$PROBE_SECS"); then
+      if out=$(read_record_bounded "$owner" "$repo" "$number" "$(probe_bound)"); then
         record_state=${out%% *}
         case "$record_state" in
           MERGED) pr_state=merged ;;
@@ -333,6 +343,32 @@ SNAPSHOT_ERROR=
 
 budget_exhausted() { [ "$(real_epoch)" -ge "$DEADLINE" ]; }
 
+# probe_bound: clamp each forge read to the sweep budget remaining, so no probe
+# can run past the end of the sweep (bin/fm-tool-update-check.sh probe_bound).
+probe_bound() {
+  local left
+  left=$((DEADLINE - $(real_epoch)))
+  if [ "$left" -lt "$PROBE_MIN_SECS" ]; then
+    printf '%s\n' "$PROBE_MIN_SECS"
+  elif [ "$left" -lt "$PROBE_SECS" ]; then
+    printf '%s\n' "$left"
+  else
+    printf '%s\n' "$PROBE_SECS"
+  fi
+}
+
+snapshot_bound() {
+  local left bound=$SNAPSHOT_BOUND
+  if [ "$DEADLINE" -gt 0 ]; then
+    left=$((DEADLINE - $(real_epoch)))
+    if [ "$left" -lt "$bound" ]; then
+      bound=$left
+    fi
+  fi
+  [ "$bound" -ge 1 ] || bound=1
+  printf '%s\n' "$bound"
+}
+
 sweep_cleanup() {
   [ -z "$FINDINGS_FILE" ] || rm -f -- "$FINDINGS_FILE"
   FINDINGS_FILE=
@@ -343,15 +379,17 @@ snapshot_holds() {
   local snapshot
   snapshot=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
     FM_CONFIG_OVERRIDE="$CONFIG" \
-    fm_run_timed "$SNAPSHOT_BOUND" "$SNAPSHOT_BIN" --contribution-input 2>/dev/null) || return 1
+    fm_run_timed "$(snapshot_bound)" "$SNAPSHOT_BIN" --backlog-json 2>/dev/null) || return 1
   [ -n "$snapshot" ] || return 1
   printf '%s\n' "$snapshot" | jq -c --argjson age "$AGE_DAYS" '
-    (.backlog.records // [])[]
+    [(.records // [])[]
     | select(.structured == true)
     | select(.hold_kind == "captain")
     | select(.hold_age_days != null and .hold_age_days >= $age)
     | {id, title, state, hold_reason, hold_age_days, pr_url,
-       completion_merged: (.completion.verb == "merged")}' || return 1
+       completion_merged: (.completion.verb == "merged")}]
+    | sort_by(-.hold_age_days)
+    | .[]' || return 1
 }
 
 action_check() {
@@ -599,11 +637,6 @@ case "${1:-check}" in
   check)
     [ "$#" -le 1 ] || die_usage "check takes no arguments"
     action_check
-    ;;
-  classify)
-    [ "$#" -eq 2 ] || die_usage "classify requires one facts JSON file"
-    [ -f "$2" ] && [ ! -L "$2" ] || die_usage "classify facts file is unavailable: $2"
-    classify_facts "$(cat "$2")"
     ;;
   arm)
     [ "$#" -eq 1 ] || die_usage "arm takes no arguments"

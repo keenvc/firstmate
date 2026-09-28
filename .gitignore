@@ -3,6 +3,7 @@ state/
 data/
 scratchpad*
 .no-mistakes/
+.omc/
 .lavish/
 .omc/
 .fm-secondmate-home

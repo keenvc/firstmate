@@ -669,18 +669,18 @@ A budget that is not a whole number from 1 to 120 is still refused outright.
 ## Captain-hold re-verification
 
 A captain call is an ordinary backlog task held for the captain, and its list rots with age: hundreds of holds had never been re-checked, so the captain's list was mostly ghosts and every count of remaining work was wrong.
-`bin/fm-hold-reverify.sh` re-checks each aged hold against shipped reality and reports it in the reconciliation vocabulary `captain-hold-lifecycle` already owns: `dead`, `still_live`, `not_a_decision`, or `unestablishable`.
+`bin/fm-hold-reverify.sh` re-checks each aged hold against shipped reality and reports it with one of four verdicts: `dead`, `still_live`, `not_a_decision`, or `unestablishable`.
 It reports only.
-It never calls `answer` and never closes or annotates a call, so only the captain's own words or an explicit evidence-backed reconciliation can resolve one.
+It never calls `answer` and never closes or annotates a call, so only the captain's own words or an explicit evidence-backed reconciliation - the seam the `captain-hold-lifecycle` skill owns - can resolve one.
 A hold is `dead` when shipped reality resolves the subject - its recorded pull request is merged, or its row records a merged completion.
 It is `still_live` when the recorded pull request is open, `not_a_decision` when the row carries no live captain question (already Done, or no hold reason), and `unestablishable` otherwise.
 `dead` is never inferred from absence or from an unreadable source, and a closed-unmerged pull request stays `unestablishable` rather than reading as dead.
-Aged holds come from the canonical local backlog projection (`fm-fleet-snapshot.sh --contribution-input`), and a recorded pull request is read through `bin/fm-pr-lib.sh`; no second backlog parser and no redundant `origin/main` clone fetch are involved.
+Aged holds come from the canonical local backlog projection (`fm-fleet-snapshot.sh --backlog-json`, which omits task metadata and merge-authority resolution), and a recorded pull request is read through `bin/fm-pr-lib.sh`; no second backlog parser and no redundant `origin/main` clone fetch are involved.
 
 `check` is a plain custom watcher check, so it stays in the check-fires-then-firstmate-decides flow that the process-event `when` adapter explicitly excludes for an action whose right form depends on what the condition finds.
 Arm it once per home with `bin/fm-hold-reverify.sh arm`, which writes `state/hold-reverify.check.sh` and binds its bytes with `bin/fm-check-register.sh` so the watcher dispatches it on its normal cadence and turns its one line into a `check:` wake.
 `disarm` removes the shim, its trust binding, and the report record.
-Each sweep writes `state/hold-reverify/docket.json` (schema `fm-hold-reverify-docket.v1`) with every examined hold's verdict, evidence, and reason, and prints one line only when the finding set changes.
+Each sweep writes `state/hold-reverify/docket.json` (schema `fm-hold-reverify-docket.v1`) with every examined hold's verdict and the structured evidence it was decided from, and prints one line only when the finding set changes.
 `state/.hold-reverify` records the sweep epoch and a digest of the `{id: verdict}` set, so a new or changed finding is reported once while an unchanged sweep stays silent.
 A sweep the watcher kills writes no record and is retried.
 
