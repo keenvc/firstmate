@@ -350,13 +350,16 @@
 #                  that executable advertises the flag (empty otherwise; session
 #                  trust for the launch cwd only, never a trust.json rewrite)
 #     __PISESSION__ Pi-family session selection, with its own leading space and
-#                  empty for secondmates and every other harness. A fresh ship
-#                  or scout passes `--session-id <task-id>` so every
-#                  incarnation of the task runs the same persistent Pi session,
-#                  recorded as pi_session_id= in state/<id>.meta. A relaunch
-#                  resumes that recorded id - or, when the endpoint's runtime
-#                  still binds a session of its own, the reference that runtime
-#                  reports (pi_session_args below owns the order;
+#                  empty for every other harness. A pi/pi-signed ship or scout
+#                  passes `--session-id <task-id>` whenever the resolved
+#                  executable advertises that flag, so every incarnation of the
+#                  task runs the same persistent Pi session, recorded as
+#                  pi_session_id= in state/<id>.meta; on a relaunch it passes
+#                  only when the prior record already names one. Ahead of that,
+#                  ANY pi-family relaunch - a secondmate's included - can carry
+#                  the `--session <reference>` the endpoint's runtime still
+#                  binds instead, so this placeholder is NOT empty for a
+#                  secondmate relaunch (pi_session_args below owns the order;
 #                  relaunch_resume_args owns the runtime read).
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
@@ -2621,9 +2624,10 @@ relaunch_resume_args() {  # <harness> <backend> <target>
 #
 # Prints the arguments with the single leading space that appends them to the
 # launch line, so an empty result leaves every other launch byte-identical.
-# A record that names no session resumes nothing rather than selecting an
-# empty one, which is what keeps a pre-field record and a switch back to Pi
-# on the fresh launch they had before.
+# An empty recorded id means there is nothing to resume, so the relaunch path
+# returns before emitting: the flag would otherwise reach the launch line with
+# a quoted empty value, which is a malformed argument rather than the fresh
+# launch a pre-field record and a switch back to Pi are supposed to get.
 pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <recorded-id> <session-flag>
   local resume
   case "$1" in
@@ -5146,11 +5150,12 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
-# Pi session continuity. A fresh ship or scout passes its task id as Pi's
-# own `--session-id`, so every incarnation of the task runs the same
-# persistent session, recorded as pi_session_id= in the task record; a
-# relaunch resumes it (or the endpoint runtime's still-bound reference,
-# which pi_session_args prefers). Computed here, where the adopted endpoint
+# Pi session continuity. A ship or scout whose executable advertises the flag
+# passes its task id as Pi's own `--session-id`, so every incarnation of the
+# task runs the same persistent session, recorded as pi_session_id= in the task
+# record; a relaunch passes it only when the prior record already names one, and
+# the endpoint runtime's still-bound reference wins ahead of it for any
+# pi-family relaunch (pi_session_args owns that order). Computed here, where the adopted endpoint
 # (T) is known, and substituted only into the Pi-family template's
 # `__PISESSION__` placeholder; an empty value leaves every other launch
 # byte-identical.
