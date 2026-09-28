@@ -1365,6 +1365,43 @@ test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
   pass "fm-teardown: a scout's scratch carve-out ends where another record names the same copy"
 }
 
+# Forced secondmate cleanup checks its descendants' pool slots through the same
+# co-claimant scan, for a record the operator never named. The flag guidance
+# belongs to the task they did name, so it must not surface here.
+test_forced_secondmate_child_slot_collision_names_only_reconcile() {
+  local dir mate parent=mate-task child=child-task rc
+
+  dir=$(make_shared_slot_case secondmate-child-slot-collision)
+  mate="$dir/mate"
+  mkdir -p "$mate/state" "$mate/data" "$mate/config"
+  printf '%s' "$parent" > "$mate/.fm-secondmate-home"
+  fm_write_meta "$dir/home/state/$parent.meta" \
+    "window=firstmate:fm-$parent" "endpoint_task_id=$parent" \
+    "worktree=$mate" "project=$mate" "home=$mate" \
+    "kind=secondmate" "mode=secondmate" "harness=echo" "yolo=off" "projects=alpha"
+  fm_write_meta "$mate/state/$child.meta" \
+    "window=firstmate:fm-$child" "endpoint_task_id=$child" \
+    "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=ship" "mode=local-only" "harness=echo"
+  write_shared_slot_ship_meta "$dir" other-task
+
+  set +e
+  run_case "$dir" "$parent" > "$dir/stdout" 2> "$dir/stderr"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "forced secondmate cleanup returned a pool slot its child shares"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh $child" \
+    "the descendant refusal should name the reconcile path for the child record"
+  assert_not_contains "$(cat "$dir/stderr")" "re-run teardown for $child without it" \
+    "the descendant refusal should not tell the operator to drop a flag from a command they never ran"
+  assert_present "$mate/state/$child.meta" "the descendant refusal removed the child record"
+  assert_present "$dir/home/state/$parent.meta" \
+    "the descendant refusal removed the secondmate's own record"
+  assert_present "$dir/pool/1/project/.git" "the descendant refusal reset the shared slot"
+
+  pass "fm-teardown: a forced secondmate's descendant slot collision names only the reconcile path"
+}
+
 write_windowless_ship_meta() {  # <case> <id>
   local dir=$1 id=$2
   fm_write_meta "$dir/home/state/$id.meta" \
@@ -1914,6 +1951,7 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record
 test_shared_slot_of_windowless_records_clears_in_any_order
 test_scout_copy_is_scratch_only_while_no_other_record_names_it
 test_shared_slot_with_an_undeterminable_record_refuses
+test_forced_secondmate_child_slot_collision_names_only_reconcile
 test_recorded_endpoint_that_changed_directory_still_tears_down
 test_project_lock_anchors_at_the_local_root_across_home_layouts
 test_remote_seeded_home_returns_its_uncontested_slot

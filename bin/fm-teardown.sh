@@ -2452,9 +2452,6 @@ require_exclusive_worktree_slot_record() {
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
         echo "Reconcile whichever record is wrong (bin/fm-crew-state.sh $record_id; bin/fm-crew-state.sh $other_id), then re-run teardown." >&2
-        if [ "$shared_ok" != 1 ]; then
-          echo "A slot whose every record is non-live and whose copy holds no work is cleared by the ordinary teardown of each of them; --force never takes that path, so re-run teardown for $record_id without it." >&2
-        fi
         if [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
@@ -2469,7 +2466,11 @@ require_exclusive_task_worktree_slot() {
   local slot own_state shared_ok=0
   slot=$(teardown_live_slot_path) || return 0
   [ "$FORCE" = "--force" ] || shared_ok=1
-  require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok" || return 1
+  if ! require_exclusive_worktree_slot_record "$META" "$ID" "$STATE" "$slot" "$shared_ok"; then
+    [ "$shared_ok" = 1 ] \
+      || echo "A slot whose every record is non-live and whose copy holds no work is cleared by the ordinary teardown of each of them; --force never takes that path, so re-run teardown for $ID without it." >&2
+    return 1
+  fi
   [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
   # Every record naming the slot must be non-live, this one included: its own
   # endpoint goes through the same classifier (a windowless record names none).
