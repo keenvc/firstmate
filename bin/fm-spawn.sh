@@ -173,9 +173,13 @@
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
-#   name from PATH once, probes that concrete path with --help, and launches the
-#   same path. It adds --tui-mode regular only when that help advertises the flag;
-#   a failed or inconclusive probe omits it so older Pi versions remain launchable.
+#   name from PATH once, probes that concrete path with --help once, and launches
+#   the same path. That single probe gates each version-dependent flag: it adds
+#   --tui-mode regular, a seeded secondmate's --approve, and a ship's or scout's
+#   deterministic --session-id <task-id>, each only when that help advertises the
+#   flag in question; a failed or inconclusive probe omits the version-dependent
+#   ones so older Pi versions remain launchable, and a relaunch under such a
+#   probe keeps the prior recorded pi_session_id without passing it.
 #   A --secondmate launch of a Firstmate-seeded home (the existing
 #   .fm-secondmate-home marker validate_firstmate_home_for_spawn already requires)
 #   also adds --approve when that help advertises it, so the first unattended
