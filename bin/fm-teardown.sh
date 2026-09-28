@@ -2423,9 +2423,10 @@ coclaimant_endpoint_state() {  # <meta> <task-id> <field>
 # Record exclusivity for one slot. With no <shared-ok> argument every other
 # record naming the slot refuses. With <shared-ok>=1 (an unforced teardown of
 # this task's own slot) a slot whose other records are all provably non-live is
-# shared rather than contested: it names them in TEARDOWN_SLOT_SHARED_WITH and
-# does not refuse, leaving the copy's own work refusals - which a shared copy
-# runs regardless of kind - to decide whether the slot may be returned. Any
+# shared rather than contested: it names them in TEARDOWN_SLOT_SHARED_WITH -
+# which only that call writes - and does not refuse, leaving the copy's own work
+# refusals, which a shared copy runs regardless of kind, to decide whether the
+# slot may be returned. Any
 # live or undeterminable co-claimant still refuses exactly as before.
 TEARDOWN_SLOT_SHARED_WITH=
 require_exclusive_worktree_slot_record() {
@@ -2467,7 +2468,7 @@ require_exclusive_worktree_slot_record() {
       done
     done
   done
-  TEARDOWN_SLOT_SHARED_WITH=$shared_with
+  [ "$shared_ok" != 1 ] || TEARDOWN_SLOT_SHARED_WITH=$shared_with
 }
 
 require_exclusive_task_worktree_slot() {
