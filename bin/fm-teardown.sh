@@ -109,9 +109,10 @@
 # status, records, checks, backlog - while every step that would read or touch
 # that slot is skipped: no process kill under it, no dirty or landed-work
 # inspection of it, no branch or hook removal in it, no Treehouse return, and
-# never the other task's claim. The claim is therefore read FIRST, and a claim
-# naming another task skips the record scan above too: a record naming a slot
-# this record no longer owns is that claimant's business, not a collision this
+# never the other task's claim. The claim is therefore read FIRST - for this
+# record and for every descendant slot a forced secondmate teardown checks - and
+# a claim naming another task skips the record scan above too: a record naming a
+# slot it no longer owns is that claimant's business, not a collision this
 # teardown may refuse on. Skipping the inspection discards nothing of this
 # task's: whatever unlanded work it had in that slot was already destroyed when
 # the pool handed the slot on. Refusing instead would strand the record, because
@@ -2461,6 +2462,9 @@ require_exclusive_worktree_slot_record() {
         fi
         echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
         echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
+        if [ "$shared_ok" != 1 ]; then
+          echo "--force does not apply the shared-slot rule to a pool slot." >&2
+        fi
         if [ -n "$endpoint_state" ]; then
           echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
         fi
@@ -3087,11 +3091,13 @@ preflight_descendant_treehouse_slots() {
       continue
     fi
     fm_backend_validate_task_endpoint "$meta" "$task_id" || return 1
-    require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
     owner_rc=0
     require_owned_worktree_slot_record "$task_id" "$worktree" || owner_rc=$?
     case "$owner_rc" in
-      0|"$TEARDOWN_SLOT_REASSIGNED_RC") ;;
+      0)
+        require_exclusive_worktree_slot_record "$meta" "$task_id" "$state" "$worktree" || return 1
+        ;;
+      "$TEARDOWN_SLOT_REASSIGNED_RC") ;;
       *) return 1 ;;
     esac
   done

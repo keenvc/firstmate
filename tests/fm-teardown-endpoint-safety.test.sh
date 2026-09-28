@@ -1431,6 +1431,36 @@ test_forced_secondmate_child_slot_collision_reports_only_the_conflict() {
     "the descendant refusal removed the secondmate's own record"
   assert_present "$dir/pool/1/project/.git" "the descendant refusal reset the shared slot"
 
+  # A descendant slot whose claim names another task is that claimant's, so the
+  # collision scan never runs for it: the claim is read first here too.
+  dir=$(make_shared_slot_case secondmate-child-slot-reassigned)
+  mate="$dir/mate"
+  mkdir -p "$mate/state" "$mate/data" "$mate/config"
+  printf '%s' "$parent" > "$mate/.fm-secondmate-home"
+  fm_write_meta "$dir/home/state/$parent.meta" \
+    "window=firstmate:fm-$parent" "endpoint_task_id=$parent" \
+    "worktree=$mate" "project=$mate" "home=$mate" \
+    "kind=secondmate" "mode=secondmate" "harness=echo" "yolo=off" "projects=alpha"
+  fm_write_meta "$mate/state/$child.meta" \
+    "window=firstmate:fm-$child" "endpoint_task_id=$child" \
+    "worktree=$dir/worktree" "project=$dir/project" \
+    "kind=ship" "mode=local-only" "harness=echo"
+  write_shared_slot_ship_meta "$dir" other-task
+  printf 'fm-other-task\n' > "$dir/tmux-live"
+  claim_pool_slot "$dir" other-task
+
+  set +e
+  run_case "$dir" "$parent" > "$dir/stdout" 2> "$dir/stderr"
+  set -e
+  assert_not_contains "$(cat "$dir/stderr")" "also task other-task's recorded worktree" \
+    "a descendant slot the claim proves reassigned should not reach the collision scan"
+  assert_contains "$(cat "$dir/stderr")" "reassigned to task other-task" \
+    "the descendant path should report the reassignment the claim proves"
+  assert_present "$dir/home/state/other-task.meta" "the claimant's record was removed"
+  assert_present "$dir/pool/1/project/.git" "the reassigned descendant slot's checkout was removed"
+  assert_contains "$(cat "$dir/pool/1/.fm-slot-owner")" "task=other-task" \
+    "the claimant's slot claim was removed or rewritten"
+
   pass "fm-teardown: a forced secondmate's descendant slot collision reports the conflict and nothing else"
 }
 
@@ -1600,6 +1630,8 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
   assert_contains "$(cat "$dir/stderr")" "not even with --force" \
     "--force should keep the existing refusal"
+  assert_contains "$(cat "$dir/stderr")" "--force does not apply the shared-slot rule to a pool slot." \
+    "the forced refusal should state that --force does not take the shared-slot path"
 
   pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
 }
