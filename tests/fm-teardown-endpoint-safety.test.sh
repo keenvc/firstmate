@@ -1282,18 +1282,26 @@ test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
   grep -Fq "treehouse <return>" "$dir/runtime.log" \
     || fail "a sole clean scout did not return its slot: $(cat "$dir/runtime.log")"
 
-  # The same record on a dirty copy: a pool slot passes from task to task, so
-  # those changes cannot be attributed to this scout and are never discarded.
+  # The same record on a dirty copy it alone names: the spawn refused to launch
+  # into a copy that was not clean, so this scratch is the scout's own.
   dir=$(make_shared_slot_case scout-sole-dirty)
   write_shared_slot_scout_meta "$dir" scout-task
   : > "$dir/worktree/sentinel"
-  assert_shared_slot_refused "$dir" scout-task "a scout on a dirty pool slot"
-  assert_contains "$(cat "$dir/stderr")" "cannot be shown to have written" \
-    "the refusal should say the changes cannot be attributed to the scout"
-  assert_not_contains "$(cat "$dir/stderr")" "--force" \
-    "the refusal should not offer --force as the remedy"
-  assert_present "$dir/worktree/sentinel" \
-    "the refusal discarded the changes it could not attribute"
+  run_unforced_case "$dir" scout-task > "$dir/stdout" 2> "$dir/stderr" \
+    || fail "teardown of a sole scout on its own scratch failed: $(cat "$dir/stderr")"
+  assert_absent "$dir/home/state/scout-task.meta" "the scout record was left behind"
+  grep -Fq "treehouse <return>" "$dir/runtime.log" \
+    || fail "a sole scout did not return the slot holding its own scratch: $(cat "$dir/runtime.log")"
+
+  # Only a scout's copy is scratch: a ship alone on a dirty slot still refuses,
+  # through the ordinary uncommitted-changes check.
+  dir=$(make_shared_slot_case ship-sole-dirty)
+  write_shared_slot_ship_meta "$dir" ship-task
+  : > "$dir/worktree/sentinel"
+  assert_shared_slot_refused "$dir" ship-task "a sole ship record on a dirty slot"
+  assert_contains "$(cat "$dir/stderr")" "uncommitted changes present" \
+    "the sole ship should refuse on the ordinary uncommitted-changes check"
+  assert_present "$dir/worktree/sentinel" "the refusal discarded the ship's uncommitted changes"
 
   # A ship record naming the same copy voids the scratch carve-out entirely:
   # the unlanded commits in it may be the ship's, so the scout refuses.
@@ -1315,8 +1323,12 @@ test_scout_copy_is_scratch_only_while_no_other_record_names_it() {
   write_shared_slot_ship_meta "$dir" ship-task
   : > "$dir/worktree/sentinel"
   assert_shared_slot_refused "$dir" scout-task "a scout sharing a dirty copy"
+  assert_contains "$(cat "$dir/stderr")" "cannot be shown to have written" \
+    "the refusal should say the changes cannot be attributed to this record"
   assert_contains "$(cat "$dir/stderr")" "ship-task" \
     "the refusal should name the record that shares the copy"
+  assert_not_contains "$(cat "$dir/stderr")" "--force" \
+    "a copy another record names should not offer --force as the remedy"
   assert_present "$dir/worktree/sentinel" \
     "the shared scout discarded the copy's uncommitted changes"
 

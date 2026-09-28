@@ -73,14 +73,13 @@
 # declared scratch and the report at data/<task-id>/report.md is the work
 # product. Teardown proceeds only once the report exists and the shared
 # unresolved-decision completion gate verifies its captain-held inventory.
-# The carve-out covers scratch this scout wrote, never work it merely found. A
-# Treehouse pool slot passes from task to task, so uncommitted changes in a pool
-# slot's copy cannot be attributed to the record being torn down: teardown names
-# them and refuses rather than discarding them as scratch, and the remedy is to
-# land or move that work, not to force the discard. A copy another record also
-# names drops the carve-out entirely, so the landed-work refusals run on it too.
-# A worktree that is no pool slot was never handed on and keeps the whole
-# carve-out.
+# The carve-out covers scratch this scout wrote, and holds while this record is
+# the only one naming its copy: a spawn refuses to launch into a copy that is
+# not clean (bin/fm-spawn.sh), so everything left in it was written during this
+# record's tenure. A copy a second record also names ends the carve-out, because
+# nothing can then say whose the work in it is: the uncommitted-changes and
+# landed-work refusals below run on it regardless of kind, naming the records
+# that share it.
 # Before destructive cleanup, teardown validates task check artifacts as
 # ordinary single-link files on the state device. It refuses and preserves
 # task state when that proof fails; otherwise it removes the task's check,
@@ -1875,14 +1874,10 @@ teardown_treehouse_return() {
 
 validate_worktree_teardown_safety() {
   local dirty_raw dirty unpushed_raw unpushed DEFAULT unmerged_raw unmerged branch
-  local scout_scratch=0
   [ -d "$WT" ] || return 0
   [ "$FORCE" != "--force" ] || return 0
   [ "$KIND" != secondmate ] || return 0
-  if [ "$KIND" = scout ]; then
-    teardown_live_slot_path >/dev/null || return 0
-    [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || scout_scratch=1
-  fi
+  [ "$KIND" != scout ] || [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] || return 0
 
   if ! dirty_raw=$(git -C "$WT" status --porcelain 2>/dev/null); then
     if worktree_safety_blocked_by_lock "uncommitted changes"; then
@@ -1894,15 +1889,13 @@ validate_worktree_teardown_safety() {
   fi
   dirty=$(printf '%s\n' "$dirty_raw" | grep -vE '^\?\? (\.claude/|\.fm-(grok|kimi)-turnend$)' | head -1 || true)
 
-  if [ "$KIND" = scout ] && [ -n "$dirty" ]; then
-    echo "REFUSED: pool slot copy $WT has uncommitted changes that scout task $ID cannot be shown to have written." >&2
+  if [ -n "$TEARDOWN_SLOT_SHARED_WITH" ] && [ -n "$dirty" ]; then
+    echo "REFUSED: pool slot copy $WT has uncommitted changes that task $ID cannot be shown to have written." >&2
     echo "uncommitted changes present" >&2
-    [ -z "$TEARDOWN_SLOT_SHARED_WITH" ] \
-      || echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so it may hold their work." >&2
-    echo "A pool slot passes from task to task, so a scout's scratch never covers changes another task may have left: commit them on a branch, move them out of $WT, or reconcile the record that owns them, then re-run teardown." >&2
+    echo "Task(s) $TEARDOWN_SLOT_SHARED_WITH record this same copy, so it may hold their work." >&2
+    echo "Land or move that work, or reconcile whichever of those records is wrong (bin/fm-crew-state.sh), then re-run teardown." >&2
     return 1
   fi
-  [ "$scout_scratch" != 1 ] || return 0
 
   if ! unpushed_raw=$(git -C "$WT" log --oneline HEAD --not --remotes -- 2>/dev/null); then
     if worktree_safety_blocked_by_lock "commits not on a remote"; then
