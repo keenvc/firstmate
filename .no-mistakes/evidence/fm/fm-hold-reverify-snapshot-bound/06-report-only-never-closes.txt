@@ -1,0 +1,21 @@
+The sweep reports and never closes a call
+========================================
+
+the lab backlog before a sweep:
+  8f51953ad307d6cebb4951b4c032cf254df572830eb521b0277b9720d17b3416  <lab>/data/backlog.md
+
+$ FM_HOME=<lab> bin/fm-hold-reverify.sh check
+  hold re-verify: 0 dead, 0 still live, 0 not-a-decision, 12 unestablishable among 12 aged captain holds (35 deferred); docket state/hold-reverify/docket.json
+
+the same backlog after it, byte for byte:
+  8f51953ad307d6cebb4951b4c032cf254df572830eb521b0277b9720d17b3416  <lab>/data/backlog.md
+
+everything the sweep touched in the home (nothing under data/, nothing in the
+backlog, no answer and no reconciliation):
+  <lab>/state/.hold-reverify
+  <lab>/state/hold-reverify/docket.json
+
+the lab whose call names a merged pull request: the verdict is dead, and the
+row is still open and still held, so only the captain can close it:
+  7:- [ ] call-merged-pr - Approve the landing of the worktree adoption https://github.com/kunchenguid/firstmate/pull/6002
+  docket verdict: dead - a proposal; the row state is still "queued" and its hold_reason is still "approve the landing"

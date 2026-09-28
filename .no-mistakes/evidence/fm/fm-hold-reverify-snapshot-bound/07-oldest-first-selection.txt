@@ -1,0 +1,39 @@
+The 12 the bounded sweep spends its budget on are the 12 oldest of the 47
+========================================================================
+
+the projection's aged captain calls, oldest first (47 total):
+   1  72d  aged-call-01
+   2  72d  aged-call-02
+   3  72d  aged-call-03
+   4  72d  aged-call-04
+   5  72d  aged-call-05
+   6  72d  aged-call-06
+   7  72d  aged-call-07
+   8  72d  aged-call-08
+   9  71d  aged-call-09
+  10  71d  aged-call-10
+  11  71d  aged-call-11
+  12  69d  aged-call-12
+  13  68d  aged-call-13
+  14  67d  aged-call-14
+  ...
+
+the docket's examined set, and whether it matches those 12 oldest:
+  aged-call-12
+  aged-call-10
+  aged-call-11
+  aged-call-09
+  aged-call-01
+  aged-call-02
+  aged-call-03
+  aged-call-07
+  aged-call-08
+  aged-call-04
+  aged-call-05
+  aged-call-06
+
+  identical: the sweep examined exactly the twelve oldest aged calls
+  deferred, disclosed in the wake line: 35 of 47
+
+Captain-call ids are masked as aged-call-NN in oldest-first order: they come from the
+operator home's private backlog, which is gitignored and stays out of this public repo.

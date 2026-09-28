@@ -1,0 +1,19 @@
+The refusal is still loud when the projection genuinely cannot be read
+======================================================================
+
+1) the projection exits non-zero
+   hold re-verify: could not read the aged-hold projection
+      [wall 0.08 s, FM_CHECK_TIMEOUT=30]
+
+2) the projection outlives the sweep's bound (a 30s --backlog-json)
+   hold re-verify: could not read the aged-hold projection
+      [wall 19.08 s, inside FM_CHECK_TIMEOUT=30]
+
+3) a tight watcher bound (FM_CHECK_TIMEOUT=10) still lists the aged calls and
+   discloses the budget cut in the wake line
+   hold re-verify: 0 dead, 0 still live, 0 not-a-decision, 12 unestablishable among 12 aged captain holds (35 deferred); docket state/hold-reverify/docket.json [budget 20s cut to 7s]
+      [wall 1.20 s, inside FM_CHECK_TIMEOUT=10]
+
+4) the same finding set on the next sweep stays silent, and the default 6h
+   cadence gate suppresses the one after that
+   (no line printed above)

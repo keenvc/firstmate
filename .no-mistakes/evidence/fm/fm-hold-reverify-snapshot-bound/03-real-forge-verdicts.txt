@@ -1,0 +1,23 @@
+The four verdicts, decided against the real GitHub forge
+=======================================================
+
+A lab home whose four aged captain calls name real pull requests in
+kunchenguid/firstmate: 6002 merged, 6022 open, 5999 closed-unmerged, plus a
+Done row that still carries the captain-hold annotation. Reads go through the
+product's own gh path against github.com; nothing is faked.
+
+  forge truth: PR 6002 MERGED mergedAt=2026-09-28T14:39:48Z
+  forge truth: PR 6022 OPEN mergedAt=null
+  forge truth: PR 5999 CLOSED mergedAt=null
+
+$ FM_HOME=<lab> bin/fm-hold-reverify.sh check
+hold re-verify: 1 dead, 1 still live, 1 not-a-decision, 1 unestablishable among 4 aged captain holds; docket state/hold-reverify/docket.json
+
+docket findings:
+  not_a_decision	call-already-done	pr_state=none	merged_completion=false
+  unestablishable	call-closed-unmerged-pr	pr_state=closed	merged_completion=false
+  dead	call-merged-pr	pr_state=merged	merged_completion=false
+  still_live	call-open-pr	pr_state=open	merged_completion=false
+
+A closed-unmerged pull request stays unestablishable: dead is never inferred
+from a closed PR, and no verdict closes the call.

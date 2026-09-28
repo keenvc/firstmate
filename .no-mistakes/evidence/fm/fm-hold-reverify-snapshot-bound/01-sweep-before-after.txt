@@ -1,0 +1,23 @@
+Aged captain-call re-verification sweep: before and after, one home
+====================================================================
+
+The home under test is a disposable lab whose data/backlog.md is a copy of the
+operator home's real backlog. The projection reports the same shape the captain
+reported: 437 records, 108 captain holds, 47 aged >= 14 days, the oldest 72 days.
+
+records: 437   structured: 428   captain holds: 108   aged >=14d: 47   oldest: 72d
+
+BEFORE - bin/fm-hold-reverify.sh check as shipped in 32386da (projection read
+         through --contribution-input under a 5s bound):
+-------------------------------------------------------------------
+hold re-verify: could not read the aged-hold projection
+  (docket: {"examined":0,"deferred":0})
+
+AFTER  - bin/fm-hold-reverify.sh check at HEAD, same home, the slow
+         --contribution-input projection still present and unused:
+-------------------------------------------------------------------
+hold re-verify: 0 dead, 0 still live, 0 not-a-decision, 12 unestablishable among 12 aged captain holds (35 deferred); docket state/hold-reverify/docket.json
+  (docket: {"examined":12,"deferred":35,"counts":{"dead":0,"still_live":0,"not_a_decision":0,"unestablishable":12}})
+
+Projection cost at this fleet size, measured in the same home:
+  fm-fleet-snapshot.sh --backlog-json : 0.73 s

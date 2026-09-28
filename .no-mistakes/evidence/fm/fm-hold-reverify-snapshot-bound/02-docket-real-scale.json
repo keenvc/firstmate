@@ -1,0 +1,124 @@
+{
+  "schema": "fm-hold-reverify-docket.v1",
+  "generated": "2026-09-28T16:52:32Z",
+  "threshold_days": 14,
+  "examined": 12,
+  "deferred": 35,
+  "counts": {
+    "dead": 0,
+    "still_live": 0,
+    "not_a_decision": 0,
+    "unestablishable": 12
+  },
+  "findings": [
+    {
+      "id": "aged-call-01",
+      "state": "queued",
+      "hold_reason": "<redacted: 386 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-02",
+      "state": "queued",
+      "hold_reason": "<redacted: 748 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-03",
+      "state": "queued",
+      "hold_reason": "<redacted: 412 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-04",
+      "state": "queued",
+      "hold_reason": "<redacted: 346 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-05",
+      "state": "queued",
+      "hold_reason": "<redacted: 282 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-06",
+      "state": "queued",
+      "hold_reason": "<redacted: 1060 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-07",
+      "state": "queued",
+      "hold_reason": "<redacted: 408 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-08",
+      "state": "queued",
+      "hold_reason": "<redacted: 494 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-09",
+      "state": "queued",
+      "hold_reason": "<redacted: 721 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-10",
+      "state": "queued",
+      "hold_reason": "<redacted: 694 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-11",
+      "state": "queued",
+      "hold_reason": "<redacted: 818 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    },
+    {
+      "id": "aged-call-12",
+      "state": "queued",
+      "hold_reason": "<redacted: 523 characters of captain-private hold prose>",
+      "pr_url": "",
+      "pr_state": "none",
+      "completion_merged": false,
+      "verdict": "unestablishable"
+    }
+  ],
+  "_redaction": "Captain-call ids and hold prose come from the operator home's private backlog (data/ is captain-private and gitignored), so ids are masked as aged-call-NN in oldest-first order and hold prose is replaced by its length. Every field the sweep decides from - state, pr_url, pr_state, completion_merged, verdict - is verbatim."
+}
