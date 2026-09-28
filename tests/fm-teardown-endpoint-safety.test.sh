@@ -1120,8 +1120,6 @@ test_shared_slot_with_a_live_record_still_refuses() {
   assert_contains "$(cat "$dir/stderr")" \
     "recorded worktree $(cd "$dir/worktree" && pwd -P) is also task running-task's recorded worktree" \
     "the live-claimant refusal should keep its existing wording"
-  assert_contains "$(cat "$dir/stderr")" "not even with --force" \
-    "the live-claimant refusal should keep its existing wording"
   assert_contains "$(cat "$dir/stderr")" "reads 'alive'" \
     "the live-claimant refusal should name the endpoint verdict"
   assert_present "$dir/home/state/running-task.meta" "the refusal removed the live record"
@@ -1274,7 +1272,7 @@ test_shared_slot_with_work_in_its_copy_refuses_every_record() {
   set +e
   run_case "$dir" second-task > "$dir/stdout" 2> "$dir/stderr"
   set -e
-  assert_contains "$(cat "$dir/stderr")" "not even with --force" \
+  assert_contains "$(cat "$dir/stderr")" "is also task first-task's recorded worktree" \
     "--force should refuse while another record names the same copy"
   assert_present "$dir/worktree/sentinel" "--force discarded work another record may own"
   assert_present "$dir/home/state/second-task.meta" "--force removed the record it refused"
@@ -1628,10 +1626,10 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_present "$dir/home/state/done-task.meta" "--force removed a record on a shared slot"
   [ ! -s "$dir/runtime.log" ] \
     || fail "--force acted on a shared slot: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/stderr")" "not even with --force" \
-    "--force should keep the existing refusal"
-  assert_contains "$(cat "$dir/stderr")" "--force does not apply the shared-slot rule to a pool slot." \
-    "the forced refusal should state that --force does not take the shared-slot path"
+  assert_contains "$(cat "$dir/stderr")" "is also task other-done-task's recorded worktree" \
+    "--force should keep refusing on the record that names the same slot"
+  assert_not_contains "$(cat "$dir/stderr")" "--force does not apply" \
+    "the refusal should state only what it observed"
 
   pass "fm-teardown: a shared slot whose records cannot all be proved finished still refuses"
 }

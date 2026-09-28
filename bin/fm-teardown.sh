@@ -167,6 +167,15 @@
 # --force exactly as before: --force authorizes discarding THIS task's unlanded
 # work, never work another record may own. Nothing of this task's own is removed
 # by a refusal.
+# Known and accepted limits of that rule: a copy several finished records name
+# stays refused while it holds uncommitted changes or unlanded work, so those
+# records clear only once that work is landed or moved; a slot named by a record
+# whose backend has no recovery classifier stays refused, because no verdict
+# short of dead or missing is accepted; and a co-claimant's no-mistakes run
+# parked in a copy this teardown returns is killed with the slot rather than
+# concluded - conclusion is identity-bound to this task - so that record's own
+# later teardown finds the copy gone. No work is lost in any of the three: the
+# return only happens on a clean, landed copy every record of which is non-live.
 # Orca is not a pool slot and proves its path through
 # require_orca_worktree_path_match instead.
 # Orca tasks use the same safety checks, then close the recorded terminal and
@@ -2460,13 +2469,9 @@ require_exclusive_worktree_slot_record() {
               ;;
           esac
         fi
-        echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field." >&2
-        echo "Returning that pool slot would kill $other_id's processes and reset its copy, so nothing was changed - not even with --force." >&2
-        if [ "$shared_ok" != 1 ]; then
-          echo "--force does not apply the shared-slot rule to a pool slot." >&2
-        fi
+        echo "REFUSED: task $record_id's recorded worktree $slot is also task $other_id's recorded $field; nothing was changed." >&2
         if [ -n "$endpoint_state" ]; then
-          echo "Task $other_id's recorded endpoint reads '$endpoint_state', not confidently dead or missing, so returning the slot cannot be proved safe for it." >&2
+          echo "Task $other_id's recorded endpoint reads '$endpoint_state'." >&2
         fi
         return 1
       done
