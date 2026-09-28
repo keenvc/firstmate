@@ -289,7 +289,7 @@ OUTPUT_MODE=json
 case "${1:---json}" in
   --json) ;;
   --secondmate-home-summary) OUTPUT_MODE=secondmate-home-summary ;;
-  --backlog-json) OUTPUT_MODE=backlog-json ;;
+  --backlog-json) OUTPUT_MODE=backlog_json ;;
   --contribution-input) OUTPUT_MODE=contribution-input ;;
   -h|--help) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
@@ -1979,7 +1979,7 @@ contribution_tasks_json() {
   done | jq -s .
 }
 
-if [ "$OUTPUT_MODE" = backlog-json ]; then
+if [ "$OUTPUT_MODE" = backlog_json ]; then
   printf '%s\n' "$BACKLOG_JSON"
   exit 0
 fi
