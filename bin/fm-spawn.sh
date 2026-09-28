@@ -176,10 +176,11 @@
 #   name from PATH once, probes that concrete path with --help once, and launches
 #   the same path. That single probe gates each version-dependent flag: it adds
 #   --tui-mode regular, a seeded secondmate's --approve, and a ship's or scout's
-#   deterministic --session-id <task-id>, each only when that help advertises the
-#   flag in question; a failed or inconclusive probe omits the version-dependent
-#   ones so older Pi versions remain launchable, and a relaunch under such a
-#   probe keeps the prior recorded pi_session_id without passing it.
+#   deterministic --session-id <task-id>.<spawn-gen>, each only when that help
+#   advertises the flag in question; a failed or inconclusive probe omits the
+#   version-dependent ones so older Pi versions remain launchable, and a
+#   relaunch under such a probe keeps the prior recorded pi_session_id without
+#   passing it.
 #   A --secondmate launch of a Firstmate-seeded home (the existing
 #   .fm-secondmate-home marker validate_firstmate_home_for_spawn already requires)
 #   also adds --approve when that help advertises it, so the first unattended
@@ -355,11 +356,12 @@
 #                  trust for the launch cwd only, never a trust.json rewrite)
 #     __PISESSION__ Pi-family session selection, with its own leading space and
 #                  empty for every other harness. A pi/pi-signed ship or scout
-#                  passes `--session-id <task-id>` whenever the resolved
-#                  executable advertises that flag, so every incarnation of the
-#                  task runs the same persistent Pi session, recorded as
+#                  passes `--session-id <task-id>.<spawn-gen>` whenever the
+#                  resolved executable advertises that flag, so a FRESH spawn
+#                  always opens a new session of its own, recorded as
 #                  pi_session_id= in state/<id>.meta; on a relaunch it passes
-#                  only when the prior record already names one. Ahead of that,
+#                  the id the prior record names, and only when it names one -
+#                  that is what continues the conversation. Ahead of that,
 #                  ANY pi-family relaunch - a secondmate's included - can carry
 #                  the `--session <reference>` the endpoint's runtime still
 #                  binds instead, so this placeholder is NOT empty for a
@@ -2601,11 +2603,13 @@ relaunch_resume_args() {  # <harness> <backend> <target>
 # persistent session, so a closed lane's replacement continues the same
 # conversation instead of re-reading its task from scratch.
 #
-# A fresh ship or scout spawn passes `--session-id <task-id>`: an exact
-# project session id, created when missing (confirmed against `pi --help`,
-# and version-probed below like `--tui-mode`), so the session identity is a
-# deterministic function of the task id and is recorded as pi_session_id= in
-# the task record. A relaunch of a ship or scout resumes the id the task's
+# A fresh ship or scout spawn passes `--session-id <task-id>.<spawn-gen>`: an
+# exact project session id, created when missing (confirmed against `pi --help`,
+# and version-probed below like `--tui-mode`). The spawn-gen component scopes it
+# to this incarnation, so re-spawning a torn-down task id into the same copy
+# path opens a new session rather than recalling the abandoned attempt's turns;
+# the caller composes it and records the same value as pi_session_id= in the
+# task record. A relaunch of a ship or scout resumes the id the task's
 # PRIOR record carries (captured by the caller before this relaunch
 # republishes that record), with one precedence rule ahead of it: when the
 # endpoint's runtime still binds a session of its own, the reference that
@@ -2632,7 +2636,7 @@ relaunch_resume_args() {  # <harness> <backend> <target>
 # returns before emitting: the flag would otherwise reach the launch line with
 # a quoted empty value, which is a malformed argument rather than the fresh
 # launch a pre-field record and a switch back to Pi are supposed to get.
-pi_session_args() {  # <harness> <kind> <id> <relaunch:0|1> <backend> <target> <recorded-id> <session-flag>
+pi_session_args() {  # <harness> <kind> <fresh-session-id> <relaunch:0|1> <backend> <target> <recorded-id> <session-flag>
   local resume
   case "$1" in
   pi | pi-signed) ;;
@@ -4958,6 +4962,11 @@ fi
 META_WINDOW=$T
 [ "$BACKEND" = orca ] && META_WINDOW=$W
 SPAWN_GEN="s$(date +%s).${BASHPID:-$$}.$RANDOM"
+# The Pi session id a FRESH ship or scout selects: scoped to this incarnation,
+# so re-spawning a torn-down task id into the same copy path cannot land in the
+# abandoned attempt's conversation. Both the launch flag and the record below
+# use this one value, so the record always names the session the launch chose.
+PI_SESSION_ID="$ID.$SPAWN_GEN"
 SPAWN_META_PATH="$STATE/$ID.meta"
 if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
@@ -4987,19 +4996,22 @@ preserve_relaunch_meta() {
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
-  # The deterministic Pi session id (pi_session_args owns the launch side).
-  # Owned by the relaunch recompute like every key above it: a harness switch
-  # away from Pi drops it, and a switch back to Pi re-derives it from the task
-  # id, so a stale id can never survive the harness that owned it. The id is
-  # always the task id, so republishing it is what both a probed launch and a
-  # prior incarnation's session name; an inconclusive probe launches fresh but
-  # keeps a session the previous incarnation recorded, since that one still
-  # holds the conversation and stays resumable on a later supporting-Pi
-  # relaunch. With neither, there is nothing to name.
+  # The Pi session id (pi_session_args owns the launch side). Owned by the
+  # relaunch recompute like every key above it: a harness switch away from Pi
+  # drops it, and a switch back to Pi derives a new one, so a stale id can never
+  # survive the harness that owned it. A relaunch that had a recorded session
+  # republishes exactly that id - the one it resumed, and the one an inconclusive
+  # probe keeps without passing, since it still holds the conversation.
+  # Otherwise the record names this incarnation's own id, which a fresh ship or
+  # scout launch selects; a relaunch with nothing to resume launches fresh and
+  # records the new incarnation id for its next relaunch. With neither, there is
+  # nothing to name.
   case "$HARNESS:$KIND" in
   pi:ship | pi:scout | pi-signed:ship | pi-signed:scout)
-    if [ -n "${PI_SESSION_FLAG:-}" ] || [ -n "$RELAUNCH_PI_SESSION_ID" ]; then
-      echo "pi_session_id=$ID"
+    if [ -n "$RELAUNCH_PI_SESSION_ID" ]; then
+      echo "pi_session_id=$RELAUNCH_PI_SESSION_ID"
+    elif [ -n "${PI_SESSION_FLAG:-}" ]; then
+      echo "pi_session_id=$PI_SESSION_ID"
     fi
     ;;
   esac
@@ -5154,16 +5166,16 @@ MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
-# Pi session continuity. A ship or scout whose executable advertises the flag
-# passes its task id as Pi's own `--session-id`, so every incarnation of the
-# task runs the same persistent session, recorded as pi_session_id= in the task
-# record; a relaunch passes it only when the prior record already names one, and
-# the endpoint runtime's still-bound reference wins ahead of it for any
-# pi-family relaunch (pi_session_args owns that order). Computed here, where the adopted endpoint
+# Pi session continuity. A fresh ship or scout whose executable advertises the
+# flag passes this incarnation's own `--session-id` ($PI_SESSION_ID), recorded
+# as pi_session_id= in the task record; a relaunch passes the id the prior
+# record names, and only when it names one, while the endpoint runtime's
+# still-bound reference wins ahead of it for any pi-family relaunch
+# (pi_session_args owns that order). Computed here, where the adopted endpoint
 # (T) is known, and substituted only into the Pi-family template's
 # `__PISESSION__` placeholder; an empty value leaves every other launch
 # byte-identical.
-PI_SESSION_ARGS=$(pi_session_args "$HARNESS" "$KIND" "$ID" "$RELAUNCH" "$BACKEND" "$T" "${RELAUNCH_PI_SESSION_ID:-}" "${PI_SESSION_FLAG:-}") || PI_SESSION_ARGS=
+PI_SESSION_ARGS=$(pi_session_args "$HARNESS" "$KIND" "$PI_SESSION_ID" "$RELAUNCH" "$BACKEND" "$T" "${RELAUNCH_PI_SESSION_ID:-}" "${PI_SESSION_FLAG:-}") || PI_SESSION_ARGS=
 LAUNCH=${LAUNCH//__PISESSION__/$PI_SESSION_ARGS}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$KEEP_AI_TRAILERS" = 1 ]; then

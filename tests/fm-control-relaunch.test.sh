@@ -1170,8 +1170,10 @@ test_relaunch_back_to_pi_rederives_the_recorded_session_id() {
 
   out=$(run_control "$dir" pr82 relaunch --harness pi --note "back onto Pi")
   assert_contains "$out" "harness=pi from=codex" "the switch back should complete"
-  [ "$(meta_field "$dir" pr82 pi_session_id)" = pr82 ] \
-    || fail "a record switched onto Pi must record the deterministic session id"
+  case "$(meta_field "$dir" pr82 pi_session_id)" in
+    pr82.?*) ;;
+    *) fail "a record switched onto Pi must record an incarnation-scoped session id, got '$(meta_field "$dir" pr82 pi_session_id)'" ;;
+  esac
   command=$(cat "$dir/fake/literal")
   assert_not_contains "$command" "--session-id" \
     "with no recorded Pi session there is nothing to resume; the switch launch is fresh"
