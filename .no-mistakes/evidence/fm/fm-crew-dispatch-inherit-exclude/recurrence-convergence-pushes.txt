@@ -1,0 +1,85 @@
+### baseline (before any convergence push)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent
+### convergence push round 1 (primary crew-dispatch.json round=1)
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent
+### convergence push round 2 (primary crew-dispatch.json round=2)
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent
+### convergence push round 3 (primary crew-dispatch.json round=3)
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent
+### convergence push round 4 (primary crew-dispatch.json round=4)
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent
+### convergence push round 5 (primary crew-dispatch.json round=5)
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+  dispatch-never-send: pushed
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent
+### primary REMOVES its crew-dispatch.json, then converges again (absence-mirroring round)
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+fdceng present mtime=1790568617 8fb483f07bb765c3
+domains present mtime=1790568617 74c50738f58e52e9
+wakewell absent

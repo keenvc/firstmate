@@ -1,0 +1,9 @@
+### A secondmate home that HOLDS an inherited config/crew-dispatch.json (the pre-fix state):
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-cdi.6secbw/lab-sm
+error: config/crew-dispatch.json is active - pass an explicit harness resolved from the dispatch rules (the consultation backstop, so the rules are never silently skipped).
+exit=1
+
+### The SAME home after the file is gone (the post-fix state: never inherited):
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /tmp/fm-cdi.6secbw/lab-sm
+error: task alpha-task has no brief at inaccessible data path /tmp/fm-cdi.6secbw/lab-sm/data/alpha-task/brief.md
+exit=1

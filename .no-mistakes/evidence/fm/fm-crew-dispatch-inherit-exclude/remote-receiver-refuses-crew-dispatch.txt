@@ -1,0 +1,19 @@
+### adversarial: a REMOTE route tries to write config/crew-dispatch.json into a remote secondmate home
+### (the receiver derives its writable set from the same one declaration)
+--- remote home's own file before:
+{"default":{"harness":"pi"},"note":"remote home own rules"}
+
+--- receiver call: put config/crew-dispatch.json
+error: path is not inherited material: config/crew-dispatch.json
+exit=1
+
+--- control: the same receiver accepts an allowlisted item (config/crew-harness)
+pushed: config/crew-harness
+exit=0
+config/crew-harness now: codex
+
+--- also tried: absent (the removal direction) for config/crew-dispatch.json
+error: path is not inherited material: config/crew-dispatch.json
+exit=1
+--- remote home's own file after both attempts:
+{"default":{"harness":"pi"},"note":"remote home own rules"}

@@ -1,0 +1,14 @@
+### targeted test run: the four suites that own the inheritance contract
+FM_TEST_END 2026-09-28T04:19:16Z tests/fm-secondmate-harness.test.sh exit=0 duration_ms=259121 gate_skip=false
+FM_TEST_END 2026-09-28T04:21:23Z tests/fm-remote-secondmate-lifecycle-e2e.test.sh exit=0 duration_ms=385890 gate_skip=false
+FM_TEST_END 2026-09-28T04:21:55Z tests/fm-bootstrap-network-parallel.test.sh exit=0 duration_ms=32209 gate_skip=false
+FM_TEST_END 2026-09-28T04:22:05Z tests/fm-dispatch-resolve.test.sh exit=0 duration_ms=9662 gate_skip=false
+
+### the inheritance-contract cases inside them:
+ok - B1 propagate_inheritable_config: copy, idempotence, convergence, absence-mirror, exclusion, no-op, skip diagnostics
+ok - B2 spawn: secondmate runs the secondmate harness; its home inherits declared config
+ok - B7 bootstrap sweep pushes, re-converges, and mirrors absence; never inherits secondmate-harness
+ok - B8 bootstrap sweep propagates config even when the home's tracked files are already current
+ok - B9 bootstrap sweep defers new inherited config until the home ignores it
+ok - B12 config-push propagates via shared live discovery, reports items, rereads on change only, and does not fast-forward
+ok - B13 config-push reports dirty, non-allowing, and invalid homes without failing warnings-only runs

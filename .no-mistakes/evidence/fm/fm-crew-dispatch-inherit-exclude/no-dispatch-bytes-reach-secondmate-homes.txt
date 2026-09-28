@@ -1,0 +1,147 @@
+### primary config/crew-dispatch.json carries a unique marker:
+{"harness":"codex","SECRET_PRIMARY_DISPATCH_MARKER":"acme-billing-only"}
+
+### live fm-config-push.sh item report:
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: unchanged
+  crew-harness: pushed
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: unchanged
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: unchanged
+  crew-harness: pushed
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: unchanged
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate wakewell (/tmp/fm-cdi.6secbw/wakewell):
+  dispatch-never-send: unchanged
+  crew-harness: pushed
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: unchanged
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate wakewell: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+
+### literal-content reread instruction actually written into the fdceng home:
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041340.00000006.8ObQF0.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041340.00000006.8ObQF0
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041338.00000005.IMfphc.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041338.00000005.IMfphc
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041245.00000001.yLQB5K.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041245.00000001.yLQB5K
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041338.00000005.IMfphc ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/dispatch-never-send
+-----BEGIN config/dispatch-never-send-----
+acme-ledger
+round-4
+-----END config/dispatch-never-send-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041337.00000004.vQR2iC ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/dispatch-never-send
+-----BEGIN config/dispatch-never-send-----
+acme-ledger
+round-3
+-----END config/dispatch-never-send-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041333.00000002.k38oJL ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/dispatch-never-send
+-----BEGIN config/dispatch-never-send-----
+acme-ledger
+round-1
+-----END config/dispatch-never-send-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041337.00000004.vQR2iC.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041337.00000004.vQR2iC
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041334.00000003.2xA97J.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041334.00000003.2xA97J
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041340.00000006.8ObQF0 ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/dispatch-never-send
+-----BEGIN config/dispatch-never-send-----
+acme-ledger
+round-5
+-----END config/dispatch-never-send-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041334.00000003.2xA97J ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/dispatch-never-send
+-----BEGIN config/dispatch-never-send-----
+acme-ledger
+round-2
+-----END config/dispatch-never-send-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041333.00000002.k38oJL.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041333.00000002.k38oJL
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041245.00000001.yLQB5K ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/dispatch-never-send
+-----BEGIN config/dispatch-never-send-----
+acme-ledger
+-----END config/dispatch-never-send-----
+
+config/crew-harness
+-----BEGIN config/crew-harness-----
+codex
+-----END config/crew-harness-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041548.00000008.CVZ0Hv.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041548.00000008.CVZ0Hv
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041402.00000007.QOsmLU ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/crew-dispatch.json
+-----BEGIN config/crew-dispatch.json-----
+{"default":{"harness":"codex"},"note":"primary project-scoped rules"}
+-----END config/crew-dispatch.json-----
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041402.00000007.QOsmLU.pending ---
+/tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041402.00000007.QOsmLU
+--- /tmp/fm-cdi.6secbw/fdceng/state/.fm-inherited-config-reread.20260928T041548.00000008.CVZ0Hv ---
+These inherited config files changed. Re-read and apply their exact contents at every future intake. They are defaults/rules and do not remove your judgment to choose differently when warranted.
+
+config/crew-harness
+-----BEGIN config/crew-harness-----
+pi
+-----END config/crew-harness-----
+
+### search EVERY file under all three secondmate homes for the primary marker:
+no match: the primary's dispatch bytes never reached any secondmate home (config copy or reread pointer)
+
+### each home's own dispatch profile is still its own:
+fdceng: {"default": {"harness": "pi"}, "rules": [{"when": "fdceng clinic scheduling", "use": {"harness": "pi"}}]}
+domains: {"default": {"harness": "grok"}}
+wakewell: (absent - never given the primary copy)
+
+Note on the instruction files listed above: instruction 00000007 (timestamp
+20260928T041402) is left-over state from the deliberate OLD-allowlist
+reproduction run recorded in old-allowlist-reproduces-recurrence.txt, where the
+pre-change default did push config/crew-dispatch.json and did write the
+primary's bytes into the home. Every instruction produced with the shipped
+allowlist names only config/dispatch-never-send and config/crew-harness, and the
+marker search covers the whole home tree.

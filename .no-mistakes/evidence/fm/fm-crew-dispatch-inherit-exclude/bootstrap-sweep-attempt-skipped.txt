@@ -1,0 +1,36 @@
+### attempt to drive the bootstrap secondmate sweep live, inside the gate worktree
+### RESULT: the sweep never reached its inheritance stage here - it skipped every home first,
+### because the gate worktree cannot resolve a primary default-branch commit. The crew-harness
+### values below are left over from the earlier fm-config-push run (primary was 'claude' for this
+### attempt, homes stayed 'pi'), so this transcript proves only the skip, NOT propagation.
+### The bootstrap convergence point is therefore covered by the repo's own end-to-end sweep test
+### (tests/fm-secondmate-harness.test.sh, 'B8 bootstrap sweep ... reconverge'), which drives the
+### real bin/fm-bootstrap.sh against a full primary+worktree world.
+
+### live 'bin/fm-bootstrap.sh' secondmate convergence sweep (the convergence point the report names)
+### primary config/crew-dispatch.json:
+{"default":{"harness":"codex"},"note":"BOOTSTRAP_SWEEP_PRIMARY_ONLY"}
+### homes before the sweep:
+fdceng: {"default": {"harness": "pi"}, "rules": [{"when": "fdceng clinic scheduling", "use": {"harness": "pi"}}]}
+domains: {"default": {"harness": "grok"}}
+wakewell: (absent)
+
+### bootstrap output (secondmate/inheritance lines):
+SECONDMATE_LIVENESS: secondmate domains: skipped: recorded harness '' is unverified for recovery (backend=tmux)
+SECONDMATE_LIVENESS: secondmate fdceng: skipped: recorded harness '' is unverified for recovery (backend=tmux)
+SECONDMATE_LIVENESS: secondmate wakewell: skipped: recorded harness '' is unverified for recovery (backend=tmux)
+SECONDMATE_SYNC: secondmate domains: skipped: primary default-branch commit cannot be resolved
+SECONDMATE_SYNC: secondmate fdceng: skipped: primary default-branch commit cannot be resolved
+SECONDMATE_SYNC: secondmate wakewell: skipped: primary default-branch commit cannot be resolved
+(bootstrap exit 0)
+
+### homes after the sweep:
+fdceng: {"default": {"harness": "pi"}, "rules": [{"when": "fdceng clinic scheduling", "use": {"harness": "pi"}}]}
+domains: {"default": {"harness": "grok"}}
+wakewell: (absent)
+### crew-harness actually converged by the same sweep (proves the sweep did propagate):
+fdceng crew-harness=pi
+domains crew-harness=pi
+wakewell crew-harness=pi
+### the primary's dispatch marker anywhere in the homes?
+no match: not copied, not pointered

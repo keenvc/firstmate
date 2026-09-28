@@ -1,0 +1,27 @@
+### adversarial: a secondmate home that does NOT gitignore config/crew-dispatch.json
+### (before the change this item hit the propagation guard; now it is not an item at all)
+--- home .gitignore no longer lists it:
+0
+(0 = not ignored)
+--- live push (stdout item report + stderr warnings):
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  home: dirty working tree - local-material push continuing
+  dispatch-never-send: unchanged
+  crew-harness: pushed
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: pushed
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+--- stderr (propagation warnings):
+WARNING: watcher still down (same stale episode; last beat: 591s ago, grace 300s) - full banner already printed this episode.
+--- the home's own file after the push:
+{"default":{"harness":"grok"},"note":"domains own rules"}
+--- primary marker present in the home tree?
+no match

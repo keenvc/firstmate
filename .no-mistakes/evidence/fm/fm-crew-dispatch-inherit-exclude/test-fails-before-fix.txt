@@ -1,0 +1,15 @@
+### regression check: the new inheritance test run against the BASE commit's library
+### (worktree HEAD tree + bin/fm-config-inherit-lib.sh from 3c2a91d, i.e. the pre-fix allowlist)
+
+ok - A1 fm-harness.sh secondmate resolves the fallback chain; crew mode unchanged
+ok - fm-harness detects only Cursor Agent CLI's exact invocation marker
+ok - C1 fm-harness.sh secondmate-model/secondmate-effort resolve the optional tokens; bare harness stays empty (backward-compat)
+ok - pi-signed identity: authoritative launch selection distinguishes shared wrapper ancestry
+ok - harness identity: dash-leading ps command names are basename operands, not options
+not ok - crew-dispatch.json was inherited (must not be)
+EXIT=1
+
+### the same test file on the shipped change:
+ok - B1 propagate_inheritable_config: copy, idempotence, convergence, absence-mirror, exclusion, no-op, skip diagnostics
+# all fm-secondmate-harness tests passed
+FM_TEST_END 2026-09-28T04:19:16Z tests/fm-secondmate-harness.test.sh exit=0 duration_ms=259121 gate_skip=false

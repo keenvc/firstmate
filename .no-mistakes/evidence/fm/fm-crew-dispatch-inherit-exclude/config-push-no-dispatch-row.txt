@@ -1,0 +1,42 @@
+### live 'bin/fm-config-push.sh' run: primary holds a project-scoped config/crew-dispatch.json;
+### two live secondmate homes each hold their own different one.
+### (the per-item report is what the operator sees; config/crew-dispatch.json has no row at all)
+
+config-push: /tmp/fm-cdi.6secbw/lab-home -> live secondmate homes
+secondmate domains (/tmp/fm-cdi.6secbw/domains):
+  dispatch-never-send: pushed
+  crew-harness: pushed
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: unchanged
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate domains: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+secondmate fdceng (/tmp/fm-cdi.6secbw/fdceng):
+  dispatch-never-send: pushed
+  crew-harness: pushed
+  backlog-backend: unchanged
+  backend: unchanged
+  herdr-presentation-spaces: unchanged
+  startup-memory-budget: unchanged
+  trace-context: unchanged - session-scoped
+  launch-env-allowlist: unchanged
+  claude-permission-mode: unchanged
+  lavish-axi-host: unchanged
+  keep-ai-trailers: unchanged
+  data/captain-shared.md: unchanged
+CONFIG_REREAD: secondmate fdceng: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+
+### each home's own copy verified byte-identical afterwards (sha256 -c against the pre-push digests):
+8fb483f07bb765c3df17c005b39fdda834c7b523c08d2f6b745619ad0c430907  /tmp/fm-cdi.6secbw/fdceng/config/crew-dispatch.json
+74c50738f58e52e9df4ffac86aea3622c4b5037b55f10689c15437b71116658c  /tmp/fm-cdi.6secbw/domains/config/crew-dispatch.json
+both verified OK - see recurrence-convergence-pushes.txt for the repeated-push proof
+
+### note: 'CONFIG_REREAD ... send failed' is the no-mistakes gate boundary refusing fm-send.sh
+### (fm-config-push passes FM_ROOT_OVERRIDE to the nudge, which voids the lab-home allowance).
+### It is an environment limit of running inside the gate, not a propagation result.
