@@ -26,9 +26,11 @@
 #      marked, recorded, or typed - on the marked secondmate path that means
 #      no marker-only record and no pending-reply expectation.
 #  11. The doorbell decision on a Herdr pane with no agent registration reads
-#      the pane's processes: a live harness process is rung, a shell-only
-#      pane is still never typed into, and a process view that cannot tell
-#      refuses with wording that says so; the record is identical in every case.
+#      the pane's processes: a live harness process is rung - including one
+#      sitting under the pane shell behind a tool that holds the foreground
+#      process group - a shell-only pane is still never typed into, and a
+#      process view that cannot tell refuses with wording that says so; the
+#      record is identical in every case.
 # Every case below that passes a literal `$...` message quotes it on purpose
 # (the point is sending an unexpanded `$` line), so SC2016 is disabled.
 # shellcheck disable=SC2016
@@ -483,6 +485,33 @@ test_herdr_lost_binding_live_agent_is_rung() {
   pass "fm-send inbox: a live agent whose Herdr registration is missing is rung"
 }
 
+test_herdr_lost_binding_foreground_tool_is_rung() {
+  local dir sleep_bin shell_pid harness_pid waited typed
+  dir=$(setup_herdr_case herdr-lost-binding-foreground-tool)
+  # A real process tree standing in for the live worker: the pane shell with a
+  # harness child, while the pane's foreground process group holds a tool the
+  # worker is running (`less`), so only the descendant walk can see the harness.
+  sleep_bin=$(command -v sleep) || fail "sleep not found"
+  bash -c 'exec -a pi "$1" 300 & printf "%s\n" "$!" >"$2"; exec "$1" 300' \
+    _ "$sleep_bin" "$dir/harness.pid" &
+  shell_pid=$!
+  waited=0
+  while [ ! -s "$dir/harness.pid" ]; do
+    [ "$waited" -lt 100 ] || fail "the fake harness child never reported its pid"
+    "$sleep_bin" 0.05
+    waited=$((waited + 1))
+  done
+  harness_pid=$(cat "$dir/harness.pid")
+  send_two_and_check_records "$dir" other "$shell_pid"
+  kill "$harness_pid" "$shell_pid" 2>/dev/null || true
+  typed=$(cat "$dir/send.log")
+  assert_contains "$typed" "Firstmate instruction waiting: list '$dir/home/state/t1.inbox'/*.msg" \
+    "a live harness under the pane shell must be rung even while a tool holds the foreground group"
+  assert_not_contains "$(cat "$dir/send.err")" "doorbell not typed" \
+    "a live worker running a tool must not be reported as unreached"
+  pass "fm-send inbox: a live agent behind a foreground tool with a lost Herdr registration is rung"
+}
+
 test_herdr_exited_agent_is_not_typed() {
   local dir sleep_bin shell_pid err
   dir=$(setup_herdr_case herdr-lost-binding-exited)
@@ -520,6 +549,7 @@ test_herdr_indeterminate_refuses_honestly() {
 test_text_steer_rides_inbox
 test_multiline_steer_is_legal
 test_herdr_lost_binding_live_agent_is_rung
+test_herdr_lost_binding_foreground_tool_is_rung
 test_herdr_exited_agent_is_not_typed
 test_herdr_indeterminate_refuses_honestly
 test_resend_enqueues_new_sequence
