@@ -779,7 +779,7 @@ done
 [ -e "$BEAT_HOME/state/.last-watcher-beat" ] \
   || fail "the stalled-publication watcher never beat: $(cat "$TMP_ROOT/beat-watch.err" 2>/dev/null)"
 seen=0
-last=$(fm_beacon_cycle "$BEAT_HOME/state/.last-watcher-beat")
+last=$(fm_beacon_cycle_settled "$BEAT_HOME/state/.last-watcher-beat")
 i=0
 while [ "$seen" -lt 3 ] && [ "$i" -lt 200 ]; do
   kill -0 "$WATCH_PID" 2>/dev/null \

@@ -1419,7 +1419,7 @@ test_long_sweep_keeps_beacon_fresh() {
     watcher_is_healthy "$dir" "$state" "$grace" \
       || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "guard predicate read a sweeping watcher as unhealthy"; }
     slow_read_started "$dir/reads" && window_seen=1
-    cycle=$(fm_beacon_cycle "$state/.last-watcher-beat")
+    cycle=$(fm_beacon_cycle_settled "$state/.last-watcher-beat")
     now=$(date +%s)
     if [ "$cycle" != "$first_cycle" ]; then
       first_cycle=$cycle
@@ -1462,7 +1462,7 @@ test_wedged_step_goes_stale_and_is_detected() {
     i=$((i + 1))
   done
   slow_read_started "$dir/reads" || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; fail "watcher never reached the hung window step"; }
-  line=$(fm_beacon_cycle "$state/.last-watcher-beat")
+  line=$(fm_beacon_cycle_settled "$state/.last-watcher-beat")
   i=0
   age=0
   while [ "$i" -lt 60 ]; do
@@ -1473,7 +1473,7 @@ test_wedged_step_goes_stale_and_is_detected() {
   done
   kill -0 "$pid" 2>/dev/null || { stop_slow_reads "$dir/reads"; fail "wedged watcher exited instead of staying blocked"; }
   [ "$age" -gt "$grace" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "a watcher blocked inside one step kept a fresh beacon (${age}s)"; }
-  [ "$(fm_beacon_cycle "$state/.last-watcher-beat")" = "$line" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "the blocked watcher republished its beacon"; }
+  [ "$(fm_beacon_cycle_settled "$state/.last-watcher-beat")" = "$line" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "the blocked watcher republished its beacon"; }
   if watcher_is_healthy "$dir" "$state" "$grace"; then
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"
     fail "the guard predicate read a wedged watcher as healthy"
@@ -1515,6 +1515,41 @@ test_exited_watcher_is_detected_as_absent() {
     fail "an exited watcher with a fresh leftover beacon read healthy"
   fi
   pass "a watcher that exits is still detected as absent despite a fresh leftover beacon"
+}
+
+test_unpublishable_beacon_is_recorded() {
+  # A directory stands where the beacon file belongs, so the write can never
+  # succeed for any user. That is the one condition every guard reads as broken
+  # supervision, so the watcher must keep polling AND leave a bounded record
+  # naming it - otherwise a failed write is indistinguishable from a dead watcher.
+  local dir state fakebin pid i needle
+  needle='liveness beacon could not be published'
+  dir=$(make_case unpublishable-beacon)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  mkdir -p "$state/.last-watcher-beat"
+  PATH="$fakebin:$PATH" FM_HOME="$dir" FM_STATE_OVERRIDE="$state" FM_POLL=1 FM_SIGNAL_GRACE=0 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 FM_SECONDMATE_LIVENESS_SECS=99999999 \
+    FM_HOME_SUMMARY_INTERVAL=999999 "$WATCH" > "$dir/watch.out" 2> "$dir/watch.err" &
+  pid=$!
+  i=0
+  while [ "$i" -lt 150 ]; do
+    grep -Fq "$needle" "$state/.watch-triage.log" 2>/dev/null && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  grep -Fq "$needle" "$state/.watch-triage.log" 2>/dev/null || {
+    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    fail "an unpublishable beacon left no record anywhere: $(cat "$dir/watch.err" 2>/dev/null)"
+  }
+  kill -0 "$pid" 2>/dev/null || {
+    wait "$pid" 2>/dev/null
+    fail "the watcher exited instead of polling on past a failed beacon write: $(cat "$dir/watch.err" 2>/dev/null)"
+  }
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  pass "a beacon this watcher cannot publish is recorded while it keeps polling"
 }
 
 test_pid_identity_is_locale_invariant() {
@@ -1748,3 +1783,4 @@ test_stopped_watcher_is_live_but_stale_then_exit_is_classified
 test_long_sweep_keeps_beacon_fresh
 test_wedged_step_goes_stale_and_is_detected
 test_exited_watcher_is_detected_as_absent
+test_unpublishable_beacon_is_recorded

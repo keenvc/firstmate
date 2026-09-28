@@ -621,6 +621,24 @@ fm_beacon_cycle() {
   printf '%s\n' "$cycle"
 }
 
+# fm_beacon_cycle_settled <beacon>: the same number, retried briefly so a read
+# that lands in the writer's truncate window returns it instead of empty. Use this
+# wherever one read is compared against another; fm_beacon_cycle's empty result is
+# for callers waiting on a beacon to first appear.
+fm_beacon_cycle_settled() {
+  local cycle i=0
+  while [ "$i" -lt 20 ]; do
+    cycle=$(fm_beacon_cycle "$1")
+    if [ -n "$cycle" ]; then
+      printf '%s\n' "$cycle"
+      return 0
+    fi
+    sleep 0.05
+    i=$((i + 1))
+  done
+  return 0
+}
+
 # --- deterministic git identity and fixtures --------------------------------
 
 # fm_git_identity [name] [email]: export a fixed author/committer identity so

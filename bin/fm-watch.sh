@@ -1989,18 +1989,19 @@ age_of() {  # seconds since file mtime; "due immediately" if missing
 # wait. Those call sites are the whole contract, not a rule about which sweeps
 # qualify, so a stretch of work with no call between beats does not publish.
 # A marked sweep that is slow because the fleet is large keeps the beacon fresh,
-# while a watcher
-# blocked inside any single step stops publishing and goes stale exactly as
-# before; nothing here runs on a timer or from a helper process. The file holds
-# the cycle number so a reader can tell a new cycle from a mid-cycle beat; every
-# guard reads only its mtime. A sourced copy (no WATCHER_PID) never beats.
+# while a watcher blocked inside any single step stops publishing and goes stale
+# exactly as before; nothing here runs on a timer or from a helper process. The
+# file holds the cycle number so a reader can tell a new cycle from a mid-cycle
+# beat; every guard reads only its mtime. A sourced copy (no WATCHER_PID) never
+# beats. Returns the write's status, so a caller can report a beacon this watcher
+# cannot publish - the one failure every guard reads as broken supervision.
 WATCHER_CYCLE=0
 watcher_beat() {
   local holder=
   [ -n "${WATCHER_PID:-}" ] || return 0
   read -r holder 2>/dev/null < "$WATCH_LOCK/pid" || true
   [ "$holder" = "$WATCHER_PID" ] || return 0
-  printf '%s\n' "$WATCHER_CYCLE" 2>/dev/null > "$STATE/.last-watcher-beat" || true
+  printf '%s\n' "$WATCHER_CYCLE" 2>/dev/null > "$STATE/.last-watcher-beat"
 }
 
 # Layer 2 + 3 signal scan: status files and turn-end markers.
@@ -2696,7 +2697,7 @@ while :; do
   # Liveness beacon (watcher_beat owns the contract): a new cycle starts here,
   # and the per-phase and per-item beats below keep a long cycle visibly alive.
   WATCHER_CYCLE=$((WATCHER_CYCLE + 1))
-  watcher_beat
+  watcher_beat || triage_log "liveness beacon could not be published to $STATE/.last-watcher-beat"
 
   # Opt-in fleet activity ledger (docs/fleet-ledger.md): pick up newly appended
   # status lines before this cycle can exit on a wake. Off costs one file test.
