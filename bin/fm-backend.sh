@@ -969,7 +969,7 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # contract. It is deliberately richer than fm_backend_target_exists's cheap
 # pane-presence read and prints exactly one of:
 #   alive      - a verified harness agent is running.
-#   dead       - the endpoint exists but confidently has no agent.
+#   dead       - the endpoint exists with no agent this classifier can see.
 #   missing    - the recorded endpoint is authoritatively absent.
 #   ambiguous  - the endpoint exists but its process cannot be attributed.
 #   unreadable - a target or inventory read failed or contradicted itself.
@@ -982,9 +982,13 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 # which verifies a registered agent against `pane process-info` and the real
 # process table, so a registration Herdr kept over a shell-only pane reads
 # `dead` here (issue #4115) - then maps a positively stopped session server to
-# `missing` only in this recovery-grade view. Zellij remains unverified because
-# its secondmate ghost-tab and agent-process recovery path has not been
-# empirically validated. Orca and cmux do not support secondmate spawns.
+# `missing` only in this recovery-grade view. A Herdr pane with no registration
+# at all reads `dead` too, which Herdr also produces for a live agent whose
+# binding it lost, so a caller that needs proof the agent is gone rather than
+# recovery grade reads fm_backend_agent_process_state below. Zellij remains
+# unverified because its secondmate ghost-tab and agent-process recovery path
+# has not been empirically validated. Orca and cmux do not support secondmate
+# spawns.
 fm_backend_agent_state() {  # <backend> <target>
   local backend=$1 target=$2
   fm_backend_source "$backend" || { printf 'unverified'; return 0; }
