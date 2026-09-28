@@ -176,7 +176,7 @@ The worktree and the task's records are unaffected either way.
   Only a positively classified state acts.
 - `exit`'s composer-empty check, above, is itself a fail-closed boundary that `relaunch` inherits by stopping the old agent through `exit`.
 - `fm-spawn --relaunch` independently refuses unless the endpoint is positively agent-free - either a `dead` endpoint that survives, or an endpoint proven gone by the absence proof above - so a replacement can never join a live agent.
-  An `alive`, `ambiguous`, or `unreadable` verdict all refuse, and so does any endpoint whose absence is not provable; absence is claimed only from positive evidence of it.
+  An `alive`, `ambiguous`, or `unreadable` verdict all refuse; absence is claimed only from positive evidence of it.
   Every such refusal names a command that acts on the state it read, spelled as the operator can run it: an `alive` endpoint points at `bin/fm-control.sh <id> relaunch --note "<why>"`, which stops that agent first, and an `ambiguous` or `unreadable` one points at `bin/fm-peek.sh <id>` and the same retry, because no lifecycle verb acts on it until it reads positively.
   The `--note` placeholder is part of every printed `relaunch`, because a ship or scout relaunch refuses without one.
   It also requires the shell to be in the recorded worktree: tmux refuses immediately when it is not, while Herdr sends one `cd` to the recorded path and refuses unless a subsequent path read confirms the move.
