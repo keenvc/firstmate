@@ -1395,12 +1395,6 @@ beacon_age() {  # <state>
   FM_STATE_OVERRIDE="$1" bash -c '. "$1"; fm_path_age "$2"' _ "$LIB" "$1/.last-watcher-beat"
 }
 
-beacon_line() {  # <state>
-  local line=
-  read -r line 2>/dev/null < "$1/.last-watcher-beat" || true
-  printf '%s\n' "$line"
-}
-
 watcher_is_healthy() {  # <dir> <state> <grace>
   FM_HOME="$1" FM_STATE_OVERRIDE="$2" bash -c '. "$1"; fm_watcher_healthy "$2" "$3" "$4" "$5"' \
     _ "$LIB" "$2" "$WATCH" "$3" "$1"
@@ -1450,11 +1444,11 @@ test_long_sweep_keeps_beacon_fresh() {
   while [ "$i" -lt 28 ]; do
     kill -0 "$pid" 2>/dev/null || { stop_slow_reads "$dir/reads"; fail "slow-sweep watcher exited: $(cat "$dir/watch.err")"; }
     age=$(beacon_age "$state")
-    [ "$age" -lt "$grace" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "beacon went stale (${age}s >= ${grace}s) while the watcher was sweeping: $(beacon_line "$state")"; }
+    [ "$age" -lt "$grace" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "beacon went stale (${age}s >= ${grace}s) while the watcher was sweeping: $(fm_beacon_cycle "$state/.last-watcher-beat")"; }
     watcher_is_healthy "$dir" "$state" "$grace" \
       || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "guard predicate read a sweeping watcher as unhealthy"; }
     slow_read_started "$dir/reads" && window_seen=1
-    cycle=$(beacon_line "$state")
+    cycle=$(fm_beacon_cycle "$state/.last-watcher-beat")
     now=$(date +%s)
     if [ "$cycle" != "$first_cycle" ]; then
       first_cycle=$cycle
@@ -1498,7 +1492,7 @@ test_wedged_step_goes_stale_and_is_detected() {
     i=$((i + 1))
   done
   slow_read_started "$dir/reads" || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; fail "watcher never reached the hung window step"; }
-  line=$(beacon_line "$state")
+  line=$(fm_beacon_cycle "$state/.last-watcher-beat")
   i=0
   age=0
   while [ "$i" -lt 60 ]; do
@@ -1509,7 +1503,7 @@ test_wedged_step_goes_stale_and_is_detected() {
   done
   kill -0 "$pid" 2>/dev/null || { stop_slow_reads "$dir/reads"; fail "wedged watcher exited instead of staying blocked"; }
   [ "$age" -gt "$grace" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "a watcher blocked inside one step kept a fresh beacon (${age}s)"; }
-  [ "$(beacon_line "$state")" = "$line" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "the blocked watcher republished its beacon"; }
+  [ "$(fm_beacon_cycle "$state/.last-watcher-beat")" = "$line" ] || { kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"; fail "the blocked watcher republished its beacon"; }
   if watcher_is_healthy "$dir" "$state" "$grace"; then
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; stop_slow_reads "$dir/reads"
     fail "the guard predicate read a wedged watcher as healthy"

@@ -605,6 +605,22 @@ fm_touch_epoch() {
     || fail "fm_touch_epoch: touch -t $stamp failed for $*"
 }
 
+# --- watcher liveness beacon ------------------------------------------------
+
+# fm_beacon_cycle <beacon>: the poll-cycle number state/.last-watcher-beat names,
+# or empty when no watcher has published one yet.
+#
+# bin/fm-watch.sh republishes the beacon from each step of a cycle (watcher_beat
+# owns that contract), so an mtime advance no longer marks a cycle boundary and
+# only this number changing does. Read it wherever a case needs "a whole poll
+# cycle ran"; mtime still answers "how fresh is it".
+fm_beacon_cycle() {
+  local cycle=
+  read -r cycle _ 2>/dev/null < "$1" || true
+  case "$cycle" in ''|*[!0-9]*) return 0 ;; esac
+  printf '%s\n' "$cycle"
+}
+
 # --- deterministic git identity and fixtures --------------------------------
 
 # fm_git_identity [name] [email]: export a fixed author/committer identity so
