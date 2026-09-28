@@ -150,8 +150,9 @@
 # operator knows which record to reconcile first. "No work" is the ordinary
 # uncommitted-changes and landed-work refusals below, which a shared copy runs
 # regardless of kind: a scout's scratch carve-out never covers a copy another
-# record also names. A record is never retired without returning its slot, so
-# every claim on that copy is still on disk when these checks run.
+# record also names. A record is never removed without returning its slot unless
+# the claim proves the slot is no longer this record's, so every record that
+# still names the copy is on disk when these checks run.
 # These refusals are not relaxed by --force, and a co-claimant refuses under
 # --force exactly as before: --force authorizes discarding THIS task's unlanded
 # work, never work another record may own. Nothing of this task's own is removed
@@ -2475,7 +2476,11 @@ require_exclusive_task_worktree_slot() {
     dead|missing) ;;
     *)
       echo "REFUSED: task $ID's recorded worktree $slot is also recorded by task(s) $TEARDOWN_SLOT_SHARED_WITH, and $ID's own recorded endpoint reads '$own_state', not confidently dead or missing; nothing was changed." >&2
-      echo "A shared slot is returned only once every record naming it is non-live; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
+      if [ "$own_state" = alive ]; then
+        echo "A shared slot is returned only once every record naming it is non-live; stop $ID's worker first (bin/fm-control.sh $ID exit), then re-run teardown." >&2
+      else
+        echo "A shared slot is returned only once every record naming it is non-live, and no worker state can be read for $ID at all, so stopping a worker cannot clear this. Reconcile whichever record naming $slot is wrong (bin/fm-crew-state.sh $ID, and the same for task(s) $TEARDOWN_SLOT_SHARED_WITH), then re-run teardown: a slot no other record names never reaches this gate." >&2
+      fi
       return 1
       ;;
   esac
@@ -2485,8 +2490,9 @@ require_exclusive_task_worktree_slot() {
 # Positive slot ownership, read from the claim the task that took the slot wrote
 # into the slot itself (bin/fm-wake-lib.sh owns the claim and its states).
 #
-# The record scan above proves that no OTHER task record names this slot. It
-# cannot prove that THIS record is not the stale one, because the task that took
+# The record scan above proves that no OTHER task record names this slot, or
+# that every record which does is provably non-live (TEARDOWN_SLOT_SHARED_WITH).
+# It cannot prove that THIS record is not the stale one, because the task that took
 # the slot next may leave no record this scan can reach: its own worker may have
 # exited and its record been cleaned up, or it may belong to a home this machine
 # does not register. The claim closes that gap from the other side - it names the
@@ -2504,7 +2510,9 @@ require_exclusive_task_worktree_slot() {
 # An absent claim proceeds as the slot's owner: a slot taken before claims
 # existed, or already returned to the pool, carries none, and refusing those
 # would strand every task in flight across the change for no evidence at all.
-# Those keep exactly the record-scan protection they had before.
+# Those keep exactly the protection the record scan above establishes: either no
+# other record names the slot, or every record that does is provably non-live
+# and the copy is about to prove it holds no work.
 TEARDOWN_SLOT_REASSIGNED_RC=3
 require_owned_worktree_slot_record() {  # <task-id> <worktree>
   local record_id=$1 worktree=$2 marker

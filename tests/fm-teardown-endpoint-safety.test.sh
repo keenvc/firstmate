@@ -1145,6 +1145,8 @@ test_shared_slot_with_a_live_record_still_refuses() {
   assert_shared_slot_refused "$dir" running-task "a live record sharing its slot with a finished one"
   assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'alive'" \
     "the refusal should name this record's own live endpoint"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-control.sh running-task exit" \
+    "a live own endpoint should be told to stop its worker"
 
   pass "fm-teardown: a slot shared with any live record still refuses without touching it"
 }
@@ -1457,6 +1459,22 @@ test_shared_slot_with_an_undeterminable_record_refuses() {
   assert_shared_slot_refused "$dir" done-task "a slot shared with an unclassifiable backend"
   assert_contains "$(cat "$dir/stderr")" "zellij-task's recorded endpoint reads 'unverified'" \
     "the refusal should name the unclassifiable record"
+
+  # This record's own endpoint cannot be read either way: there is no worker to
+  # stop, so the refusal names the reconcile path that can actually clear it.
+  dir=$(make_shared_slot_case shared-own-unreadable)
+  write_shared_slot_ship_meta "$dir" done-task
+  write_shared_slot_ship_meta "$dir" own-task lostsession
+  : > "$dir/tmux-unreadable-lostsession"
+  assert_shared_slot_refused "$dir" own-task "a record whose own endpoint cannot be read"
+  assert_contains "$(cat "$dir/stderr")" "own recorded endpoint reads 'unreadable'" \
+    "the refusal should name this record's own undeterminable verdict"
+  assert_contains "$(cat "$dir/stderr")" "bin/fm-crew-state.sh own-task" \
+    "an unreadable own endpoint should be told to reconcile the records naming the slot"
+  assert_contains "$(cat "$dir/stderr")" "done-task" \
+    "the refusal should name the record that shares the slot"
+  assert_not_contains "$(cat "$dir/stderr")" "fm-control.sh" \
+    "an unreadable own endpoint should not be told to stop a worker that cannot be read"
 
   # A secondmate home is never finished work, whatever its endpoint reads.
   dir=$(make_shared_slot_case shared-secondmate)
