@@ -1339,6 +1339,7 @@ spawn_abort_cleanup() {
     [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
     "$SCRIPT_DIR/fm-claim.sh" release-task "$ID" --home "$FM_HOME" >/dev/null 2>&1 || true
   fi
+  spawn_herdr_presentation_order_lock_release
   return "$status"
 }
 trap spawn_abort_cleanup EXIT
@@ -1360,6 +1361,22 @@ spawn_herdr_presentation_order_lock_acquire() {
     sleep 0.1
     attempt=$((attempt + 1))
   done
+  return 1
+}
+
+# Cross-home presentation recovery can wait behind another home's teardown or
+# reclaim that legitimately holds the same session lock longer than a fresh
+# spawn's 5s try loop; bounded wait matches that contention without weakening
+# the test's concurrent-recovery guarantee.
+spawn_herdr_presentation_order_lock_acquire_recovery() {
+  local session=${1:-} lock_path
+  [ -n "$session" ] || session=$(fm_backend_herdr_session)
+  lock_path=$(fm_backend_herdr_presentation_session_lock_path "$session") || return 1
+  HERDR_PRESENTATION_ORDER_LOCK="$lock_path"
+  if fm_lock_acquire_wait_bounded "$lock_path" 120; then
+    HERDR_PRESENTATION_ORDER_LOCK_HELD=1
+    return 0
+  fi
   return 1
 }
 
@@ -3433,7 +3450,7 @@ else
           echo "error: herdr presentation recovery could not ensure its exact named session" >&2
           exit 1
         }
-        spawn_herdr_presentation_order_lock_acquire "$HERDR_SES" || {
+        spawn_herdr_presentation_order_lock_acquire_recovery "$HERDR_SES" || {
           echo "error: herdr presentation recovery could not acquire its session lock; refusing a concurrent resume" >&2
           exit 1
         }

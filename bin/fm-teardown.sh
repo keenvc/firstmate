@@ -3331,11 +3331,29 @@ fi
 # refuses before any destructive step.
 TEARDOWN_HERDR_SESSION=
 TEARDOWN_HERDR_PANE=
+TEARDOWN_HERDR_REASSIGNED_DEAD=0
 if [ "$BACKEND" = herdr ] && [ -z "$TEARDOWN_ENDPOINT_CLEARED" ]; then
-  teardown_herdr_preflight_target "$T" "$ID" || exit 1
-  fm_backend_herdr_parse_target "$T" || exit 1
-  TEARDOWN_HERDR_SESSION=$FM_BACKEND_HERDR_SESSION
-  TEARDOWN_HERDR_PANE=$FM_BACKEND_HERDR_PANE
+  fm_backend_source herdr || true
+  if fm_backend_herdr_parse_target "$T"; then
+    TEARDOWN_HERDR_SESSION=$FM_BACKEND_HERDR_SESSION
+    TEARDOWN_HERDR_PANE=$FM_BACKEND_HERDR_PANE
+    if [ "$TEARDOWN_SLOT_REASSIGNED" = 1 ] \
+       && [ "$(fm_backend_herdr_pane_presence_state "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE")" = dead ]; then
+      # A reassigned slot is no longer this task's to kill or return; when its
+      # Herdr pane is already a dead husk, record and journal cleanup need no
+      # presentation-order lock. Claim-first teardown used to refuse at the
+      # exclusive scan before ever acquiring this lock; finishing reassigned
+      # cleanup without it keeps concurrent cross-home recovery from losing a
+      # 5s presentation-lock race to stale-record teardown.
+      TEARDOWN_HERDR_REASSIGNED_DEAD=1
+    fi
+  fi
+  if [ "$TEARDOWN_HERDR_REASSIGNED_DEAD" != 1 ]; then
+    teardown_herdr_preflight_target "$T" "$ID" || exit 1
+    fm_backend_herdr_parse_target "$T" || exit 1
+    TEARDOWN_HERDR_SESSION=$FM_BACKEND_HERDR_SESSION
+    TEARDOWN_HERDR_PANE=$FM_BACKEND_HERDR_PANE
+  fi
 fi
 
 BACKLOG_CLOSED=0
@@ -3531,6 +3549,8 @@ elif [ -n "$TEARDOWN_ENDPOINT_CLEARED" ]; then
   # Any leftover presentation journal is stale for the same reason.
   rm -f "$HERDR_PRESENTATION_JOURNAL"
   :
+elif [ "$TEARDOWN_HERDR_REASSIGNED_DEAD" = 1 ]; then
+  rm -f "$HERDR_PRESENTATION_JOURNAL"
 elif [ "$BACKEND" = herdr ]; then
   if teardown_herdr_session_lock_held "$TEARDOWN_HERDR_SESSION"; then
     fm_backend_herdr_kill_serialized "$TEARDOWN_HERDR_SESSION" "$TEARDOWN_HERDR_PANE" 2>/dev/null || true
