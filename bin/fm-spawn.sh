@@ -74,6 +74,12 @@
 #   from that harness's launch rather than guessed. Ultra is the explicit
 #   exception: bin/fm-harness.sh validate-native-effort owns its model scope;
 #   supported Pi launches receive --codex-effort ultra, never --thinking ultra.
+#   OpenCode has no verified interactive effort launch flag; the effort axis is
+#   recorded in task metadata but omitted from the launch command (record-and-omit).
+#   OpenCode 1.x keeps `opencode --model` with a permission-only config JSON.
+#   OpenCode 2.x removed top-level --model; the resolved model rides a top-level
+#   `"model"` field in OPENCODE_CONFIG_CONTENT with `--standalone` (verified 2.0.19;
+#   agent.build.model is ignored on 2.0.19).
 #   --backend <name> is the explicit runtime session-provider backend for this
 #   exact task only (docs/configuration.md "Runtime backend" owns when that flag
 #   is authorized). Without it, the script resolves FM_BACKEND, then
@@ -1971,7 +1977,10 @@ launch_template() {
       printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox --disable hooks -c "notify=[\"bash\",\"-c\",\"touch __TURNEND__\"]" "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     fi
     ;;
-  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # OpenCode 1.x: permission JSON plus --model. OpenCode 2.x: top-level model in
+  # JSON plus --standalone (no top-level --model). Major version is resolved at
+  # launch substitution time from `opencode --version`.
+  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__OPENCODEMODEL__}'\'' opencode __OPENCODEPREFIX____MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE__'
     if [ "$kind" = secondmate ]; then
@@ -2573,13 +2582,41 @@ muse_credential_present() {
 }
 
 model_flag_for_harness() {
-  local harness=$1 model=$2
+  local harness=$1 model=$2 opencode_v2=${3:-0}
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | cline)
+  opencode)
+    [ "$opencode_v2" -eq 1 ] && return 0
+    printf -- '--model %s ' "$(shell_quote "$model")"
+    ;;
+  claude | codex | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | cline)
     printf -- '--model %s ' "$(shell_quote "$model")"
     ;;
   esac
+}
+
+opencode_version_major() {
+  local ver major
+  ver=$(opencode --version 2>/dev/null) || return 1
+  major=${ver#*v}
+  major=${major%%.*}
+  case "$major" in
+  '' | *[!0-9]*) return 1 ;;
+  esac
+  printf '%s' "$major"
+}
+
+opencode_model_json_quoted() {
+  local model=$1 model_json
+  model_json=$(json_escape "$model")
+  model_json=${model_json//\'/\'\\\'\'}
+  printf '%s' "$model_json"
+}
+
+opencode_model_config_fragment() {
+  local model=$1
+  [ -n "$model" ] && [ "$model" != default ] || return 0
+  printf ',"model":"%s"' "$(opencode_model_json_quoted "$model")"
 }
 
 effort_flag_for_harness() {
@@ -2663,9 +2700,8 @@ effort_flag_for_harness() {
     # --config-override, but that flag is single-value (see
     # rovo_config_override_flag below) so it is built there, merged with the
     # mandatory allowedExternalPaths grant, rather than here.
-    # opencode's interactive `opencode --prompt` launch has a verified --model
-    # flag but no verified effort flag. Its `opencode run --variant` flag belongs
-    # to a different, non-interactive launch mode, so fm-spawn does not pass it.
+    # opencode effort is record-and-omit on the interactive launch path (see the
+    # opencode launch template and opencode_model_config_fragment).
     # kimi provider catalogs expose supported and default effort values, but a
     # launch flag and mapping have not been live-verified; the requested axis
     # stays in task metadata but never reaches the launch command. Cursor encodes
@@ -4959,10 +4995,26 @@ if [ "$HARNESS" = openhands ]; then
   LAUNCH=${LAUNCH//__OHHOME__/"$(shell_quote "$OPENHANDS_HOME_DIR")"}
   LAUNCH=${LAUNCH//__OHPERSIST__/"$(shell_quote "$OPENHANDS_PERSIST_DIR")"}
 fi
-MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
+OPENCODE_V2=0
+OPENCODEPREFIX=
+OPENCODEMODEL=
+if [ "$HARNESS" = opencode ]; then
+  major=$(opencode_version_major) || {
+    echo "error: could not resolve opencode version from 'opencode --version'" >&2
+    exit 1
+  }
+  [ "$major" -ge 2 ] && OPENCODE_V2=1
+  if [ "$OPENCODE_V2" -eq 1 ]; then
+    OPENCODEPREFIX='--standalone '
+    OPENCODEMODEL=$(opencode_model_config_fragment "$MODEL")
+  fi
+fi
+MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL" "$OPENCODE_V2")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
+LAUNCH=${LAUNCH//__OPENCODEMODEL__/$OPENCODEMODEL}
+LAUNCH=${LAUNCH//__OPENCODEPREFIX__/$OPENCODEPREFIX}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$HARNESS" = rovo ]; then
   ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {
