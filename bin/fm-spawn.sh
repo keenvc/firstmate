@@ -74,6 +74,12 @@
 #   from that harness's launch rather than guessed. Ultra is the explicit
 #   exception: bin/fm-harness.sh validate-native-effort owns its model scope;
 #   supported Pi launches receive --codex-effort ultra, never --thinking ultra.
+#   OpenCode has no interactive effort flag, so its effort is written as the
+#   build agent's variant, keyed to the resolved model, inside the
+#   OPENCODE_CONFIG_CONTENT JSON its launch already carries (config schema
+#   verified on opencode 1.18.32); without a model the axis is recorded but omitted.
+#   OpenCode 2.x has no top-level --model; the resolved model rides that same JSON
+#   (top-level model or agent.build.model) and --standalone (verified 2.0.19).
 #   --backend <name> is the explicit runtime session-provider backend for this
 #   exact task only (docs/configuration.md "Runtime backend" owns when that flag
 #   is authorized). Without it, the script resolves FM_BACKEND, then
@@ -1971,7 +1977,10 @@ launch_template() {
       printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox --disable hooks -c "notify=[\"bash\",\"-c\",\"touch __TURNEND__\"]" "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     fi
     ;;
-  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # opencode 2.x removed the top-level --model flag; model must ride
+  # OPENCODE_CONFIG_CONTENT and --standalone keeps that config off the shared
+  # background service (verified 2.0.19: config model is ignored without it).
+  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__OPENCODEMODEL____EFFORTFLAG__}'\'' opencode --standalone --prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE__'
     if [ "$kind" = secondmate ]; then
@@ -2576,10 +2585,30 @@ model_flag_for_harness() {
   local harness=$1 model=$2
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | cline)
+  claude | codex | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | cline)
     printf -- '--model %s ' "$(shell_quote "$model")"
     ;;
   esac
+}
+
+opencode_emits_agent_variant() {
+  local model=$1 effort=$2
+  [ -n "$model" ] && [ "$model" != default ] || return 1
+  case "${model%%/*}:$effort" in
+  anthropic:high | anthropic:max) ;;
+  openai:low | openai:medium | openai:high | openai:xhigh) ;;
+  *) return 1 ;;
+  esac
+}
+
+opencode_model_config_fragment() {
+  local model=$1 effort=$2
+  opencode_emits_agent_variant "$model" "$effort" && return 0
+  [ -n "$model" ] && [ "$model" != default ] || return 0
+  local model_json
+  model_json=$(json_escape "$model")
+  model_json=${model_json//\'/\'\\\'\'}
+  printf ',"model":"%s"' "$model_json"
 }
 
 effort_flag_for_harness() {
@@ -2645,6 +2674,30 @@ effort_flag_for_harness() {
     low | medium | high | xhigh | max) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
     esac
     ;;
+  opencode)
+    # opencode's interactive `opencode --standalone --prompt` launch has no effort
+    # flag (`opencode run --variant` is a different, non-interactive mode). Its
+    # config schema (opencode 1.18.32+, `opencode debug config` / config.json)
+    # carries per-model reasoning effort as agent.<name>.variant, "Default model
+    # variant for this agent (applies only when using the agent's configured
+    # model)", so the effort rides the OPENCODE_CONFIG_CONTENT JSON the launch
+    # already writes: the default build agent is pinned to the resolved model
+    # and the effort named as its variant, which OpenCode resolves against that
+    # model's own variant list. Those lists are per-provider (anthropic/* expose
+    # high|max, openai/* expose low|medium|high|xhigh), so emit the variant only
+    # when the resolved model's provider is known to expose that effort; any
+    # other provider, or an effort outside its family's list, keeps the
+    # permission-only launch and omits the variant (record-and-omit, as codex
+    # and grok do). Without a resolved model the variant has nothing to key to
+    # and is likewise omitted. The fragment lands inside the launch's
+    # single-quoted assignment, so a literal quote in the model id must close and
+    # reopen that quoting.
+    opencode_emits_agent_variant "$model" "$effort" || return 0
+    local model_json
+    model_json=$(json_escape "$model")
+    model_json=${model_json//\'/\'\\\'\'}
+    printf ',"agent":{"build":{"model":"%s","variant":"%s"}}' "$model_json" "$effort"
+    ;;
   muse)
     # muse 0.1.0-R708.1 --reasoning-effort accepts none|minimal|low|medium|
     # high|xhigh|ultra and defaults to high, so low..xhigh map straight across.
@@ -2663,9 +2716,8 @@ effort_flag_for_harness() {
     # --config-override, but that flag is single-value (see
     # rovo_config_override_flag below) so it is built there, merged with the
     # mandatory allowedExternalPaths grant, rather than here.
-    # opencode's interactive `opencode --prompt` launch has a verified --model
-    # flag but no verified effort flag. Its `opencode run --variant` flag belongs
-    # to a different, non-interactive launch mode, so fm-spawn does not pass it.
+    # opencode effort rides OPENCODE_CONFIG_CONTENT (see the opencode case above);
+    # `opencode run --variant` belongs to a different, non-interactive mode.
     # kimi provider catalogs expose supported and default effort values, but a
     # launch flag and mapping have not been live-verified; the requested axis
     # stays in task metadata but never reaches the launch command. Cursor encodes
@@ -4961,8 +5013,13 @@ if [ "$HARNESS" = openhands ]; then
 fi
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL") || exit 1
+OPENCODEMODEL=
+if [ "$HARNESS" = opencode ]; then
+  OPENCODEMODEL=$(opencode_model_config_fragment "$MODEL" "$EFFORT")
+fi
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
+LAUNCH=${LAUNCH//__OPENCODEMODEL__/$OPENCODEMODEL}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}
 if [ "$HARNESS" = rovo ]; then
   ROVOCONFIGOVERRIDE=$(rovo_config_override_flag "$EFFORT" "$DATA" "$STATE" "$ID") || {

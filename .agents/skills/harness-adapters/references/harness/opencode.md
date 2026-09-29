@@ -1,6 +1,7 @@
 # OpenCode
 
 Verified on 2026-06-11 across versions 1.15.7 through 1.17.6, with busy-queue behavior re-verified on 2026-07-20 using 1.18.4.
+OpenCode 2.0.19 re-verified 2026-09-29 for launch, model config, and `--standalone`.
 
 ## Operating facts
 
@@ -11,8 +12,8 @@ Verified on 2026-06-11 across versions 1.15.7 through 1.17.6, with busy-queue be
 | Interrupt | Double Escape; it is known to be flaky while a long shell command runs, so use `../../../bin/fm-control.sh <task-id> relaunch` for a wedged pane. |
 | Skill invocation | No separate verified form beyond normal slash-command behavior; use natural language when the exact command is uncertain. |
 | Resume | Relaunch with `--continue` to resume the most recent session for the current directory, then send the next instruction after the TUI is ready because `--prompt` does not auto-submit alongside `--continue`. |
-| Model flag | `--model <provider/model>`. |
-| Effort flag | None for Firstmate's interactive `opencode --prompt` launch verified on 1.17.6; `opencode run` has `--variant`, but that is not this path. |
+| Model flag | None on the interactive launch path. OpenCode 2.x removed the top-level `--model` flag (`opencode run --model` remains for non-interactive `run`). Firstmate writes the resolved model into `OPENCODE_CONFIG_CONTENT` as a top-level `"model"` field, or as `agent.build.model` when a reasoning variant is also emitted, and launches with `opencode --standalone --prompt` so that JSON is honored instead of ignored by the shared background service (verified 2.0.19). |
+| Effort flag | None for Firstmate's interactive `opencode --standalone --prompt` launch; `opencode run` has `--variant`, but that is not this path. The effort instead rides the launch's `OPENCODE_CONFIG_CONTENT` JSON as the `build` agent's `variant` keyed to the resolved model, the config schema's per-model reasoning-effort field verified on 1.18.32. It is emitted only when the resolved model's provider is known to expose that effort as a variant (`anthropic/*`: high, max; `openai/*`: low, medium, high, xhigh); with no model resolved, another provider, or an effort outside its family's list, the variant is omitted and only the top-level model field (when resolved) is added alongside the permission block. |
 | Model discovery | Run `opencode models [provider]` to list available provider/model identifiers. |
 | Trust dialog | None. |
 | Marker | None; OpenCode publishes no identity marker, so `../../../bin/fm-harness.sh` identifies it from process ancestry. |
@@ -42,3 +43,15 @@ On native Windows, the operational-input adapter runs its Bash helper through `b
 
 The companion `.opencode/plugins/fm-primary-watch-arm.js` owns normal TUI watcher supervision, wakes it with `client.session.promptAsync`, and coordinates with the guard before a blind-turn follow-up.
 The PreToolUse-equivalent watcher-arm seatbelt blocks by throwing from `tool.execute.before`.
+
+## OpenCode 2.x launch verification (2026-09-29)
+
+Environment: `opencode v2.0.19` on the task host, Firstmate worktree launch template from `bin/fm-spawn.sh`.
+
+Before (reproduced pre-fix launch shape): `opencode --model 'anthropic/claude-sonnet-4-5' --prompt '…'` fails immediately with `Unrecognized flag: --model in command opencode` because 2.x only accepts `--model` on `opencode run`.
+
+After (post-fix): `OPENCODE_CONFIG_CONTENT='{"permission":{"*":"allow"},"model":"openrouter/stealth/space-bunny-alpha"}' opencode --standalone --prompt '…'` starts the interactive TUI and honors the configured model (standalone required; without it, attaching to the background service ignores `OPENCODE_CONFIG_CONTENT` model).
+
+Permission block: `OPENCODE_CONFIG_CONTENT='{"permission":{"*":"allow"},"model":"…"}'` with `--standalone` continues to auto-approve tools per the permission JSON (same contract as pre-2.x launches).
+
+Busy-state plugin, turn-end `session.idle` touch, and composer queued-Enter policy are unchanged on the interactive TUI path; portable regression remains `tests/fm-busy-adapter-wiring.test.sh` and `tests/fm-tmux-submit-busy.test.sh`.
