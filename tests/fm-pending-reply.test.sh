@@ -29,6 +29,10 @@
 #  15. Remote parent-replies.status is not classified as wrong-home
 #  16. An escalated correlation stays retryable while undelivered, is never reset
 #      once delivered, and its delivery-unknown decision still closes on resolve
+#  17. A reread request resolves from the exact corr first, falls back to a
+#      receipt naming the same reread generation under another corr, never
+#      matches a different generation, and a resend of one generation reuses
+#      its open correlation instead of minting a second expectation
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -1570,6 +1574,122 @@ test_escalated_undelivered_correlation_stays_retryable() {
   pass "an escalated correlation stays retryable only while undelivered"
 }
 
+REREAD_GEN_A='.fm-inherited-config-reread.20260929T132427.00000004.rvp2Dg'
+REREAD_GEN_B='.fm-inherited-config-reread.20260929T143428.00000001.LoOlPy'
+
+test_reread_exact_corr_is_primary_match() {
+  local home state corr rec
+  home=$(setup_parent reread-exact)
+  state="$home/state"
+  export FM_PENDING_REPLY_NOW=11000
+  corr=$(fm_pending_reply_create "$home" "$state" mate "CONFIG_REREAD: $home/mate/state/$REREAD_GEN_A")
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  [ "$(fm_pending_reply_get "$rec" reread_marker)" = "$REREAD_GEN_A" ] \
+    || fail "a reread request must record its generation marker"
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  printf 'working: corr=%s Config reread received and applied\n' "$corr" > "$state/mate.status"
+  fm_pending_reply_try_resolve "$state" "$corr" || fail "exact corr receipt must resolve"
+  [ "$(fm_pending_reply_get "$rec" resolved_via)" = status ] \
+    || fail "an exact corr receipt must resolve through the primary match"
+  unset FM_PENDING_REPLY_NOW
+  pass "a reread receipt with the exact corr resolves through the primary match"
+}
+
+test_reread_marker_fallback_resolves_other_corr() {
+  local home state corr rec other
+  home=$(setup_parent reread-fallback)
+  state="$home/state"
+  export FM_PENDING_REPLY_NOW=11100
+  corr=$(fm_pending_reply_create "$home" "$state" mate "CONFIG_REREAD: $home/mate/state/$REREAD_GEN_A")
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  other=$(fm_pending_reply_new_id)
+  # The parent's own escalation quotes the request and must never self-resolve.
+  printf 'blocked [key=pending-reply-%s]: pending-reply-missed: task=mate pending-reply-id=%s request=CONFIG_REREAD: %s/mate/state/%s\n' \
+    "$corr" "$corr" "$home" "$REREAD_GEN_A" > "$state/mate.status"
+  printf 'resolved [key=x]: answered: CONFIG_REREAD: %s/mate/state/%s\n' "$home" "$REREAD_GEN_A" >> "$state/mate.status"
+  if fm_pending_reply_try_resolve "$state" "$corr"; then
+    fail "the parent's own lines naming the generation must not resolve"
+  fi
+  printf 'working: corr=%s Config reread received and applied: %s/mate/state/%s\n' \
+    "$other" "$home" "$REREAD_GEN_A" >> "$state/mate.status"
+  fm_pending_reply_try_resolve "$state" "$corr" \
+    || fail "a receipt naming the same generation must resolve via the fallback"
+  [ "$(fm_pending_reply_get "$rec" resolved_via)" = marker ] \
+    || fail "a fallback resolve must record via=marker"
+  unset FM_PENDING_REPLY_NOW
+  pass "a reread receipt naming the same generation under another corr resolves"
+}
+
+test_reread_other_generation_does_not_resolve() {
+  local home state corr legacy rec other
+  home=$(setup_parent reread-other-gen)
+  state="$home/state"
+  export FM_PENDING_REPLY_NOW=11200
+  corr=$(fm_pending_reply_create "$home" "$state" mate "CONFIG_REREAD: $home/mate/state/$REREAD_GEN_A")
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  other=$(fm_pending_reply_new_id)
+  printf 'working: corr=%s Config reread received and applied: %s/mate/state/%s\n' \
+    "$other" "$home" "$REREAD_GEN_B" > "$state/mate.status"
+  printf 'working: applied %s/mate/state/%sX and %s/mate/state/%s.pending\n' \
+    "$home" "${REREAD_GEN_A%?}" "$home" "${REREAD_GEN_A%.*}" >> "$state/mate.status"
+  if fm_pending_reply_try_resolve "$state" "$corr"; then
+    fail "a receipt for a different generation must not resolve"
+  fi
+  [ "$(phase_of "$state" "$corr")" = awaiting_report ] \
+    || fail "a different generation must leave the record awaiting its report"
+  # A legacy record without reread_marker whose summary was clipped mid-basename
+  # never derives a generation from the clipped text.
+  legacy=$(fm_pending_reply_create "$home" "$state" mate "legacy request")
+  rec=$(fm_pending_reply_path "$state" "$legacy")
+  grep -v '^reread_marker=' "$rec" > "$rec.new" && mv "$rec.new" "$rec"
+  fm_pending_reply_set "$rec" request_summary "CONFIG_REREAD: $home/mate/state/${REREAD_GEN_A:0:40}..."
+  [ -z "$(fm_pending_reply_record_marker "$rec")" ] \
+    || fail "a truncated legacy summary must not yield a generation marker"
+  fm_pending_reply_set "$rec" request_summary "CONFIG_REREAD: $home/mate/state/$REREAD_GEN_A"
+  [ "$(fm_pending_reply_record_marker "$rec")" = "$REREAD_GEN_A" ] \
+    || fail "an intact legacy summary must yield its generation marker"
+  unset FM_PENDING_REPLY_NOW
+  pass "a reread receipt for a different generation does not resolve"
+}
+
+test_reread_resend_reuses_open_corr() {
+  local dir fb log home state msg corr1 corr2 corr3 count
+  dir="$TMP_ROOT/reread-reuse"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"
+  home=$(setup_parent reread-reuse)
+  state="$home/state"
+  fm_write_secondmate_meta "$state/mate.meta" "$home/mate" "sess:fm-mate"
+  fm_write_secondmate_meta "$state/other.meta" "$home/other" "sess:fm-other"
+  msg="CONFIG_REREAD: $home/mate/state/$REREAD_GEN_A"
+  run_send "$fb" "$home" "$log" mate "$msg" || fail "first reread send failed"
+  corr1=$(fm_pending_reply_extract_corr "$(latest_record_body "$home" mate)")
+  # Escalated after delivery is still unacknowledged, so it is reused too.
+  fm_pending_reply_set "$(fm_pending_reply_path "$state" "$corr1")" phase escalated
+  run_send "$fb" "$home" "$log" mate "$msg" || fail "second reread send failed"
+  corr2=$(fm_pending_reply_extract_corr "$(latest_record_body "$home" mate)")
+  [ "$corr2" = "$corr1" ] || fail "a resend of one generation must reuse its open corr ($corr1 vs $corr2)"
+  count=$(find "$(fm_pending_reply_dir "$state")" -maxdepth 1 -type f ! -name '.*' | wc -l | tr -d ' ')
+  [ "$count" = 1 ] || fail "a resend of one generation must not mint a second record, got $count"
+  run_send "$fb" "$home" "$log" other "CONFIG_REREAD: $home/other/state/$REREAD_GEN_A" \
+    || fail "other-mate reread send failed"
+  corr3=$(fm_pending_reply_extract_corr "$(latest_record_body "$home" other)")
+  [ -n "$corr3" ] && [ "$corr3" != "$corr1" ] \
+    || fail "another mate's reread must not reuse this mate's corr"
+  run_send "$fb" "$home" "$log" mate "CONFIG_REREAD: $home/mate/state/$REREAD_GEN_B" \
+    || fail "next-generation reread send failed"
+  corr3=$(fm_pending_reply_extract_corr "$(latest_record_body "$home" mate)")
+  [ -n "$corr3" ] && [ "$corr3" != "$corr1" ] \
+    || fail "a different generation must receive its own corr"
+  printf 'done: corr=%s applied\n' "$corr1" > "$state/mate.status"
+  fm_pending_reply_try_resolve "$state" "$corr1" || fail "reused expectation should resolve"
+  run_send "$fb" "$home" "$log" mate "$msg" || fail "post-resolve reread send failed"
+  corr3=$(fm_pending_reply_extract_corr "$(latest_record_body "$home" mate)")
+  [ -n "$corr3" ] && [ "$corr3" != "$corr1" ] \
+    || fail "a resolved generation must not guard a new send"
+  pass "a resend of one reread generation reuses its open corr"
+}
+
 # --- run --------------------------------------------------------------------
 
 test_normal_correlated_reply_resolves_once
@@ -1611,5 +1731,9 @@ test_mechanical_helper_writes_parent_channel
 test_remote_parent_replies_is_not_wrong_home
 test_local_parent_replies_is_wrong_home_evidence
 test_escalated_undelivered_correlation_stays_retryable
+test_reread_exact_corr_is_primary_match
+test_reread_marker_fallback_resolves_other_corr
+test_reread_other_generation_does_not_resolve
+test_reread_resend_reuses_open_corr
 
 printf 'ok - all pending-reply tests passed\n'
