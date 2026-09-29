@@ -32,6 +32,9 @@
 #   parent_status=          absolute path of parent state/<task_id>.status
 #   parent_status_scan_signature=
 #   request_summary=        short sanitized summary (no secrets by design)
+#   reread_marker=          the inherited-config reread generation the request
+#                           names (.fm-inherited-config-reread.<generation>), or
+#                           empty; see the reread-generation note below
 #   created_epoch=          when the expectation was created
 #   delivered_epoch=        when the marked request was confirmed delivered
 #                           (empty until delivery; delivery never resolves)
@@ -59,7 +62,7 @@
 #                           escalation was closed again (see the escalation
 #                           lifecycle note below); empty until then
 #   resolved_epoch=
-#   resolved_via=           status | document | helper | empty
+#   resolved_via=           status | document | helper | marker | empty
 #   wrong_home_hits=        count of corr sightings under the secondmate home
 #   wrong_home_first_sighting= encoded path:line identity of the first sighting
 #   wrong_home_sightings=   comma-separated encoded path:line identities
@@ -95,6 +98,18 @@
 # (bin/fm-backlog-handoff.sh's receiver wake) stayed refused forever once the
 # watcher escalated between the lost transport and the next resume.
 #
+# Reread generation: a CONFIG_REREAD request (bin/fm-config-inherit-lib.sh)
+# names one generation-unique instruction file, and that basename is the
+# request's identity independent of any correlation id. Two consequences are
+# owned here. A new marked send naming a generation that already has a
+# delivered, unacknowledged record for the same task reuses that record's
+# correlation instead of minting a second expectation
+# (fm_pending_reply_open_corr_for_marker, consumed by bin/fm-send.sh). And a
+# parent status line naming that exact generation resolves the record as a
+# fallback when no line carries the exact correlation token, which stays the
+# primary match; the parent's own pending-reply lines and answered: excerpts
+# never count, and a different generation never matches.
+#
 # Sourced by bin/fm-send.sh, bin/fm-watch.sh, bin/fm-secondmate-report.sh, and
 # tests. No side effects on source. set -u / set -e safe.
 #
@@ -118,6 +133,9 @@ _FM_PENDING_REPLY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/n
 
 FM_PENDING_REPLY_SCHEMA='fm-pending-reply.v1'
 FM_PENDING_REPLY_CORR_RE='corr=[A-Fa-f0-9]{16}'
+# One reread instruction basename: generation stamp, sequence, mktemp suffix
+# (fm_config_reread_new_retry_stage_path in bin/fm-config-inherit-lib.sh).
+FM_PENDING_REPLY_REREAD_MARKER_RE='\.fm-inherited-config-reread\.[0-9]{8}T[0-9]{6}\.[0-9]{8}\.[A-Za-z0-9]+'
 FM_PENDING_REPLY_GRACE_DEFAULT=120
 
 fm_pending_reply_now() {
@@ -172,6 +190,30 @@ fm_pending_reply_corr_token() {  # <corr_id>
 fm_pending_reply_extract_corr() {  # <text>
   local text=$1
   printf '%s' "$text" | grep -oE "$FM_PENDING_REPLY_CORR_RE" 2>/dev/null | head -1 | cut -d= -f2- | tr 'A-F' 'a-f' || true
+}
+
+# Print every reread generation marker named in free text, one per line.
+fm_pending_reply_reread_markers() {  # <text>
+  printf '%s' "$1" | grep -oE "$FM_PENDING_REPLY_REREAD_MARKER_RE" 2>/dev/null || true
+}
+
+# The first reread generation marker named in free text, or empty.
+fm_pending_reply_extract_reread_marker() {  # <text>
+  fm_pending_reply_reread_markers "$1" | head -1
+}
+
+# The reread generation a record's request named, or empty. A record written
+# before reread_marker existed falls back to its summary only when the summary
+# was not truncated, so a clipped basename can never stand in for a generation.
+fm_pending_reply_record_marker() {  # <record-path>
+  local rec=$1 marker summary
+  marker=$(fm_pending_reply_get "$rec" reread_marker)
+  if [ -z "$marker" ] && ! grep -q '^reread_marker=' "$rec" 2>/dev/null; then
+    summary=$(fm_pending_reply_get "$rec" request_summary)
+    case "$summary" in *...) summary='' ;; esac
+    marker=$(fm_pending_reply_extract_reread_marker "$summary")
+  fi
+  printf '%s' "$marker"
 }
 
 # 0 if <text> carries the exact correlation token for <corr_id>.
@@ -330,6 +372,7 @@ parent_home=$parent_home
 parent_status=$status_path
 parent_status_scan_signature=
 request_summary=$summary
+reread_marker=$(fm_pending_reply_extract_reread_marker "$request_text")
 created_epoch=$now
 delivered_epoch=
 phase=awaiting_report
@@ -576,9 +619,27 @@ fm_pending_reply_line_resolves() {  # <line> <corr_id>
   fm_pending_reply_text_has_corr "$line" "$corr"
 }
 
+# 0 if a status line names exactly the reread generation <marker>. The fallback
+# match for a mate receipt that carries some other correlation id. The parent's
+# own pending-reply lines quote the request, and an answered: excerpt quotes
+# firstmate's own text, so neither is a mate report.
+fm_pending_reply_line_resolves_by_marker() {  # <line> <marker>
+  local line=$1 marker=$2 named
+  [ -n "$line" ] && [ -n "$marker" ] || return 1
+  case "$line" in
+    *pending-reply-*|*"answered: "*) return 1 ;;
+  esac
+  while IFS= read -r named; do
+    [ "$named" = "$marker" ] && return 0
+  done < <(fm_pending_reply_reread_markers "$line")
+  return 1
+}
+
 # Scan a status file for a correlated resolve. Prints the matching line or empty.
-fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id>
-  local status_file=$1 corr=$2 line
+# The exact correlation token is the primary match over the whole file; only
+# when no line carries it does an optional reread <marker> match as fallback.
+fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id> [marker]
+  local status_file=$1 corr=$2 marker=${3-} line
   [ -f "$status_file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
@@ -587,6 +648,38 @@ fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id>
       return 0
     fi
   done < "$status_file"
+  [ -n "$marker" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    if fm_pending_reply_line_resolves_by_marker "$line" "$marker"; then
+      printf '%s' "$line"
+      return 0
+    fi
+  done < "$status_file"
+  return 0
+}
+
+# The correlation of a delivered, unacknowledged record for <task_id> whose
+# request named reread generation <marker>, or empty. Undelivered records are
+# left to their owner's resend contract, and a record mid-recovery is never
+# reused, so reuse cannot race a recovery send or an unresolved delivery.
+fm_pending_reply_open_corr_for_marker() {  # <state-dir> <task_id> <marker>
+  local state=$1 task_id=$2 marker=$3 dir rec phase
+  [ -n "$task_id" ] && [ -n "$marker" ] || return 0
+  dir=$(fm_pending_reply_dir "$state")
+  [ -d "$dir" ] || return 0
+  for rec in "$dir"/*; do
+    [ -f "$rec" ] && [ ! -L "$rec" ] || continue
+    case "${rec##*/}" in .*) continue ;; esac
+    grep -qF -- "$marker" "$rec" 2>/dev/null || continue
+    [ "$(fm_pending_reply_get "$rec" task_id)" = "$task_id" ] || continue
+    [ -n "$(fm_pending_reply_get "$rec" delivered_epoch)" ] || continue
+    phase=$(fm_pending_reply_get "$rec" phase)
+    case "$phase" in awaiting_report|recovery_sent|escalated) ;; *) continue ;; esac
+    [ "$(fm_pending_reply_record_marker "$rec")" = "$marker" ] || continue
+    fm_pending_reply_get "$rec" corr_id
+    return 0
+  done
   return 0
 }
 
@@ -675,14 +768,18 @@ _fm_pending_reply_try_resolve_locked() {  # <state-dir> <corr_id> [status-file-o
     previous=$(fm_pending_reply_get "$rec" parent_status_scan_signature)
     [ "$signature" != "$previous" ] || return 1
   fi
-  line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr")
+  line=$(fm_pending_reply_find_resolve_line "$status_file" "$corr" "$(fm_pending_reply_record_marker "$rec")")
   if [ -z "$line" ]; then
     if [ -z "$status_override" ] && [ "$unconfirmed" = 0 ]; then
       fm_pending_reply_set "$rec" parent_status_scan_signature "$signature" || return 1
     fi
     return 1
   fi
-  via=$(fm_pending_reply_resolve_via_of_line "$line")
+  if fm_pending_reply_line_resolves "$line" "$corr"; then
+    via=$(fm_pending_reply_resolve_via_of_line "$line")
+  else
+    via=marker
+  fi
   now=$(fm_pending_reply_now)
   fm_pending_reply_set "$rec" phase resolved || return 1
   if [ -z "$delivered" ]; then

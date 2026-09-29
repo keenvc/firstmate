@@ -809,14 +809,22 @@ else
     # durable parent expectation before delivery. Transport success never
     # resolves that expectation (see fm-pending-reply-lib.sh).
     existing_corr_explicit=0
+    existing_corr_marker=0
     if [ "${FM_PENDING_REPLY_EXISTING_CORR+x}" = x ]; then
       existing_corr_explicit=1
       existing_corr=$FM_PENDING_REPLY_EXISTING_CORR
     else
       existing_corr=$(fm_pending_reply_extract_corr "$MESSAGE")
+      # A resent reread generation keeps its open expectation's correlation
+      # (reread-generation note in fm-pending-reply-lib.sh).
+      if [ -z "$existing_corr" ]; then
+        existing_corr=$(fm_pending_reply_open_corr_for_marker "$STATE" "$TARGET_TASK_ID" \
+          "$(fm_pending_reply_extract_reread_marker "$MESSAGE")")
+        [ -z "$existing_corr" ] || existing_corr_marker=1
+      fi
     fi
-    if [ -n "$existing_corr" ] &&
-      fm_pending_reply_corr_reusable "$STATE" "$existing_corr" "$TARGET_TASK_ID"; then
+    if [ -n "$existing_corr" ] && { [ "$existing_corr_marker" = 1 ] ||
+      fm_pending_reply_corr_reusable "$STATE" "$existing_corr" "$TARGET_TASK_ID"; }; then
       PENDING_REPLY_CORR=$existing_corr
     else
       if [ "$existing_corr_explicit" = 1 ]; then
