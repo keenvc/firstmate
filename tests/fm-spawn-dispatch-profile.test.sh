@@ -48,15 +48,6 @@ fi
 exit 0
 SH
   chmod +x "$fakebin/timeout" "$fakebin/cursor-agent"
-  cat > "$fakebin/opencode" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = --version ]; then
-  printf '%s\n' "${FM_FAKE_OPENCODE_VERSION:-opencode v2.0.19}"
-  exit 0
-fi
-exit 0
-SH
-  chmod +x "$fakebin/opencode"
   make_spawn_pi_probe "$fakebin" pi
   make_spawn_pi_probe "$fakebin" pi-signed
   printf '%s\n' "$fakebin"
