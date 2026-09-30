@@ -369,7 +369,11 @@ E2E_HOME="$E2E/home"
 E2E_FAKEBIN="$E2E/fakebin"
 mkdir -p "$E2E_HOME/state" "$E2E_HOME/data" "$E2E_HOME/config" "$E2E_FAKEBIN"
 git init -q -b main "$E2E_ROOT"
-git -C "$E2E_ROOT" commit -q --allow-empty -m init
+# A CI runner carries no global git identity, so an unconfigured commit there
+# dies with "empty ident name" and the digest this half asserts on never runs.
+# Pin the identity the same way tests/fm-backlog-atomicity.test.sh does.
+git -C "$E2E_ROOT" -c user.name=fmtest -c user.email=fmtest@example.invalid \
+  commit -q --allow-empty -m init
 
 make_hanging_tasks_axi "$E2E_FAKEBIN"
 # The reconcile sweep this half asserts on runs only under a verified fleet
@@ -391,7 +395,7 @@ exit 1
 SH
 chmod +x "$E2E_FAKEBIN/ps"
 fm_fake_exit0 "$E2E_FAKEBIN" tmux node chrome-devtools-axi gh treehouse
-fm_fake_version_tool "$E2E_FAKEBIN" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.77
+fm_fake_version_tool "$E2E_FAKEBIN" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.80
 fm_fake_version_tool "$E2E_FAKEBIN" gh-axi FM_FAKE_GH_AXI_VERSION 0.1.29
 fm_fake_version_tool "$E2E_FAKEBIN" no-mistakes FM_FAKE_NO_MISTAKES_VERSION \
   'no-mistakes version v1.46.0 (fake) 2026-06-27T00:02:18Z'
