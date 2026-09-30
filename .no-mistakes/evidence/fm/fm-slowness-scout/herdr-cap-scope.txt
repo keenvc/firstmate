@@ -1,0 +1,34 @@
+=== FM_BACKEND_HERDR_CLI_TIMEOUT=30 (endpoint timeout default 10) rc=0
+endpoint: dead (backend=herdr window=sess:p-dead)
+endpoint: alive (backend=herdr window=sess:p-live)
+-- herdr calls seen by fake herdr:
+      1 cap=10 args=pane get p-dead --session sess
+      1 cap=10 args=pane get p-live --session sess
+      1 cap=30 args=pane get p-dead --session sess
+      1 cap=30 args=pane get p-live --session sess
+-- stderr:
+=== FM_BACKEND_HERDR_CLI_TIMEOUT=3 (endpoint timeout default 10) rc=0
+endpoint: dead (backend=herdr window=sess:p-dead)
+endpoint: alive (backend=herdr window=sess:p-live)
+-- herdr calls seen by fake herdr:
+      2 cap=3 args=pane get p-dead --session sess
+      2 cap=3 args=pane get p-live --session sess
+-- stderr:
+=== FM_BACKEND_HERDR_CLI_TIMEOUT=2.5 (endpoint timeout default 10) rc=0
+endpoint: dead (backend=herdr window=sess:p-dead)
+endpoint: alive (backend=herdr window=sess:p-live)
+-- herdr calls seen by fake herdr:
+      1 cap=10 args=pane get p-dead --session sess
+      1 cap=10 args=pane get p-live --session sess
+      1 cap=2.5 args=pane get p-dead --session sess
+      1 cap=2.5 args=pane get p-live --session sess
+-- stderr:
+=== FM_BACKEND_HERDR_CLI_TIMEOUT=unset (endpoint timeout default 10) rc=0
+endpoint: dead (backend=herdr window=sess:p-dead)
+endpoint: alive (backend=herdr window=sess:p-live)
+-- herdr calls seen by fake herdr:
+      1 cap=10 args=pane get p-dead --session sess
+      1 cap=10 args=pane get p-live --session sess
+      1 cap=<unset> args=pane get p-dead --session sess
+      1 cap=<unset> args=pane get p-live --session sess
+-- stderr:

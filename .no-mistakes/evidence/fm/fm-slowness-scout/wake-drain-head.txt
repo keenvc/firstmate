@@ -1,0 +1,114 @@
+1790743514	393	signal	task-1.status	needs-decision: pick option 393
+1790743514	382	stale	task-2	no progress for 382 minutes
+1790743514	399	heartbeat	hb	tick 399
+1790743514	4	check	pr-4	ci red on job number 4
+1790743514	397	signal	task-5.status	needs-decision: pick option 397
+1790743514	386	stale	task-1	no progress for 386 minutes
+1790743514	8	check	pr-8	ci red on job number 8
+1790743514	373	signal	task-2.status	needs-decision: pick option 373
+1790743514	390	stale	task-0	no progress for 390 minutes
+1790743514	12	check	pr-12	ci red on job number 12
+1790743514	377	signal	task-6.status	needs-decision: pick option 377
+1790743514	394	stale	task-4	no progress for 394 minutes
+1790743514	16	check	pr-16	ci red on job number 16
+1790743514	381	signal	task-3.status	needs-decision: pick option 381
+1790743514	398	stale	task-3	no progress for 398 minutes
+1790743514	20	check	pr-20	ci red on job number 20
+1790743514	385	signal	task-0.status	needs-decision: pick option 385
+1790743514	24	check	pr-24	ci red on job number 24
+1790743514	389	signal	task-4.status	needs-decision: pick option 389
+1790743514	28	check	pr-28	ci red on job number 28
+1790743514	32	check	pr-32	ci red on job number 32
+1790743514	36	check	pr-36	ci red on job number 36
+1790743514	40	check	pr-40	ci red on job number 40
+1790743514	44	check	pr-44	ci red on job number 44
+1790743514	48	check	pr-48	ci red on job number 48
+1790743514	52	check	pr-52	ci red on job number 52
+1790743514	56	check	pr-56	ci red on job number 56
+1790743514	60	check	pr-60	ci red on job number 60
+1790743514	64	check	pr-64	ci red on job number 64
+1790743514	68	check	pr-68	ci red on job number 68
+1790743514	72	check	pr-72	ci red on job number 72
+1790743514	76	check	pr-76	ci red on job number 76
+1790743514	80	check	pr-80	ci red on job number 80
+1790743514	84	check	pr-84	ci red on job number 84
+1790743514	88	check	pr-88	ci red on job number 88
+1790743514	92	check	pr-92	ci red on job number 92
+1790743514	96	check	pr-96	ci red on job number 96
+1790743514	100	check	pr-100	ci red on job number 100
+1790743514	104	check	pr-104	ci red on job number 104
+1790743514	108	check	pr-108	ci red on job number 108
+1790743514	112	check	pr-112	ci red on job number 112
+1790743514	116	check	pr-116	ci red on job number 116
+1790743514	120	check	pr-120	ci red on job number 120
+1790743514	124	check	pr-124	ci red on job number 124
+1790743514	128	check	pr-128	ci red on job number 128
+1790743514	132	check	pr-132	ci red on job number 132
+1790743514	136	check	pr-136	ci red on job number 136
+1790743514	140	check	pr-140	ci red on job number 140
+1790743514	144	check	pr-144	ci red on job number 144
+1790743514	148	check	pr-148	ci red on job number 148
+1790743514	152	check	pr-152	ci red on job number 152
+1790743514	156	check	pr-156	ci red on job number 156
+1790743514	160	check	pr-160	ci red on job number 160
+1790743514	164	check	pr-164	ci red on job number 164
+1790743514	168	check	pr-168	ci red on job number 168
+1790743514	172	check	pr-172	ci red on job number 172
+1790743514	176	check	pr-176	ci red on job number 176
+1790743514	180	check	pr-180	ci red on job number 180
+1790743514	184	check	pr-184	ci red on job number 184
+1790743514	188	check	pr-188	ci red on job number 188
+1790743514	192	check	pr-192	ci red on job number 192
+1790743514	196	check	pr-196	ci red on job number 196
+1790743514	200	check	pr-200	ci red on job number 200
+1790743514	204	check	pr-204	ci red on job number 204
+1790743514	208	check	pr-208	ci red on job number 208
+1790743514	212	check	pr-212	ci red on job number 212
+1790743514	216	check	pr-216	ci red on job number 216
+1790743514	220	check	pr-220	ci red on job number 220
+1790743514	224	check	pr-224	ci red on job number 224
+1790743514	228	check	pr-228	ci red on job number 228
+1790743514	232	check	pr-232	ci red on job number 232
+1790743514	236	check	pr-236	ci red on job number 236
+1790743514	240	check	pr-240	ci red on job number 240
+1790743514	244	check	pr-244	ci red on job number 244
+1790743514	248	check	pr-248	ci red on job number 248
+1790743514	252	check	pr-252	ci red on job number 252
+1790743514	256	check	pr-256	ci red on job number 256
+1790743514	260	check	pr-260	ci red on job number 260
+1790743514	264	check	pr-264	ci red on job number 264
+1790743514	268	check	pr-268	ci red on job number 268
+1790743514	272	check	pr-272	ci red on job number 272
+1790743514	276	check	pr-276	ci red on job number 276
+1790743514	280	check	pr-280	ci red on job number 280
+1790743514	284	check	pr-284	ci red on job number 284
+1790743514	288	check	pr-288	ci red on job number 288
+1790743514	292	check	pr-292	ci red on job number 292
+1790743514	296	check	pr-296	ci red on job number 296
+1790743514	300	check	pr-300	ci red on job number 300
+1790743514	304	check	pr-304	ci red on job number 304
+1790743514	308	check	pr-308	ci red on job number 308
+1790743514	312	check	pr-312	ci red on job number 312
+1790743514	316	check	pr-316	ci red on job number 316
+1790743514	320	check	pr-320	ci red on job number 320
+1790743514	324	check	pr-324	ci red on job number 324
+1790743514	328	check	pr-328	ci red on job number 328
+1790743514	332	check	pr-332	ci red on job number 332
+1790743514	336	check	pr-336	ci red on job number 336
+1790743514	340	check	pr-340	ci red on job number 340
+1790743514	344	check	pr-344	ci red on job number 344
+1790743514	348	check	pr-348	ci red on job number 348
+1790743514	352	check	pr-352	ci red on job number 352
+1790743514	356	check	pr-356	ci red on job number 356
+1790743514	360	check	pr-360	ci red on job number 360
+1790743514	364	check	pr-364	ci red on job number 364
+1790743514	368	check	pr-368	ci red on job number 368
+1790743514	372	check	pr-372	ci red on job number 372
+1790743514	376	check	pr-376	ci red on job number 376
+1790743514	380	check	pr-380	ci red on job number 380
+1790743514	384	check	pr-384	ci red on job number 384
+1790743514	388	check	pr-388	ci red on job number 388
+1790743514	392	check	pr-392	ci red on job number 392
+1790743514	396	check	pr-396	ci red on job number 396
+1790743514	400	check	pr-400	ci red on job number 400
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 400 --recovery-generation 3606912.1790743540.aIThn3
