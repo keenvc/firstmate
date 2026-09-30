@@ -56,7 +56,10 @@
 #     an explicit unknown value because their endpoint liveness belongs to
 #     supervision rather than this snapshot path.
 #     paths.status_log.last_event is historical wake-event data only, never
-#     current state.
+#     current state. age_seconds is null when the emission time is unknown;
+#     fm-classify-lib.sh owns the optional emission-time field, and only the
+#     age derived from it is published here. A future event time leaves that age
+#     unknown rather than clamped to zero.
 #     hints.open_decisions is the keyed open-decision set returned by
 #     fm-classify-lib.sh's authoritative status_open_decisions fold and reconciled
 #     against current_state; hints.pending_decision and hints.blocked_event are
@@ -77,6 +80,10 @@
 #     each home with explicit provenance, freshness, endpoint evidence, and unknown
 #     failure reasons. Parent status and bounded terminal evidence are historical,
 #     untrusted supplements only and never override readable structured-home facts.
+#     parent_event carries age_seconds from the task's paths.status_log.last_event
+#     above. An unreadable-home fallback reports freshness.age_seconds from the
+#     observed status file's mtime instead: freshness is how fresh this snapshot's
+#     own observation is, never when a worker emitted the event.
 #     Each structured-home record carries active_children, decisions_open, holds,
 #     queued, landed, endpoints, counts, and omitted. provenance.summary_source
 #     distinguishes "local-ledger", "remote-ledger", and "remote-ledger-cache";
@@ -367,16 +374,21 @@ crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
 }
 
 status_event_json() {  # <observed-status-log> [<contract-path>]
-  local log=$1 path=${2:-$1} present=0 raw='' verb='' note=''
+  local log=$1 path=${2:-$1} present=0 raw='' verb='' note='' epoch=null age=null
   local raw_tmp note_tmp rc
   if [ -f "$log" ]; then
     present=1
     raw=$(last_nonempty_line "$log" || true)
     verb=$(status_line_verb "$raw")
     note=$(status_line_note "$raw")
+    epoch=$(status_line_at_epoch "$raw") || epoch=null
+    if [ "$epoch" != null ] && [ "$epoch" -le "$SNAPSHOT_EPOCH" ]; then
+      age=$((SNAPSHOT_EPOCH - epoch))
+    fi
   fi
   # raw and note inherit the full length of a status line, which can exceed the
   # kernel's 128KB single-argument cap, so they reach jq through --rawfile.
+  # Upstream age_seconds is preserved alongside the fork ARG_MAX transport.
   raw_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-fleet-event-raw.XXXXXX") || return 1
   note_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-fleet-event-note.XXXXXX") || { rm -f -- "$raw_tmp"; return 1; }
   if ! printf '%s' "$raw" > "$raw_tmp" || ! printf '%s' "$note" > "$note_tmp"; then
@@ -388,8 +400,9 @@ status_event_json() {  # <observed-status-log> [<contract-path>]
     --arg verb "$verb" \
     --rawfile raw "$raw_tmp" \
     --rawfile note "$note_tmp" \
+    --argjson age "$age" \
     --argjson present "$(bool_json "$present")" \
-    '{path:$path,present:$present,kind:"event_history",last_event:{state:$verb,note:$note,raw:$raw}}'
+    '{path:$path,present:$present,kind:"event_history",last_event:{state:$verb,note:$note,raw:$raw,age_seconds:$age}}'
   rc=$?
   rm -f -- "$raw_tmp" "$note_tmp"
   return "$rc"
@@ -759,11 +772,11 @@ prefetch_task_current_states() {
 }
 
 task_json_lines() {
-  local meta original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path
+  local meta original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path branch
   local remote_host remote_root current_file endpoint_file observation_line index=0
-  local pr pr_source current_json endpoint_exists agent_alive meta_json report_json worktree_json home_json
-  local event_file open_decisions_file current_state current_source pending_decision blocked_event report_present=0 pr_from_status
-  local open_decisions_tsv
+  local pr pr_source event_file current_json endpoint_exists agent_alive meta_json report_json worktree_json home_json
+  local current_state current_source pending_decision blocked_event report_present=0 pr_from_status
+  local open_decisions_tsv open_decisions_file
 
   while [ "$index" -lt "$SNAPSHOT_TASK_META_COUNT" ]; do
     meta=${SNAPSHOT_TASK_METAS[index]}
@@ -780,6 +793,7 @@ task_json_lines() {
     home=$(meta_value "$meta" home)
     projects=$(meta_value "$meta" projects)
     spawn_gen=$(meta_value "$meta" spawn_gen)
+    branch=$(meta_value "$meta" branch)
     remote_host=$(meta_value "$meta" remote_host)
     remote_root=$(meta_value "$meta" remote_root)
     if [ -n "$remote_host" ]; then
@@ -853,8 +867,11 @@ task_json_lines() {
       snapshot_task_cleanup
       return 1
     }
-    pending_decision=$(jq 'if any(.[]; .verb == "needs-decision") then 1 else 0 end' "$open_decisions_file")
-    blocked_event=$(jq 'if any(.[]; .verb == "blocked") then 1 else 0 end' "$open_decisions_file")
+    # One jq read for both hint booleans instead of one process each; the row
+    # loop runs per task, so every spawn here multiplies across the fleet.
+    read -r pending_decision blocked_event < <(jq -r '
+      [ (if any(.[]; .verb == "needs-decision") then 1 else 0 end),
+        (if any(.[]; .verb == "blocked") then 1 else 0 end) ] | @tsv' "$open_decisions_file")
 
     endpoint_exists=null
     agent_alive=not_checked
@@ -871,13 +888,13 @@ task_json_lines() {
     [ -f "$report_path" ] && report_present=1 || report_present=0
     meta_json=$(path_present_json "$original_meta" "$meta")
     report_json=$(path_present_json "$DATA/$id/report.md" "$report_path")
-    if [ -n "$worktree" ]; then worktree_json=$(path_present_json "$worktree"); else worktree_json=$(jq -n '{path:null,present:false}'); fi
+    if [ -n "$worktree" ]; then worktree_json=$(path_present_json "$worktree"); else worktree_json='{"path":null,"present":false}'; fi
     if [ -n "$home" ] && [ -n "$remote_host" ]; then
       home_json=$(jq -n --arg path "$home" '{path:$path,present:null}')
     elif [ -n "$home" ]; then
       home_json=$(path_present_json "$home")
     else
-      home_json=$(jq -n '{path:null,present:false}')
+      home_json='{"path":null,"present":false}'
     fi
 
     jq -n \
@@ -886,6 +903,7 @@ task_json_lines() {
       --arg harness "$harness" \
       --arg mode "$mode" \
       --arg yolo "$yolo" \
+      --arg branch "$branch" \
       --arg project "$project" \
       --arg worktree "$worktree" \
       --arg home "$home" \
@@ -920,6 +938,7 @@ task_json_lines() {
         harness:($harness // ""),
         mode:($mode // ""),
         yolo:($yolo // ""),
+        branch:($branch | if . == "" then null else . end),
         project:($project // ""),
         spawn_gen:($spawn_gen | if . == "" then null else . end),
         backend:$backend,
@@ -1681,6 +1700,7 @@ terminal_evidence_json() {  # <parent-task-json> <event-note> <evidence-contradi
 }
 
 parent_evidence_reconciliation_json() {  # <summary-json-file> <activities-json-file> <decisions-json-file>
+  # activities/decisions arrive as files: their JSON can exceed MAX_ARG_STRLEN.
   jq -n --slurpfile summary "$1" --slurpfile activities "$2" --slurpfile decisions "$3" '
     ($activities[0]) as $activities
     | ($decisions[0]) as $decisions
@@ -1747,7 +1767,7 @@ parent_evidence_reconciliation_json() {  # <summary-json-file> <activities-json-
 
 secondmate_current_json() {  # <parent-tasks-json-file> <output-file>
   local tasks_file=$1 output_file=$2 registry_file union_file records_file rows total_registered total shown truncated
-  local row id home host remote registered registry_error task sampled_spawn_gen status_file status_observation_file event_raw event_note event_epoch event_age
+  local row id home host remote registered registry_error task sampled_spawn_gen status_file status_observation_file event_raw event_note event_age observed_epoch observed_age
   local activity_scan activities decisions reconciliation provenance freshness reason summary_file summary_sampled summary_valid summary_invalidity state terminal terminal_contradiction contradiction
   local summary_source summary_age summary_observed summary_freshness cache_path collection_status collection_slot summary_index=0 row_transport
   local seen_homes=''
@@ -1813,11 +1833,12 @@ secondmate_current_json() {  # <parent-tasks-json-file> <output-file>
     printf '%s' "$activities" > "$row_transport/activities.json" || return 1
     printf '%s' "$activity_scan" > "$row_transport/activity-scan.json" || return 1
     printf '%s' "$decisions" > "$row_transport/decisions.json" || return 1
-    event_epoch=$(file_mtime_epoch "$status_observation_file")
-    event_age=null
-    if [ -n "$event_epoch" ]; then
-      event_age=$((SNAPSHOT_EPOCH - event_epoch))
-      [ "$event_age" -lt 0 ] && event_age=0
+    event_age=$(printf '%s' "$task" | jq -r '.paths.status_log.last_event.age_seconds // "null"')
+    observed_epoch=$(file_mtime_epoch "$status_observation_file")
+    observed_age=null
+    if [ -n "$observed_epoch" ]; then
+      observed_age=$((SNAPSHOT_EPOCH - observed_epoch))
+      [ "$observed_age" -lt 0 ] && observed_age=0
     fi
 
     reason=$registry_error
@@ -1966,7 +1987,7 @@ secondmate_current_json() {  # <parent-tasks-json-file> <output-file>
         --arg provenance "$provenance" --arg freshness "$freshness" \
         --rawfile event_raw "$row_transport/event-raw.txt" \
         --rawfile event_note "$row_transport/event-note.txt" \
-        --argjson registered "$registered" --argjson event_age "$event_age" \
+        --argjson registered "$registered" --argjson event_age "$event_age" --argjson observed_age "$observed_age" \
         --slurpfile activities "$row_transport/activities.json" \
         --slurpfile activity_scan "$row_transport/activity-scan.json" \
         --slurpfile decisions "$row_transport/decisions.json" \
@@ -1983,7 +2004,7 @@ secondmate_current_json() {  # <parent-tasks-json-file> <output-file>
          current:{state:"unknown",reason:(if $summary_sampled then "structured home state invalid: " + ($summary.reason // "unknown reason") else $reason end)},invalidity:null,
          reconcile_inventory:(if $summary_sampled then $summary.invalidity else null end),
          provenance:{selected:$provenance,structured_home:($home | if . == "" then null else . end),parent_event_role:"fallback-only-not-current"},
-         freshness:{status:$freshness,observed_at:$observed,age_seconds:$event_age},
+         freshness:{status:$freshness,observed_at:$observed,age_seconds:$observed_age},
          active_children:[],decisions_open:[],holds:[],queued:[],landed:[],endpoints:[],counts:{active_children:0,decisions_open:0,holds:0,queued:0,landed:0,endpoints:0},omitted:[],
          parent_event:{raw:$event_raw,note:$event_note,age_seconds:$event_age,open_activities:$activities,open_decisions:$decisions,activity_scan:$activity_scan},
          terminal_evidence:$terminal,contradiction:false}' >> "$records_file" || return 1
