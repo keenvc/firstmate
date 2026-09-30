@@ -272,8 +272,10 @@ fi
 POLL=${FM_POLL:-15}                   # seconds between cycles
 # The liveness beacon is touched once per cycle, immediately before the
 # terminal wait below (event_wait_or_sleep) as well as at the top of the next
-# one, so a healthy cycle's beacon can legitimately age up to POLL seconds
-# between touches. fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
+# one, and again before each *.check.sh in the serial sweep, so a healthy
+# cycle's beacon can legitimately age up to POLL seconds between touches and a
+# long but healthy check sweep never reads as a stalled watcher.
+# fm_poll_derived_grace (bin/fm-wake-lib.sh, already sourced
 # transitively above) is the single owner of the max(300, poll+60)
 # derivation - see docs/turnend-guard.md "Guard grace and the poll cadence".
 # This recomputes the library default above now that the real configured
@@ -2754,6 +2756,10 @@ while :; do
     contribution_check_output=
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
+      # A serial sweep of up to nine 30s checks can hold this watcher's beacon
+      # for minutes. Refresh it before each check so a healthy sweep never reads
+      # as a stalled watcher to the guard or a continuity supervisor.
+      touch "$STATE/.last-watcher-beat"
       is_pr_poll=0
       if [ "$(basename "$c")" = x-watch.check.sh ]; then
         if fmx_poll_shim_valid "$c" "$FM_HOME" "$FM_ROOT" \

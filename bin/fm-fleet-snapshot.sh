@@ -1545,7 +1545,27 @@ snapshot_cleanup() {
   snapshot_collection_cleanup
   cleanup_json_files
 }
+
+# Belt-and-suspenders for a prior run that was SIGKILL'd before its EXIT trap
+# could run: remove task temp directories older than a few hours before creating
+# this run's. The age gate keeps a live concurrent snapshot's directory safe,
+# while a leaked one ages out and is reaped by a later run. A reap failure is
+# never fatal to this snapshot.
+snapshot_reap_aged_task_dirs() {
+  local root=${TMPDIR:-/tmp} minutes=${FM_SNAPSHOT_TMP_REAP_MINUTES:-180}
+  case "$minutes" in ''|*[!0-9]*|0) return 0 ;; esac
+  find "$root" -maxdepth 1 -type d -name 'fm-fleet-tasks.*' -mmin +"$minutes" \
+    -exec rm -rf {} + 2>/dev/null || true
+}
+
+snapshot_reap_aged_task_dirs
+snapshot_on_signal() {  # <status>
+  snapshot_cleanup
+  exit "$1"
+}
 trap snapshot_cleanup EXIT
+trap 'snapshot_on_signal 130' INT
+trap 'snapshot_on_signal 143' TERM
 
 bounded_parent_activities_json() {  # <status-file>
   local f=$1 out rc reason script
