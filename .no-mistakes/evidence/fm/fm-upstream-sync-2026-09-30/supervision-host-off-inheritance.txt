@@ -1,0 +1,58 @@
+### BEFORE: fork main 6e20524a
+== mate gate BEFORE push (claude primary): exit=0
+== FM_HOME=$LAB fm-config-push.sh
+   config-push: /tmp/fm-lab.O0sdfn -> live secondmate homes
+   secondmate sm-lab (/tmp/fm-lab.OotKUQ):
+     crew-dispatch.json: unchanged
+     dispatch-never-send: unchanged
+     crew-harness: unchanged
+     backlog-backend: unchanged
+     backend: unchanged
+     herdr-presentation-spaces: unchanged
+     startup-memory-budget: unchanged
+     trace-context: unchanged - session-scoped
+     launch-env-allowlist: unchanged
+     claude-permission-mode: unchanged
+     lavish-axi-host: unchanged
+     keep-ai-trailers: unchanged
+     data/captain-shared.md: unchanged
+   push exit=0
+== mate config after push:
+   supervision-host
+== inherited supervision-host-off: ABSENT
+== mate own engine line preserved: codex
+== mate gate AFTER push (claude primary): exit=0 (0=host runs, 1=off)
+== control: remove primary opt-out and push again
+   mate opt-out after primary cleared: ABSENT
+   mate gate: exit=0
+
+### AFTER: merge e1eb261c
+== mate gate BEFORE push (claude primary): exit=0
+== FM_HOME=$LAB fm-config-push.sh
+   config-push: /tmp/fm-lab.sVmPlc -> live secondmate homes
+   secondmate sm-lab (/tmp/fm-lab.d6xPZW):
+     crew-dispatch.json: unchanged
+     dispatch-never-send: unchanged
+     crew-harness: unchanged
+     backlog-backend: unchanged
+     backend: unchanged
+     herdr-presentation-spaces: unchanged
+     startup-memory-budget: unchanged
+     trace-context: unchanged - session-scoped
+     launch-env-allowlist: unchanged
+     claude-permission-mode: unchanged
+     lavish-axi-host: unchanged
+     keep-ai-trailers: unchanged
+     supervision-host-off: pushed
+     data/captain-shared.md: unchanged
+   CONFIG_REREAD: secondmate sm-lab: send failed: error: refusing fleet lifecycle from inside a no-mistakes gate worktree (/home/azureuser/.no-mistakes/repos/6f716179fc56.git)
+   push exit=1
+== mate config after push:
+   supervision-host
+   supervision-host-off
+== inherited supervision-host-off: PRESENT
+== mate own engine line preserved: codex
+== mate gate AFTER push (claude primary): exit=1 (0=host runs, 1=off)
+== control: remove primary opt-out and push again
+   mate opt-out after primary cleared: ABSENT
+   mate gate: exit=0
