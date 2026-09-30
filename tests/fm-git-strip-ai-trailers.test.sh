@@ -253,13 +253,43 @@ test_empty_project_hookspath_runs_no_repository_hook() {
   pass "an empty project core.hooksPath runs no repository hook and still strips the trailer"
 }
 
+# git reaches the wrapper's own hooks lookup only where it resolves
+# core.hooksPath lazily, at hook lookup, so the pane's GIT_CONFIG override
+# supersedes the repository's broken value for git's own commands. Older git
+# expands every core.* path as it parses config instead, so a repository whose
+# core.hooksPath cannot be resolved refuses EVERY command - `git status`
+# included, with or without the override - and the two cases below can neither
+# build their fixture nor reach the wrapper. There the property they protect is
+# enforced by git itself: no repository hook is silently skipped when no command
+# runs at all. Probe the live git with the exact breakage each case uses, rather
+# than gating on a version number.
+break_hookspath_unresolvable() {  # <repo>
+  git -C "$1" config core.hooksPath '~fm-no-such-user-6171/hooks'
+}
+
+break_hookspath_valueless() {  # <repo>
+  printf '[core]\n\thooksPath\n' >>"$1/.git/config"
+}
+
+hookspath_break_still_leaves_git_usable() {  # <break-fn>
+  local probe="$TMP_ROOT/hookspath-probe-$1"
+  rm -rf "$probe"
+  fm_git_init_commit "$probe" >/dev/null 2>&1 || fail "the core.hooksPath probe repo could not be built"
+  "$1" "$probe" || fail "the core.hooksPath probe could not break core.hooksPath"
+  git -C "$probe" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 test_unresolvable_project_hookspath_still_refuses() {
   local repo hooks head err
+  hookspath_break_still_leaves_git_usable break_hookspath_unresolvable || {
+    pass "an unresolvable project core.hooksPath still refuses the commit (skipped: this git refuses every command in such a repository)"
+    return 0
+  }
   repo="$TMP_ROOT/unresolvable-hookspath"
   make_repo "$repo"
   printf 'note\n' >>"$repo/README.md"
   git -C "$repo" add README.md
-  git -C "$repo" config core.hooksPath '~fm-no-such-user-6171/hooks'
+  break_hookspath_unresolvable "$repo"
   hooks="$TMP_ROOT/hooks-unresolvable"
   "$STRIP" install "$hooks" "$repo" || fail "install should succeed with an unresolvable core.hooksPath"
   head=$(git -C "$repo" rev-parse HEAD)
@@ -273,6 +303,10 @@ test_unresolvable_project_hookspath_still_refuses() {
 
 test_valueless_project_hookspath_still_refuses() {
   local repo hooks head err
+  hookspath_break_still_leaves_git_usable break_hookspath_valueless || {
+    pass "a valueless project core.hooksPath still refuses the commit (skipped: this git refuses every command in such a repository)"
+    return 0
+  }
   repo="$TMP_ROOT/valueless-hookspath"
   make_repo "$repo"
   hooks="$TMP_ROOT/hooks-valueless"
@@ -280,7 +314,7 @@ test_valueless_project_hookspath_still_refuses() {
   head=$(git -C "$repo" rev-parse HEAD)
   printf 'note\n' >>"$repo/README.md"
   git -C "$repo" add README.md
-  printf '[core]\n\thooksPath\n' >>"$repo/.git/config"
+  break_hookspath_valueless "$repo"
   err=$(with_hooks_env "$hooks" git -C "$repo" commit -q -m 'fix: valueless hooksPath' 2>&1) &&
     fail "a commit succeeded although core.hooksPath has no value"
   assert_contains "$err" "refusing to skip its pre-commit hook" "the refusal did not name the skipped hook"
