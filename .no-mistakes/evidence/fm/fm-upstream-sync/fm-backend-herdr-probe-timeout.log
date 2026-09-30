@@ -1,0 +1,5 @@
+ok - capture read: a TERM-ignoring hung herdr is bounded and its process is reaped
+ok - composer_state probe: a TERM-ignoring hung herdr is bounded and its process is reaped
+ok - fm_backend_herdr_cli: the shared read owner bounds and reaps a hung herdr
+ok - fm_backend_herdr_cli: the long-lived server launch stays exempt from the bound
+exit=0

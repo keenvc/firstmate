@@ -1,0 +1,5 @@
+== fm-lab-gate-2190546-13671
+provision=0
+{"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[]}}
+run=0
+teardown=0
