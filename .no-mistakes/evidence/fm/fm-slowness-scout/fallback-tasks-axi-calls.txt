@@ -1,0 +1,7 @@
+--version
+update --help
+mv --help
+list --state queued --file /tmp/fm-bootstrap-tests.unt9G3/reconcile-fail-list/home/data/backlog.md
+show task-a --file /tmp/fm-bootstrap-tests.unt9G3/reconcile-fail-list/home/data/backlog.md
+show task-b --file /tmp/fm-bootstrap-tests.unt9G3/reconcile-fail-list/home/data/backlog.md
+show task-q --file /tmp/fm-bootstrap-tests.unt9G3/reconcile-fail-list/home/data/backlog.md
