@@ -4389,8 +4389,11 @@ const tree = dom.match(/<div[^>]*id="tree-container"[^>]*>([\s\S]*?)<div[^>]*id=
 if (!messages || !tree) process.exit(1);
 if (!/<div class="user-message"[^>]*>[\s\S]*Show a deterministic tool example\./.test(messages)) process.exit(1);
 if (!/<div class="assistant-message"[^>]*>[\s\S]*The deterministic tool example is complete\./.test(messages)) process.exit(1);
-if (messages.includes('<div class="hook-message"')) process.exit(1);
-if (messages.includes("[firstmate-synthetic-input]")) process.exit(1);
+// In Pi <0.99 hook messages were omitted from export messages; in Pi >=0.99 hidden
+// custom messages are rendered with class="hook-message hook-message-hidden" (display: none
+// via CSS). A non-hidden hook message or visible synthetic input violates the boundary.
+const visibleMessages = messages.replace(/<div class="hook-message\s+hook-message-hidden"[\s\S]*?<\/div>\s*<\/div>/g, "");
+if (visibleMessages.includes('<div class="hook-message"') || visibleMessages.includes("[firstmate-synthetic-input]")) process.exit(1);
 for (const current of ["CURRENT_WATCHER_E2E", "CURRENT_TURN_END_E2E", "CURRENT_AWAY_E2E", "CURRENT_FROM_FIRSTMATE_E2E", "CURRENT_LAUNCH_BRIEF_E2E"]) {
   if (!messages.includes(current)) process.exit(1);
 }
