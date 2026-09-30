@@ -1280,7 +1280,7 @@ crew_dispatch_validate() {
 # snapshot's classifier and bin/fm-secondmate-reconcile.sh's nudge stay as
 # backstops for what this cannot see. Never reads or writes another home.
 backlog_record_reconcile() {
-  local marker meta control_lock meta_lock id row label has_record=0 gate_status queued_lookup
+  local marker meta control_lock meta_lock id row label has_record=0 gate_status
   # A fresh home with no state directory has no physical task records to pair.
   # Keep bootstrap diagnostics working without creating state just for a no-op.
   [ -e "$STATE" ] || [ -L "$STATE" ] || return 0
@@ -1356,17 +1356,6 @@ backlog_record_reconcile() {
     break
   done
   [ "$has_record" = 1 ] || return 0
-  # One backlog listing for the whole sweep: this path only heals queued rows,
-  # so per-record `tasks-axi show` probes are unnecessary for every other state.
-  queued_lookup=$(
-    fm_backlog_row_list "$DATA" --state queued 2>/dev/null | awk -F, '
-      /^  [A-Za-z0-9._-]+,/ {
-        id = $1
-        sub(/^ +/, "", id)
-        print id
-      }
-    ' | LC_ALL=C sort -u
-  ) || queued_lookup=
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || [ -L "$meta" ] || continue
     if ! fm_backlog_record_present "$meta" "task record" "$STATE"; then
@@ -1387,13 +1376,6 @@ backlog_record_reconcile() {
     fi
     if [ "$(fm_meta_get "$meta" kind)" != secondmate ] \
        && [ "$(fm_meta_get "$meta" cleanup_recovery)" != orca ]; then
-      case $'\n'"${queued_lookup:-}"$'\n' in
-        *$'\n'"$id"$'\n'*) ;;
-        *)
-          fm_lock_release "$meta_lock"
-          continue
-          ;;
-      esac
       row=
       if fm_backlog_row_probe "$DATA" "$id"; then
         row=$FM_BACKLOG_ROW_STATE
