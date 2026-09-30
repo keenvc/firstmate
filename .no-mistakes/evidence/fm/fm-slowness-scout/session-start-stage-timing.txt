@@ -1,0 +1,25 @@
+# Session start on a sanitized mirror of the live /home/azureuser/firstmate fleet (lab home, backend=tmux on private socket)
+# Stage arrival times in seconds (left column) - base a774c448 vs target e0bf4136
+== base
+   0.8 LOCK
+  10.3 BOOTSTRAP
+  21.9 WAKE QUEUE
+  37.4 READ-ONCE CONTRACT
+  37.4 FLEET STATE
+  38.9 NETWORK CHECKS
+  39.0 CONTEXT
+  39.0 NEXT STEP
+  39.0 section near the top of it governs what may still be read from disk.
+  21.9 /tmp/fm-perf.3kflH7/base/bin/fm-fleet-snapshot.sh: line 1994: /usr/bin/jq: Argument list too long
+== target
+   0.8 LOCK
+   5.3 BOOTSTRAP
+  16.9 WAKE QUEUE
+  31.3 READ-ONCE CONTRACT
+  31.3 FLEET STATE
+  32.9 NETWORK CHECKS
+  33.0 CONTEXT
+  33.0 NEXT STEP
+  33.0 section near the top of it governs what may still be read from disk.
+== wake queue section base vs target: identical after normalizing home path/generation
+== home-summary.json published by detached refresh (target): {"schema":"fm-secondmate-home-summary.v1"}

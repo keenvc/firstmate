@@ -1,0 +1,21 @@
+# Session start driven against Herdr lab session fm-lab-tmocap-* with two herdr-backed task metas; logging passthrough shim records env the real herdr receives
+== user FM_BACKEND_HERDR_CLI_TIMEOUT: unset
+      4 FM_BACKEND_HERDR_CLI_TIMEOUT=10 args=pane get wZZ:p9 --session fm-lab-tmocap-1530173-11787
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+test-errors-on-output: 0
+== user FM_BACKEND_HERDR_CLI_TIMEOUT: lower
+      4 FM_BACKEND_HERDR_CLI_TIMEOUT=3 args=pane get wZZ:p9 --session fm-lab-tmocap-1530173-11787
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+test-errors-on-output: 0
+== user FM_BACKEND_HERDR_CLI_TIMEOUT: higher
+      4 FM_BACKEND_HERDR_CLI_TIMEOUT=10 args=pane get wZZ:p9 --session fm-lab-tmocap-1530173-11787
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+test-errors-on-output: 0
+== user FM_BACKEND_HERDR_CLI_TIMEOUT: frac
+      4 FM_BACKEND_HERDR_CLI_TIMEOUT=10 args=pane get wZZ:p9 --session fm-lab-tmocap-1530173-11787
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+endpoint: dead (backend=herdr window=fm-lab-tmocap-1530173-11787:wZZ:p9)
+test-errors-on-output: 0
