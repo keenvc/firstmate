@@ -1,0 +1,1178 @@
+
+================================================================================
+SESSION START - /tmp/fm-lab.EftCLz
+================================================================================
+
+LOCK
+--------------------------------------------------------------------------------
+lock acquired: harness pid 1697386
+
+BOOTSTRAP
+--------------------------------------------------------------------------------
+BOOTSTRAP_INFO: lavish-axi >=0.1.80 enables confirmed board replies; this older compatible version retains the legacy reply path, but upgrade to prevent handing back a board before its reply is accepted
+
+WAKE QUEUE
+--------------------------------------------------------------------------------
+1790745773	1	check	check-1	ci probe 1 payload
+1790745773	2999	stale	task-w2	stale row 2999
+1790745773	3000	signal	task-w1.status	turn-ended row 3000
+1790745773	4	check	check-4	ci probe 4 payload
+1790745773	7	check	check-7	ci probe 7 payload
+1790745773	10	check	check-10	ci probe 10 payload
+1790745773	13	check	check-13	ci probe 13 payload
+1790745773	16	check	check-16	ci probe 16 payload
+1790745773	19	check	check-19	ci probe 19 payload
+1790745773	22	check	check-22	ci probe 22 payload
+1790745773	25	check	check-25	ci probe 25 payload
+1790745773	28	check	check-28	ci probe 28 payload
+1790745773	31	check	check-31	ci probe 31 payload
+1790745773	34	check	check-34	ci probe 34 payload
+1790745773	37	check	check-37	ci probe 37 payload
+1790745773	40	check	check-40	ci probe 40 payload
+1790745773	43	check	check-43	ci probe 43 payload
+1790745773	46	check	check-46	ci probe 46 payload
+1790745773	49	check	check-49	ci probe 49 payload
+1790745773	52	check	check-52	ci probe 52 payload
+1790745773	55	check	check-55	ci probe 55 payload
+1790745773	58	check	check-58	ci probe 58 payload
+1790745773	61	check	check-61	ci probe 61 payload
+1790745773	64	check	check-64	ci probe 64 payload
+1790745773	67	check	check-67	ci probe 67 payload
+1790745773	70	check	check-70	ci probe 70 payload
+1790745773	73	check	check-73	ci probe 73 payload
+1790745773	76	check	check-76	ci probe 76 payload
+1790745773	79	check	check-79	ci probe 79 payload
+1790745773	82	check	check-82	ci probe 82 payload
+1790745773	85	check	check-85	ci probe 85 payload
+1790745773	88	check	check-88	ci probe 88 payload
+1790745773	91	check	check-91	ci probe 91 payload
+1790745773	94	check	check-94	ci probe 94 payload
+1790745773	97	check	check-97	ci probe 97 payload
+1790745773	100	check	check-100	ci probe 100 payload
+1790745773	103	check	check-103	ci probe 103 payload
+1790745773	106	check	check-106	ci probe 106 payload
+1790745773	109	check	check-109	ci probe 109 payload
+1790745773	112	check	check-112	ci probe 112 payload
+1790745773	115	check	check-115	ci probe 115 payload
+1790745773	118	check	check-118	ci probe 118 payload
+1790745773	121	check	check-121	ci probe 121 payload
+1790745773	124	check	check-124	ci probe 124 payload
+1790745773	127	check	check-127	ci probe 127 payload
+1790745773	130	check	check-130	ci probe 130 payload
+1790745773	133	check	check-133	ci probe 133 payload
+1790745773	136	check	check-136	ci probe 136 payload
+1790745773	139	check	check-139	ci probe 139 payload
+1790745773	142	check	check-142	ci probe 142 payload
+1790745773	145	check	check-145	ci probe 145 payload
+1790745773	148	check	check-148	ci probe 148 payload
+1790745773	151	check	check-151	ci probe 151 payload
+1790745773	154	check	check-154	ci probe 154 payload
+1790745773	157	check	check-157	ci probe 157 payload
+1790745773	160	check	check-160	ci probe 160 payload
+1790745773	163	check	check-163	ci probe 163 payload
+1790745773	166	check	check-166	ci probe 166 payload
+1790745773	169	check	check-169	ci probe 169 payload
+1790745773	172	check	check-172	ci probe 172 payload
+1790745773	175	check	check-175	ci probe 175 payload
+1790745773	178	check	check-178	ci probe 178 payload
+1790745773	181	check	check-181	ci probe 181 payload
+1790745773	184	check	check-184	ci probe 184 payload
+1790745773	187	check	check-187	ci probe 187 payload
+1790745773	190	check	check-190	ci probe 190 payload
+1790745773	193	check	check-193	ci probe 193 payload
+1790745773	196	check	check-196	ci probe 196 payload
+1790745773	199	check	check-199	ci probe 199 payload
+1790745773	202	check	check-202	ci probe 202 payload
+1790745773	205	check	check-205	ci probe 205 payload
+1790745773	208	check	check-208	ci probe 208 payload
+1790745773	211	check	check-211	ci probe 211 payload
+1790745773	214	check	check-214	ci probe 214 payload
+1790745773	217	check	check-217	ci probe 217 payload
+1790745773	220	check	check-220	ci probe 220 payload
+1790745773	223	check	check-223	ci probe 223 payload
+1790745773	226	check	check-226	ci probe 226 payload
+1790745773	229	check	check-229	ci probe 229 payload
+1790745773	232	check	check-232	ci probe 232 payload
+1790745773	235	check	check-235	ci probe 235 payload
+1790745773	238	check	check-238	ci probe 238 payload
+1790745773	241	check	check-241	ci probe 241 payload
+1790745773	244	check	check-244	ci probe 244 payload
+1790745773	247	check	check-247	ci probe 247 payload
+1790745773	250	check	check-250	ci probe 250 payload
+1790745773	253	check	check-253	ci probe 253 payload
+1790745773	256	check	check-256	ci probe 256 payload
+1790745773	259	check	check-259	ci probe 259 payload
+1790745773	262	check	check-262	ci probe 262 payload
+1790745773	265	check	check-265	ci probe 265 payload
+1790745773	268	check	check-268	ci probe 268 payload
+1790745773	271	check	check-271	ci probe 271 payload
+1790745773	274	check	check-274	ci probe 274 payload
+1790745773	277	check	check-277	ci probe 277 payload
+1790745773	280	check	check-280	ci probe 280 payload
+1790745773	283	check	check-283	ci probe 283 payload
+1790745773	286	check	check-286	ci probe 286 payload
+1790745773	289	check	check-289	ci probe 289 payload
+1790745773	292	check	check-292	ci probe 292 payload
+1790745773	295	check	check-295	ci probe 295 payload
+1790745773	298	check	check-298	ci probe 298 payload
+1790745773	301	check	check-301	ci probe 301 payload
+1790745773	304	check	check-304	ci probe 304 payload
+1790745773	307	check	check-307	ci probe 307 payload
+1790745773	310	check	check-310	ci probe 310 payload
+1790745773	313	check	check-313	ci probe 313 payload
+1790745773	316	check	check-316	ci probe 316 payload
+1790745773	319	check	check-319	ci probe 319 payload
+1790745773	322	check	check-322	ci probe 322 payload
+1790745773	325	check	check-325	ci probe 325 payload
+1790745773	328	check	check-328	ci probe 328 payload
+1790745773	331	check	check-331	ci probe 331 payload
+1790745773	334	check	check-334	ci probe 334 payload
+1790745773	337	check	check-337	ci probe 337 payload
+1790745773	340	check	check-340	ci probe 340 payload
+1790745773	343	check	check-343	ci probe 343 payload
+1790745773	346	check	check-346	ci probe 346 payload
+1790745773	349	check	check-349	ci probe 349 payload
+1790745773	352	check	check-352	ci probe 352 payload
+1790745773	355	check	check-355	ci probe 355 payload
+1790745773	358	check	check-358	ci probe 358 payload
+1790745773	361	check	check-361	ci probe 361 payload
+1790745773	364	check	check-364	ci probe 364 payload
+1790745773	367	check	check-367	ci probe 367 payload
+1790745773	370	check	check-370	ci probe 370 payload
+1790745773	373	check	check-373	ci probe 373 payload
+1790745773	376	check	check-376	ci probe 376 payload
+1790745773	379	check	check-379	ci probe 379 payload
+1790745773	382	check	check-382	ci probe 382 payload
+1790745773	385	check	check-385	ci probe 385 payload
+1790745773	388	check	check-388	ci probe 388 payload
+1790745773	391	check	check-391	ci probe 391 payload
+1790745773	394	check	check-394	ci probe 394 payload
+1790745773	397	check	check-397	ci probe 397 payload
+1790745773	400	check	check-400	ci probe 400 payload
+1790745773	403	check	check-403	ci probe 403 payload
+1790745773	406	check	check-406	ci probe 406 payload
+1790745773	409	check	check-409	ci probe 409 payload
+1790745773	412	check	check-412	ci probe 412 payload
+1790745773	415	check	check-415	ci probe 415 payload
+1790745773	418	check	check-418	ci probe 418 payload
+1790745773	421	check	check-421	ci probe 421 payload
+1790745773	424	check	check-424	ci probe 424 payload
+1790745773	427	check	check-427	ci probe 427 payload
+1790745773	430	check	check-430	ci probe 430 payload
+1790745773	433	check	check-433	ci probe 433 payload
+1790745773	436	check	check-436	ci probe 436 payload
+1790745773	439	check	check-439	ci probe 439 payload
+1790745773	442	check	check-442	ci probe 442 payload
+1790745773	445	check	check-445	ci probe 445 payload
+1790745773	448	check	check-448	ci probe 448 payload
+1790745773	451	check	check-451	ci probe 451 payload
+1790745773	454	check	check-454	ci probe 454 payload
+1790745773	457	check	check-457	ci probe 457 payload
+1790745773	460	check	check-460	ci probe 460 payload
+1790745773	463	check	check-463	ci probe 463 payload
+1790745773	466	check	check-466	ci probe 466 payload
+1790745773	469	check	check-469	ci probe 469 payload
+1790745773	472	check	check-472	ci probe 472 payload
+1790745773	475	check	check-475	ci probe 475 payload
+1790745773	478	check	check-478	ci probe 478 payload
+1790745773	481	check	check-481	ci probe 481 payload
+1790745773	484	check	check-484	ci probe 484 payload
+1790745773	487	check	check-487	ci probe 487 payload
+1790745773	490	check	check-490	ci probe 490 payload
+1790745773	493	check	check-493	ci probe 493 payload
+1790745773	496	check	check-496	ci probe 496 payload
+1790745773	499	check	check-499	ci probe 499 payload
+1790745773	502	check	check-502	ci probe 502 payload
+1790745773	505	check	check-505	ci probe 505 payload
+1790745773	508	check	check-508	ci probe 508 payload
+1790745773	511	check	check-511	ci probe 511 payload
+1790745773	514	check	check-514	ci probe 514 payload
+1790745773	517	check	check-517	ci probe 517 payload
+1790745773	520	check	check-520	ci probe 520 payload
+1790745773	523	check	check-523	ci probe 523 payload
+1790745773	526	check	check-526	ci probe 526 payload
+1790745773	529	check	check-529	ci probe 529 payload
+1790745773	532	check	check-532	ci probe 532 payload
+1790745773	535	check	check-535	ci probe 535 payload
+1790745773	538	check	check-538	ci probe 538 payload
+1790745773	541	check	check-541	ci probe 541 payload
+1790745773	544	check	check-544	ci probe 544 payload
+1790745773	547	check	check-547	ci probe 547 payload
+1790745773	550	check	check-550	ci probe 550 payload
+1790745773	553	check	check-553	ci probe 553 payload
+1790745773	556	check	check-556	ci probe 556 payload
+1790745773	559	check	check-559	ci probe 559 payload
+1790745773	562	check	check-562	ci probe 562 payload
+1790745773	565	check	check-565	ci probe 565 payload
+1790745773	568	check	check-568	ci probe 568 payload
+1790745773	571	check	check-571	ci probe 571 payload
+1790745773	574	check	check-574	ci probe 574 payload
+1790745773	577	check	check-577	ci probe 577 payload
+1790745773	580	check	check-580	ci probe 580 payload
+1790745773	583	check	check-583	ci probe 583 payload
+1790745773	586	check	check-586	ci probe 586 payload
+1790745773	589	check	check-589	ci probe 589 payload
+1790745773	592	check	check-592	ci probe 592 payload
+1790745773	595	check	check-595	ci probe 595 payload
+1790745773	598	check	check-598	ci probe 598 payload
+1790745773	601	check	check-601	ci probe 601 payload
+1790745773	604	check	check-604	ci probe 604 payload
+1790745773	607	check	check-607	ci probe 607 payload
+1790745773	610	check	check-610	ci probe 610 payload
+1790745773	613	check	check-613	ci probe 613 payload
+1790745773	616	check	check-616	ci probe 616 payload
+1790745773	619	check	check-619	ci probe 619 payload
+1790745773	622	check	check-622	ci probe 622 payload
+1790745773	625	check	check-625	ci probe 625 payload
+1790745773	628	check	check-628	ci probe 628 payload
+1790745773	631	check	check-631	ci probe 631 payload
+1790745773	634	check	check-634	ci probe 634 payload
+1790745773	637	check	check-637	ci probe 637 payload
+1790745773	640	check	check-640	ci probe 640 payload
+1790745773	643	check	check-643	ci probe 643 payload
+1790745773	646	check	check-646	ci probe 646 payload
+1790745773	649	check	check-649	ci probe 649 payload
+1790745773	652	check	check-652	ci probe 652 payload
+1790745773	655	check	check-655	ci probe 655 payload
+1790745773	658	check	check-658	ci probe 658 payload
+1790745773	661	check	check-661	ci probe 661 payload
+1790745773	664	check	check-664	ci probe 664 payload
+1790745773	667	check	check-667	ci probe 667 payload
+1790745773	670	check	check-670	ci probe 670 payload
+1790745773	673	check	check-673	ci probe 673 payload
+1790745773	676	check	check-676	ci probe 676 payload
+1790745773	679	check	check-679	ci probe 679 payload
+1790745773	682	check	check-682	ci probe 682 payload
+1790745773	685	check	check-685	ci probe 685 payload
+1790745773	688	check	check-688	ci probe 688 payload
+1790745773	691	check	check-691	ci probe 691 payload
+1790745773	694	check	check-694	ci probe 694 payload
+1790745773	697	check	check-697	ci probe 697 payload
+1790745773	700	check	check-700	ci probe 700 payload
+1790745773	703	check	check-703	ci probe 703 payload
+1790745773	706	check	check-706	ci probe 706 payload
+1790745773	709	check	check-709	ci probe 709 payload
+1790745773	712	check	check-712	ci probe 712 payload
+1790745773	715	check	check-715	ci probe 715 payload
+1790745773	718	check	check-718	ci probe 718 payload
+1790745773	721	check	check-721	ci probe 721 payload
+1790745773	724	check	check-724	ci probe 724 payload
+1790745773	727	check	check-727	ci probe 727 payload
+1790745773	730	check	check-730	ci probe 730 payload
+1790745773	733	check	check-733	ci probe 733 payload
+1790745773	736	check	check-736	ci probe 736 payload
+1790745773	739	check	check-739	ci probe 739 payload
+1790745773	742	check	check-742	ci probe 742 payload
+1790745773	745	check	check-745	ci probe 745 payload
+1790745773	748	check	check-748	ci probe 748 payload
+1790745773	751	check	check-751	ci probe 751 payload
+1790745773	754	check	check-754	ci probe 754 payload
+1790745773	757	check	check-757	ci probe 757 payload
+1790745773	760	check	check-760	ci probe 760 payload
+1790745773	763	check	check-763	ci probe 763 payload
+1790745773	766	check	check-766	ci probe 766 payload
+1790745773	769	check	check-769	ci probe 769 payload
+1790745773	772	check	check-772	ci probe 772 payload
+1790745773	775	check	check-775	ci probe 775 payload
+1790745773	778	check	check-778	ci probe 778 payload
+1790745773	781	check	check-781	ci probe 781 payload
+1790745773	784	check	check-784	ci probe 784 payload
+1790745773	787	check	check-787	ci probe 787 payload
+1790745773	790	check	check-790	ci probe 790 payload
+1790745773	793	check	check-793	ci probe 793 payload
+1790745773	796	check	check-796	ci probe 796 payload
+1790745773	799	check	check-799	ci probe 799 payload
+1790745773	802	check	check-802	ci probe 802 payload
+1790745773	805	check	check-805	ci probe 805 payload
+1790745773	808	check	check-808	ci probe 808 payload
+1790745773	811	check	check-811	ci probe 811 payload
+1790745773	814	check	check-814	ci probe 814 payload
+1790745773	817	check	check-817	ci probe 817 payload
+1790745773	820	check	check-820	ci probe 820 payload
+1790745773	823	check	check-823	ci probe 823 payload
+1790745773	826	check	check-826	ci probe 826 payload
+1790745773	829	check	check-829	ci probe 829 payload
+1790745773	832	check	check-832	ci probe 832 payload
+1790745773	835	check	check-835	ci probe 835 payload
+1790745773	838	check	check-838	ci probe 838 payload
+1790745773	841	check	check-841	ci probe 841 payload
+1790745773	844	check	check-844	ci probe 844 payload
+1790745773	847	check	check-847	ci probe 847 payload
+1790745773	850	check	check-850	ci probe 850 payload
+1790745773	853	check	check-853	ci probe 853 payload
+1790745773	856	check	check-856	ci probe 856 payload
+1790745773	859	check	check-859	ci probe 859 payload
+1790745773	862	check	check-862	ci probe 862 payload
+1790745773	865	check	check-865	ci probe 865 payload
+1790745773	868	check	check-868	ci probe 868 payload
+1790745773	871	check	check-871	ci probe 871 payload
+1790745773	874	check	check-874	ci probe 874 payload
+1790745773	877	check	check-877	ci probe 877 payload
+1790745773	880	check	check-880	ci probe 880 payload
+1790745773	883	check	check-883	ci probe 883 payload
+1790745773	886	check	check-886	ci probe 886 payload
+1790745773	889	check	check-889	ci probe 889 payload
+1790745773	892	check	check-892	ci probe 892 payload
+1790745773	895	check	check-895	ci probe 895 payload
+1790745773	898	check	check-898	ci probe 898 payload
+1790745773	901	check	check-901	ci probe 901 payload
+1790745773	904	check	check-904	ci probe 904 payload
+1790745773	907	check	check-907	ci probe 907 payload
+1790745773	910	check	check-910	ci probe 910 payload
+1790745773	913	check	check-913	ci probe 913 payload
+1790745773	916	check	check-916	ci probe 916 payload
+1790745773	919	check	check-919	ci probe 919 payload
+1790745773	922	check	check-922	ci probe 922 payload
+1790745773	925	check	check-925	ci probe 925 payload
+1790745773	928	check	check-928	ci probe 928 payload
+1790745773	931	check	check-931	ci probe 931 payload
+1790745773	934	check	check-934	ci probe 934 payload
+1790745773	937	check	check-937	ci probe 937 payload
+1790745773	940	check	check-940	ci probe 940 payload
+1790745773	943	check	check-943	ci probe 943 payload
+1790745773	946	check	check-946	ci probe 946 payload
+1790745773	949	check	check-949	ci probe 949 payload
+1790745773	952	check	check-952	ci probe 952 payload
+1790745773	955	check	check-955	ci probe 955 payload
+1790745773	958	check	check-958	ci probe 958 payload
+1790745773	961	check	check-961	ci probe 961 payload
+1790745773	964	check	check-964	ci probe 964 payload
+1790745773	967	check	check-967	ci probe 967 payload
+1790745773	970	check	check-970	ci probe 970 payload
+1790745773	973	check	check-973	ci probe 973 payload
+1790745773	976	check	check-976	ci probe 976 payload
+1790745773	979	check	check-979	ci probe 979 payload
+1790745773	982	check	check-982	ci probe 982 payload
+1790745773	985	check	check-985	ci probe 985 payload
+1790745773	988	check	check-988	ci probe 988 payload
+1790745773	991	check	check-991	ci probe 991 payload
+1790745773	994	check	check-994	ci probe 994 payload
+1790745773	997	check	check-997	ci probe 997 payload
+1790745773	1000	check	check-1000	ci probe 1000 payload
+1790745773	1003	check	check-1003	ci probe 1003 payload
+1790745773	1006	check	check-1006	ci probe 1006 payload
+1790745773	1009	check	check-1009	ci probe 1009 payload
+1790745773	1012	check	check-1012	ci probe 1012 payload
+1790745773	1015	check	check-1015	ci probe 1015 payload
+1790745773	1018	check	check-1018	ci probe 1018 payload
+1790745773	1021	check	check-1021	ci probe 1021 payload
+1790745773	1024	check	check-1024	ci probe 1024 payload
+1790745773	1027	check	check-1027	ci probe 1027 payload
+1790745773	1030	check	check-1030	ci probe 1030 payload
+1790745773	1033	check	check-1033	ci probe 1033 payload
+1790745773	1036	check	check-1036	ci probe 1036 payload
+1790745773	1039	check	check-1039	ci probe 1039 payload
+1790745773	1042	check	check-1042	ci probe 1042 payload
+1790745773	1045	check	check-1045	ci probe 1045 payload
+1790745773	1048	check	check-1048	ci probe 1048 payload
+1790745773	1051	check	check-1051	ci probe 1051 payload
+1790745773	1054	check	check-1054	ci probe 1054 payload
+1790745773	1057	check	check-1057	ci probe 1057 payload
+1790745773	1060	check	check-1060	ci probe 1060 payload
+1790745773	1063	check	check-1063	ci probe 1063 payload
+1790745773	1066	check	check-1066	ci probe 1066 payload
+1790745773	1069	check	check-1069	ci probe 1069 payload
+1790745773	1072	check	check-1072	ci probe 1072 payload
+1790745773	1075	check	check-1075	ci probe 1075 payload
+1790745773	1078	check	check-1078	ci probe 1078 payload
+1790745773	1081	check	check-1081	ci probe 1081 payload
+1790745773	1084	check	check-1084	ci probe 1084 payload
+1790745773	1087	check	check-1087	ci probe 1087 payload
+1790745773	1090	check	check-1090	ci probe 1090 payload
+1790745773	1093	check	check-1093	ci probe 1093 payload
+1790745773	1096	check	check-1096	ci probe 1096 payload
+1790745773	1099	check	check-1099	ci probe 1099 payload
+1790745773	1102	check	check-1102	ci probe 1102 payload
+1790745773	1105	check	check-1105	ci probe 1105 payload
+1790745773	1108	check	check-1108	ci probe 1108 payload
+1790745773	1111	check	check-1111	ci probe 1111 payload
+1790745773	1114	check	check-1114	ci probe 1114 payload
+1790745773	1117	check	check-1117	ci probe 1117 payload
+1790745773	1120	check	check-1120	ci probe 1120 payload
+1790745773	1123	check	check-1123	ci probe 1123 payload
+1790745773	1126	check	check-1126	ci probe 1126 payload
+1790745773	1129	check	check-1129	ci probe 1129 payload
+1790745773	1132	check	check-1132	ci probe 1132 payload
+1790745773	1135	check	check-1135	ci probe 1135 payload
+1790745773	1138	check	check-1138	ci probe 1138 payload
+1790745773	1141	check	check-1141	ci probe 1141 payload
+1790745773	1144	check	check-1144	ci probe 1144 payload
+1790745773	1147	check	check-1147	ci probe 1147 payload
+1790745773	1150	check	check-1150	ci probe 1150 payload
+1790745773	1153	check	check-1153	ci probe 1153 payload
+1790745773	1156	check	check-1156	ci probe 1156 payload
+1790745773	1159	check	check-1159	ci probe 1159 payload
+1790745773	1162	check	check-1162	ci probe 1162 payload
+1790745773	1165	check	check-1165	ci probe 1165 payload
+1790745773	1168	check	check-1168	ci probe 1168 payload
+1790745773	1171	check	check-1171	ci probe 1171 payload
+1790745773	1174	check	check-1174	ci probe 1174 payload
+1790745773	1177	check	check-1177	ci probe 1177 payload
+1790745773	1180	check	check-1180	ci probe 1180 payload
+1790745773	1183	check	check-1183	ci probe 1183 payload
+1790745773	1186	check	check-1186	ci probe 1186 payload
+1790745773	1189	check	check-1189	ci probe 1189 payload
+1790745773	1192	check	check-1192	ci probe 1192 payload
+1790745773	1195	check	check-1195	ci probe 1195 payload
+1790745773	1198	check	check-1198	ci probe 1198 payload
+1790745773	1201	check	check-1201	ci probe 1201 payload
+1790745773	1204	check	check-1204	ci probe 1204 payload
+1790745773	1207	check	check-1207	ci probe 1207 payload
+1790745773	1210	check	check-1210	ci probe 1210 payload
+1790745773	1213	check	check-1213	ci probe 1213 payload
+1790745773	1216	check	check-1216	ci probe 1216 payload
+1790745773	1219	check	check-1219	ci probe 1219 payload
+1790745773	1222	check	check-1222	ci probe 1222 payload
+1790745773	1225	check	check-1225	ci probe 1225 payload
+1790745773	1228	check	check-1228	ci probe 1228 payload
+1790745773	1231	check	check-1231	ci probe 1231 payload
+1790745773	1234	check	check-1234	ci probe 1234 payload
+1790745773	1237	check	check-1237	ci probe 1237 payload
+1790745773	1240	check	check-1240	ci probe 1240 payload
+1790745773	1243	check	check-1243	ci probe 1243 payload
+1790745773	1246	check	check-1246	ci probe 1246 payload
+1790745773	1249	check	check-1249	ci probe 1249 payload
+1790745773	1252	check	check-1252	ci probe 1252 payload
+1790745773	1255	check	check-1255	ci probe 1255 payload
+1790745773	1258	check	check-1258	ci probe 1258 payload
+1790745773	1261	check	check-1261	ci probe 1261 payload
+1790745773	1264	check	check-1264	ci probe 1264 payload
+1790745773	1267	check	check-1267	ci probe 1267 payload
+1790745773	1270	check	check-1270	ci probe 1270 payload
+1790745773	1273	check	check-1273	ci probe 1273 payload
+1790745773	1276	check	check-1276	ci probe 1276 payload
+1790745773	1279	check	check-1279	ci probe 1279 payload
+1790745773	1282	check	check-1282	ci probe 1282 payload
+1790745773	1285	check	check-1285	ci probe 1285 payload
+1790745773	1288	check	check-1288	ci probe 1288 payload
+1790745773	1291	check	check-1291	ci probe 1291 payload
+1790745773	1294	check	check-1294	ci probe 1294 payload
+1790745773	1297	check	check-1297	ci probe 1297 payload
+1790745773	1300	check	check-1300	ci probe 1300 payload
+1790745773	1303	check	check-1303	ci probe 1303 payload
+1790745773	1306	check	check-1306	ci probe 1306 payload
+1790745773	1309	check	check-1309	ci probe 1309 payload
+1790745773	1312	check	check-1312	ci probe 1312 payload
+1790745773	1315	check	check-1315	ci probe 1315 payload
+1790745773	1318	check	check-1318	ci probe 1318 payload
+1790745773	1321	check	check-1321	ci probe 1321 payload
+1790745773	1324	check	check-1324	ci probe 1324 payload
+1790745773	1327	check	check-1327	ci probe 1327 payload
+1790745773	1330	check	check-1330	ci probe 1330 payload
+1790745773	1333	check	check-1333	ci probe 1333 payload
+1790745773	1336	check	check-1336	ci probe 1336 payload
+1790745773	1339	check	check-1339	ci probe 1339 payload
+1790745773	1342	check	check-1342	ci probe 1342 payload
+1790745773	1345	check	check-1345	ci probe 1345 payload
+1790745773	1348	check	check-1348	ci probe 1348 payload
+1790745773	1351	check	check-1351	ci probe 1351 payload
+1790745773	1354	check	check-1354	ci probe 1354 payload
+1790745773	1357	check	check-1357	ci probe 1357 payload
+1790745773	1360	check	check-1360	ci probe 1360 payload
+1790745773	1363	check	check-1363	ci probe 1363 payload
+1790745773	1366	check	check-1366	ci probe 1366 payload
+1790745773	1369	check	check-1369	ci probe 1369 payload
+1790745773	1372	check	check-1372	ci probe 1372 payload
+1790745773	1375	check	check-1375	ci probe 1375 payload
+1790745773	1378	check	check-1378	ci probe 1378 payload
+1790745773	1381	check	check-1381	ci probe 1381 payload
+1790745773	1384	check	check-1384	ci probe 1384 payload
+1790745773	1387	check	check-1387	ci probe 1387 payload
+1790745773	1390	check	check-1390	ci probe 1390 payload
+1790745773	1393	check	check-1393	ci probe 1393 payload
+1790745773	1396	check	check-1396	ci probe 1396 payload
+1790745773	1399	check	check-1399	ci probe 1399 payload
+1790745773	1402	check	check-1402	ci probe 1402 payload
+1790745773	1405	check	check-1405	ci probe 1405 payload
+1790745773	1408	check	check-1408	ci probe 1408 payload
+1790745773	1411	check	check-1411	ci probe 1411 payload
+1790745773	1414	check	check-1414	ci probe 1414 payload
+1790745773	1417	check	check-1417	ci probe 1417 payload
+1790745773	1420	check	check-1420	ci probe 1420 payload
+1790745773	1423	check	check-1423	ci probe 1423 payload
+1790745773	1426	check	check-1426	ci probe 1426 payload
+1790745773	1429	check	check-1429	ci probe 1429 payload
+1790745773	1432	check	check-1432	ci probe 1432 payload
+1790745773	1435	check	check-1435	ci probe 1435 payload
+1790745773	1438	check	check-1438	ci probe 1438 payload
+1790745773	1441	check	check-1441	ci probe 1441 payload
+1790745773	1444	check	check-1444	ci probe 1444 payload
+1790745773	1447	check	check-1447	ci probe 1447 payload
+1790745773	1450	check	check-1450	ci probe 1450 payload
+1790745773	1453	check	check-1453	ci probe 1453 payload
+1790745773	1456	check	check-1456	ci probe 1456 payload
+1790745773	1459	check	check-1459	ci probe 1459 payload
+1790745773	1462	check	check-1462	ci probe 1462 payload
+1790745773	1465	check	check-1465	ci probe 1465 payload
+1790745773	1468	check	check-1468	ci probe 1468 payload
+1790745773	1471	check	check-1471	ci probe 1471 payload
+1790745773	1474	check	check-1474	ci probe 1474 payload
+1790745773	1477	check	check-1477	ci probe 1477 payload
+1790745773	1480	check	check-1480	ci probe 1480 payload
+1790745773	1483	check	check-1483	ci probe 1483 payload
+1790745773	1486	check	check-1486	ci probe 1486 payload
+1790745773	1489	check	check-1489	ci probe 1489 payload
+1790745773	1492	check	check-1492	ci probe 1492 payload
+1790745773	1495	check	check-1495	ci probe 1495 payload
+1790745773	1498	check	check-1498	ci probe 1498 payload
+1790745773	1501	check	check-1501	ci probe 1501 payload
+1790745773	1504	check	check-1504	ci probe 1504 payload
+1790745773	1507	check	check-1507	ci probe 1507 payload
+1790745773	1510	check	check-1510	ci probe 1510 payload
+1790745773	1513	check	check-1513	ci probe 1513 payload
+1790745773	1516	check	check-1516	ci probe 1516 payload
+1790745773	1519	check	check-1519	ci probe 1519 payload
+1790745773	1522	check	check-1522	ci probe 1522 payload
+1790745773	1525	check	check-1525	ci probe 1525 payload
+1790745773	1528	check	check-1528	ci probe 1528 payload
+1790745773	1531	check	check-1531	ci probe 1531 payload
+1790745773	1534	check	check-1534	ci probe 1534 payload
+1790745773	1537	check	check-1537	ci probe 1537 payload
+1790745773	1540	check	check-1540	ci probe 1540 payload
+1790745773	1543	check	check-1543	ci probe 1543 payload
+1790745773	1546	check	check-1546	ci probe 1546 payload
+1790745773	1549	check	check-1549	ci probe 1549 payload
+1790745773	1552	check	check-1552	ci probe 1552 payload
+1790745773	1555	check	check-1555	ci probe 1555 payload
+1790745773	1558	check	check-1558	ci probe 1558 payload
+1790745773	1561	check	check-1561	ci probe 1561 payload
+1790745773	1564	check	check-1564	ci probe 1564 payload
+1790745773	1567	check	check-1567	ci probe 1567 payload
+1790745773	1570	check	check-1570	ci probe 1570 payload
+1790745773	1573	check	check-1573	ci probe 1573 payload
+1790745773	1576	check	check-1576	ci probe 1576 payload
+1790745773	1579	check	check-1579	ci probe 1579 payload
+1790745773	1582	check	check-1582	ci probe 1582 payload
+1790745773	1585	check	check-1585	ci probe 1585 payload
+1790745773	1588	check	check-1588	ci probe 1588 payload
+1790745773	1591	check	check-1591	ci probe 1591 payload
+1790745773	1594	check	check-1594	ci probe 1594 payload
+1790745773	1597	check	check-1597	ci probe 1597 payload
+1790745773	1600	check	check-1600	ci probe 1600 payload
+1790745773	1603	check	check-1603	ci probe 1603 payload
+1790745773	1606	check	check-1606	ci probe 1606 payload
+1790745773	1609	check	check-1609	ci probe 1609 payload
+1790745773	1612	check	check-1612	ci probe 1612 payload
+1790745773	1615	check	check-1615	ci probe 1615 payload
+1790745773	1618	check	check-1618	ci probe 1618 payload
+1790745773	1621	check	check-1621	ci probe 1621 payload
+1790745773	1624	check	check-1624	ci probe 1624 payload
+1790745773	1627	check	check-1627	ci probe 1627 payload
+1790745773	1630	check	check-1630	ci probe 1630 payload
+1790745773	1633	check	check-1633	ci probe 1633 payload
+1790745773	1636	check	check-1636	ci probe 1636 payload
+1790745773	1639	check	check-1639	ci probe 1639 payload
+1790745773	1642	check	check-1642	ci probe 1642 payload
+1790745773	1645	check	check-1645	ci probe 1645 payload
+1790745773	1648	check	check-1648	ci probe 1648 payload
+1790745773	1651	check	check-1651	ci probe 1651 payload
+1790745773	1654	check	check-1654	ci probe 1654 payload
+1790745773	1657	check	check-1657	ci probe 1657 payload
+1790745773	1660	check	check-1660	ci probe 1660 payload
+1790745773	1663	check	check-1663	ci probe 1663 payload
+1790745773	1666	check	check-1666	ci probe 1666 payload
+1790745773	1669	check	check-1669	ci probe 1669 payload
+1790745773	1672	check	check-1672	ci probe 1672 payload
+1790745773	1675	check	check-1675	ci probe 1675 payload
+1790745773	1678	check	check-1678	ci probe 1678 payload
+1790745773	1681	check	check-1681	ci probe 1681 payload
+1790745773	1684	check	check-1684	ci probe 1684 payload
+1790745773	1687	check	check-1687	ci probe 1687 payload
+1790745773	1690	check	check-1690	ci probe 1690 payload
+1790745773	1693	check	check-1693	ci probe 1693 payload
+1790745773	1696	check	check-1696	ci probe 1696 payload
+1790745773	1699	check	check-1699	ci probe 1699 payload
+1790745773	1702	check	check-1702	ci probe 1702 payload
+1790745773	1705	check	check-1705	ci probe 1705 payload
+1790745773	1708	check	check-1708	ci probe 1708 payload
+1790745773	1711	check	check-1711	ci probe 1711 payload
+1790745773	1714	check	check-1714	ci probe 1714 payload
+1790745773	1717	check	check-1717	ci probe 1717 payload
+1790745773	1720	check	check-1720	ci probe 1720 payload
+1790745773	1723	check	check-1723	ci probe 1723 payload
+1790745773	1726	check	check-1726	ci probe 1726 payload
+1790745773	1729	check	check-1729	ci probe 1729 payload
+1790745773	1732	check	check-1732	ci probe 1732 payload
+1790745773	1735	check	check-1735	ci probe 1735 payload
+1790745773	1738	check	check-1738	ci probe 1738 payload
+1790745773	1741	check	check-1741	ci probe 1741 payload
+1790745773	1744	check	check-1744	ci probe 1744 payload
+1790745773	1747	check	check-1747	ci probe 1747 payload
+1790745773	1750	check	check-1750	ci probe 1750 payload
+1790745773	1753	check	check-1753	ci probe 1753 payload
+1790745773	1756	check	check-1756	ci probe 1756 payload
+1790745773	1759	check	check-1759	ci probe 1759 payload
+1790745773	1762	check	check-1762	ci probe 1762 payload
+1790745773	1765	check	check-1765	ci probe 1765 payload
+1790745773	1768	check	check-1768	ci probe 1768 payload
+1790745773	1771	check	check-1771	ci probe 1771 payload
+1790745773	1774	check	check-1774	ci probe 1774 payload
+1790745773	1777	check	check-1777	ci probe 1777 payload
+1790745773	1780	check	check-1780	ci probe 1780 payload
+1790745773	1783	check	check-1783	ci probe 1783 payload
+1790745773	1786	check	check-1786	ci probe 1786 payload
+1790745773	1789	check	check-1789	ci probe 1789 payload
+1790745773	1792	check	check-1792	ci probe 1792 payload
+1790745773	1795	check	check-1795	ci probe 1795 payload
+1790745773	1798	check	check-1798	ci probe 1798 payload
+1790745773	1801	check	check-1801	ci probe 1801 payload
+1790745773	1804	check	check-1804	ci probe 1804 payload
+1790745773	1807	check	check-1807	ci probe 1807 payload
+1790745773	1810	check	check-1810	ci probe 1810 payload
+1790745773	1813	check	check-1813	ci probe 1813 payload
+1790745773	1816	check	check-1816	ci probe 1816 payload
+1790745773	1819	check	check-1819	ci probe 1819 payload
+1790745773	1822	check	check-1822	ci probe 1822 payload
+1790745773	1825	check	check-1825	ci probe 1825 payload
+1790745773	1828	check	check-1828	ci probe 1828 payload
+1790745773	1831	check	check-1831	ci probe 1831 payload
+1790745773	1834	check	check-1834	ci probe 1834 payload
+1790745773	1837	check	check-1837	ci probe 1837 payload
+1790745773	1840	check	check-1840	ci probe 1840 payload
+1790745773	1843	check	check-1843	ci probe 1843 payload
+1790745773	1846	check	check-1846	ci probe 1846 payload
+1790745773	1849	check	check-1849	ci probe 1849 payload
+1790745773	1852	check	check-1852	ci probe 1852 payload
+1790745773	1855	check	check-1855	ci probe 1855 payload
+1790745773	1858	check	check-1858	ci probe 1858 payload
+1790745773	1861	check	check-1861	ci probe 1861 payload
+1790745773	1864	check	check-1864	ci probe 1864 payload
+1790745773	1867	check	check-1867	ci probe 1867 payload
+1790745773	1870	check	check-1870	ci probe 1870 payload
+1790745773	1873	check	check-1873	ci probe 1873 payload
+1790745773	1876	check	check-1876	ci probe 1876 payload
+1790745773	1879	check	check-1879	ci probe 1879 payload
+1790745773	1882	check	check-1882	ci probe 1882 payload
+1790745773	1885	check	check-1885	ci probe 1885 payload
+1790745773	1888	check	check-1888	ci probe 1888 payload
+1790745773	1891	check	check-1891	ci probe 1891 payload
+1790745773	1894	check	check-1894	ci probe 1894 payload
+1790745773	1897	check	check-1897	ci probe 1897 payload
+1790745773	1900	check	check-1900	ci probe 1900 payload
+1790745773	1903	check	check-1903	ci probe 1903 payload
+1790745773	1906	check	check-1906	ci probe 1906 payload
+1790745773	1909	check	check-1909	ci probe 1909 payload
+1790745773	1912	check	check-1912	ci probe 1912 payload
+1790745773	1915	check	check-1915	ci probe 1915 payload
+1790745773	1918	check	check-1918	ci probe 1918 payload
+1790745773	1921	check	check-1921	ci probe 1921 payload
+1790745773	1924	check	check-1924	ci probe 1924 payload
+1790745773	1927	check	check-1927	ci probe 1927 payload
+1790745773	1930	check	check-1930	ci probe 1930 payload
+1790745773	1933	check	check-1933	ci probe 1933 payload
+1790745773	1936	check	check-1936	ci probe 1936 payload
+1790745773	1939	check	check-1939	ci probe 1939 payload
+1790745773	1942	check	check-1942	ci probe 1942 payload
+1790745773	1945	check	check-1945	ci probe 1945 payload
+1790745773	1948	check	check-1948	ci probe 1948 payload
+1790745773	1951	check	check-1951	ci probe 1951 payload
+1790745773	1954	check	check-1954	ci probe 1954 payload
+1790745773	1957	check	check-1957	ci probe 1957 payload
+1790745773	1960	check	check-1960	ci probe 1960 payload
+1790745773	1963	check	check-1963	ci probe 1963 payload
+1790745773	1966	check	check-1966	ci probe 1966 payload
+1790745773	1969	check	check-1969	ci probe 1969 payload
+1790745773	1972	check	check-1972	ci probe 1972 payload
+1790745773	1975	check	check-1975	ci probe 1975 payload
+1790745773	1978	check	check-1978	ci probe 1978 payload
+1790745773	1981	check	check-1981	ci probe 1981 payload
+1790745773	1984	check	check-1984	ci probe 1984 payload
+1790745773	1987	check	check-1987	ci probe 1987 payload
+1790745773	1990	check	check-1990	ci probe 1990 payload
+1790745773	1993	check	check-1993	ci probe 1993 payload
+1790745773	1996	check	check-1996	ci probe 1996 payload
+1790745773	1999	check	check-1999	ci probe 1999 payload
+1790745773	2002	check	check-2002	ci probe 2002 payload
+1790745773	2005	check	check-2005	ci probe 2005 payload
+1790745773	2008	check	check-2008	ci probe 2008 payload
+1790745773	2011	check	check-2011	ci probe 2011 payload
+1790745773	2014	check	check-2014	ci probe 2014 payload
+1790745773	2017	check	check-2017	ci probe 2017 payload
+1790745773	2020	check	check-2020	ci probe 2020 payload
+1790745773	2023	check	check-2023	ci probe 2023 payload
+1790745773	2026	check	check-2026	ci probe 2026 payload
+1790745773	2029	check	check-2029	ci probe 2029 payload
+1790745773	2032	check	check-2032	ci probe 2032 payload
+1790745773	2035	check	check-2035	ci probe 2035 payload
+1790745773	2038	check	check-2038	ci probe 2038 payload
+1790745773	2041	check	check-2041	ci probe 2041 payload
+1790745773	2044	check	check-2044	ci probe 2044 payload
+1790745773	2047	check	check-2047	ci probe 2047 payload
+1790745773	2050	check	check-2050	ci probe 2050 payload
+1790745773	2053	check	check-2053	ci probe 2053 payload
+1790745773	2056	check	check-2056	ci probe 2056 payload
+1790745773	2059	check	check-2059	ci probe 2059 payload
+1790745773	2062	check	check-2062	ci probe 2062 payload
+1790745773	2065	check	check-2065	ci probe 2065 payload
+1790745773	2068	check	check-2068	ci probe 2068 payload
+1790745773	2071	check	check-2071	ci probe 2071 payload
+1790745773	2074	check	check-2074	ci probe 2074 payload
+1790745773	2077	check	check-2077	ci probe 2077 payload
+1790745773	2080	check	check-2080	ci probe 2080 payload
+1790745773	2083	check	check-2083	ci probe 2083 payload
+1790745773	2086	check	check-2086	ci probe 2086 payload
+1790745773	2089	check	check-2089	ci probe 2089 payload
+1790745773	2092	check	check-2092	ci probe 2092 payload
+1790745773	2095	check	check-2095	ci probe 2095 payload
+1790745773	2098	check	check-2098	ci probe 2098 payload
+1790745773	2101	check	check-2101	ci probe 2101 payload
+1790745773	2104	check	check-2104	ci probe 2104 payload
+1790745773	2107	check	check-2107	ci probe 2107 payload
+1790745773	2110	check	check-2110	ci probe 2110 payload
+1790745773	2113	check	check-2113	ci probe 2113 payload
+1790745773	2116	check	check-2116	ci probe 2116 payload
+1790745773	2119	check	check-2119	ci probe 2119 payload
+1790745773	2122	check	check-2122	ci probe 2122 payload
+1790745773	2125	check	check-2125	ci probe 2125 payload
+1790745773	2128	check	check-2128	ci probe 2128 payload
+1790745773	2131	check	check-2131	ci probe 2131 payload
+1790745773	2134	check	check-2134	ci probe 2134 payload
+1790745773	2137	check	check-2137	ci probe 2137 payload
+1790745773	2140	check	check-2140	ci probe 2140 payload
+1790745773	2143	check	check-2143	ci probe 2143 payload
+1790745773	2146	check	check-2146	ci probe 2146 payload
+1790745773	2149	check	check-2149	ci probe 2149 payload
+1790745773	2152	check	check-2152	ci probe 2152 payload
+1790745773	2155	check	check-2155	ci probe 2155 payload
+1790745773	2158	check	check-2158	ci probe 2158 payload
+1790745773	2161	check	check-2161	ci probe 2161 payload
+1790745773	2164	check	check-2164	ci probe 2164 payload
+1790745773	2167	check	check-2167	ci probe 2167 payload
+1790745773	2170	check	check-2170	ci probe 2170 payload
+1790745773	2173	check	check-2173	ci probe 2173 payload
+1790745773	2176	check	check-2176	ci probe 2176 payload
+1790745773	2179	check	check-2179	ci probe 2179 payload
+1790745773	2182	check	check-2182	ci probe 2182 payload
+1790745773	2185	check	check-2185	ci probe 2185 payload
+1790745773	2188	check	check-2188	ci probe 2188 payload
+1790745773	2191	check	check-2191	ci probe 2191 payload
+1790745773	2194	check	check-2194	ci probe 2194 payload
+1790745773	2197	check	check-2197	ci probe 2197 payload
+1790745773	2200	check	check-2200	ci probe 2200 payload
+1790745773	2203	check	check-2203	ci probe 2203 payload
+1790745773	2206	check	check-2206	ci probe 2206 payload
+1790745773	2209	check	check-2209	ci probe 2209 payload
+1790745773	2212	check	check-2212	ci probe 2212 payload
+1790745773	2215	check	check-2215	ci probe 2215 payload
+1790745773	2218	check	check-2218	ci probe 2218 payload
+1790745773	2221	check	check-2221	ci probe 2221 payload
+1790745773	2224	check	check-2224	ci probe 2224 payload
+1790745773	2227	check	check-2227	ci probe 2227 payload
+1790745773	2230	check	check-2230	ci probe 2230 payload
+1790745773	2233	check	check-2233	ci probe 2233 payload
+1790745773	2236	check	check-2236	ci probe 2236 payload
+1790745773	2239	check	check-2239	ci probe 2239 payload
+1790745773	2242	check	check-2242	ci probe 2242 payload
+1790745773	2245	check	check-2245	ci probe 2245 payload
+1790745773	2248	check	check-2248	ci probe 2248 payload
+1790745773	2251	check	check-2251	ci probe 2251 payload
+1790745773	2254	check	check-2254	ci probe 2254 payload
+1790745773	2257	check	check-2257	ci probe 2257 payload
+1790745773	2260	check	check-2260	ci probe 2260 payload
+1790745773	2263	check	check-2263	ci probe 2263 payload
+1790745773	2266	check	check-2266	ci probe 2266 payload
+1790745773	2269	check	check-2269	ci probe 2269 payload
+1790745773	2272	check	check-2272	ci probe 2272 payload
+1790745773	2275	check	check-2275	ci probe 2275 payload
+1790745773	2278	check	check-2278	ci probe 2278 payload
+1790745773	2281	check	check-2281	ci probe 2281 payload
+1790745773	2284	check	check-2284	ci probe 2284 payload
+1790745773	2287	check	check-2287	ci probe 2287 payload
+1790745773	2290	check	check-2290	ci probe 2290 payload
+1790745773	2293	check	check-2293	ci probe 2293 payload
+1790745773	2296	check	check-2296	ci probe 2296 payload
+1790745773	2299	check	check-2299	ci probe 2299 payload
+1790745773	2302	check	check-2302	ci probe 2302 payload
+1790745773	2305	check	check-2305	ci probe 2305 payload
+1790745773	2308	check	check-2308	ci probe 2308 payload
+1790745773	2311	check	check-2311	ci probe 2311 payload
+1790745773	2314	check	check-2314	ci probe 2314 payload
+1790745773	2317	check	check-2317	ci probe 2317 payload
+1790745773	2320	check	check-2320	ci probe 2320 payload
+1790745773	2323	check	check-2323	ci probe 2323 payload
+1790745773	2326	check	check-2326	ci probe 2326 payload
+1790745773	2329	check	check-2329	ci probe 2329 payload
+1790745773	2332	check	check-2332	ci probe 2332 payload
+1790745773	2335	check	check-2335	ci probe 2335 payload
+1790745773	2338	check	check-2338	ci probe 2338 payload
+1790745773	2341	check	check-2341	ci probe 2341 payload
+1790745773	2344	check	check-2344	ci probe 2344 payload
+1790745773	2347	check	check-2347	ci probe 2347 payload
+1790745773	2350	check	check-2350	ci probe 2350 payload
+1790745773	2353	check	check-2353	ci probe 2353 payload
+1790745773	2356	check	check-2356	ci probe 2356 payload
+1790745773	2359	check	check-2359	ci probe 2359 payload
+1790745773	2362	check	check-2362	ci probe 2362 payload
+1790745773	2365	check	check-2365	ci probe 2365 payload
+1790745773	2368	check	check-2368	ci probe 2368 payload
+1790745773	2371	check	check-2371	ci probe 2371 payload
+1790745773	2374	check	check-2374	ci probe 2374 payload
+1790745773	2377	check	check-2377	ci probe 2377 payload
+1790745773	2380	check	check-2380	ci probe 2380 payload
+1790745773	2383	check	check-2383	ci probe 2383 payload
+1790745773	2386	check	check-2386	ci probe 2386 payload
+1790745773	2389	check	check-2389	ci probe 2389 payload
+1790745773	2392	check	check-2392	ci probe 2392 payload
+1790745773	2395	check	check-2395	ci probe 2395 payload
+1790745773	2398	check	check-2398	ci probe 2398 payload
+1790745773	2401	check	check-2401	ci probe 2401 payload
+1790745773	2404	check	check-2404	ci probe 2404 payload
+1790745773	2407	check	check-2407	ci probe 2407 payload
+1790745773	2410	check	check-2410	ci probe 2410 payload
+1790745773	2413	check	check-2413	ci probe 2413 payload
+1790745773	2416	check	check-2416	ci probe 2416 payload
+1790745773	2419	check	check-2419	ci probe 2419 payload
+1790745773	2422	check	check-2422	ci probe 2422 payload
+1790745773	2425	check	check-2425	ci probe 2425 payload
+1790745773	2428	check	check-2428	ci probe 2428 payload
+1790745773	2431	check	check-2431	ci probe 2431 payload
+1790745773	2434	check	check-2434	ci probe 2434 payload
+1790745773	2437	check	check-2437	ci probe 2437 payload
+1790745773	2440	check	check-2440	ci probe 2440 payload
+1790745773	2443	check	check-2443	ci probe 2443 payload
+1790745773	2446	check	check-2446	ci probe 2446 payload
+1790745773	2449	check	check-2449	ci probe 2449 payload
+1790745773	2452	check	check-2452	ci probe 2452 payload
+1790745773	2455	check	check-2455	ci probe 2455 payload
+1790745773	2458	check	check-2458	ci probe 2458 payload
+1790745773	2461	check	check-2461	ci probe 2461 payload
+1790745773	2464	check	check-2464	ci probe 2464 payload
+1790745773	2467	check	check-2467	ci probe 2467 payload
+1790745773	2470	check	check-2470	ci probe 2470 payload
+1790745773	2473	check	check-2473	ci probe 2473 payload
+1790745773	2476	check	check-2476	ci probe 2476 payload
+1790745773	2479	check	check-2479	ci probe 2479 payload
+1790745773	2482	check	check-2482	ci probe 2482 payload
+1790745773	2485	check	check-2485	ci probe 2485 payload
+1790745773	2488	check	check-2488	ci probe 2488 payload
+1790745773	2491	check	check-2491	ci probe 2491 payload
+1790745773	2494	check	check-2494	ci probe 2494 payload
+1790745773	2497	check	check-2497	ci probe 2497 payload
+1790745773	2500	check	check-2500	ci probe 2500 payload
+1790745773	2503	check	check-2503	ci probe 2503 payload
+1790745773	2506	check	check-2506	ci probe 2506 payload
+1790745773	2509	check	check-2509	ci probe 2509 payload
+1790745773	2512	check	check-2512	ci probe 2512 payload
+1790745773	2515	check	check-2515	ci probe 2515 payload
+1790745773	2518	check	check-2518	ci probe 2518 payload
+1790745773	2521	check	check-2521	ci probe 2521 payload
+1790745773	2524	check	check-2524	ci probe 2524 payload
+1790745773	2527	check	check-2527	ci probe 2527 payload
+1790745773	2530	check	check-2530	ci probe 2530 payload
+1790745773	2533	check	check-2533	ci probe 2533 payload
+1790745773	2536	check	check-2536	ci probe 2536 payload
+1790745773	2539	check	check-2539	ci probe 2539 payload
+1790745773	2542	check	check-2542	ci probe 2542 payload
+1790745773	2545	check	check-2545	ci probe 2545 payload
+1790745773	2548	check	check-2548	ci probe 2548 payload
+1790745773	2551	check	check-2551	ci probe 2551 payload
+1790745773	2554	check	check-2554	ci probe 2554 payload
+1790745773	2557	check	check-2557	ci probe 2557 payload
+1790745773	2560	check	check-2560	ci probe 2560 payload
+1790745773	2563	check	check-2563	ci probe 2563 payload
+1790745773	2566	check	check-2566	ci probe 2566 payload
+1790745773	2569	check	check-2569	ci probe 2569 payload
+1790745773	2572	check	check-2572	ci probe 2572 payload
+1790745773	2575	check	check-2575	ci probe 2575 payload
+1790745773	2578	check	check-2578	ci probe 2578 payload
+1790745773	2581	check	check-2581	ci probe 2581 payload
+1790745773	2584	check	check-2584	ci probe 2584 payload
+1790745773	2587	check	check-2587	ci probe 2587 payload
+1790745773	2590	check	check-2590	ci probe 2590 payload
+1790745773	2593	check	check-2593	ci probe 2593 payload
+1790745773	2596	check	check-2596	ci probe 2596 payload
+1790745773	2599	check	check-2599	ci probe 2599 payload
+1790745773	2602	check	check-2602	ci probe 2602 payload
+1790745773	2605	check	check-2605	ci probe 2605 payload
+1790745773	2608	check	check-2608	ci probe 2608 payload
+1790745773	2611	check	check-2611	ci probe 2611 payload
+1790745773	2614	check	check-2614	ci probe 2614 payload
+1790745773	2617	check	check-2617	ci probe 2617 payload
+1790745773	2620	check	check-2620	ci probe 2620 payload
+1790745773	2623	check	check-2623	ci probe 2623 payload
+1790745773	2626	check	check-2626	ci probe 2626 payload
+1790745773	2629	check	check-2629	ci probe 2629 payload
+1790745773	2632	check	check-2632	ci probe 2632 payload
+1790745773	2635	check	check-2635	ci probe 2635 payload
+1790745773	2638	check	check-2638	ci probe 2638 payload
+1790745773	2641	check	check-2641	ci probe 2641 payload
+1790745773	2644	check	check-2644	ci probe 2644 payload
+1790745773	2647	check	check-2647	ci probe 2647 payload
+1790745773	2650	check	check-2650	ci probe 2650 payload
+1790745773	2653	check	check-2653	ci probe 2653 payload
+1790745773	2656	check	check-2656	ci probe 2656 payload
+1790745773	2659	check	check-2659	ci probe 2659 payload
+1790745773	2662	check	check-2662	ci probe 2662 payload
+1790745773	2665	check	check-2665	ci probe 2665 payload
+1790745773	2668	check	check-2668	ci probe 2668 payload
+1790745773	2671	check	check-2671	ci probe 2671 payload
+1790745773	2674	check	check-2674	ci probe 2674 payload
+1790745773	2677	check	check-2677	ci probe 2677 payload
+1790745773	2680	check	check-2680	ci probe 2680 payload
+1790745773	2683	check	check-2683	ci probe 2683 payload
+1790745773	2686	check	check-2686	ci probe 2686 payload
+1790745773	2689	check	check-2689	ci probe 2689 payload
+1790745773	2692	check	check-2692	ci probe 2692 payload
+1790745773	2695	check	check-2695	ci probe 2695 payload
+1790745773	2698	check	check-2698	ci probe 2698 payload
+1790745773	2701	check	check-2701	ci probe 2701 payload
+1790745773	2704	check	check-2704	ci probe 2704 payload
+1790745773	2707	check	check-2707	ci probe 2707 payload
+1790745773	2710	check	check-2710	ci probe 2710 payload
+1790745773	2713	check	check-2713	ci probe 2713 payload
+1790745773	2716	check	check-2716	ci probe 2716 payload
+1790745773	2719	check	check-2719	ci probe 2719 payload
+1790745773	2722	check	check-2722	ci probe 2722 payload
+1790745773	2725	check	check-2725	ci probe 2725 payload
+1790745773	2728	check	check-2728	ci probe 2728 payload
+1790745773	2731	check	check-2731	ci probe 2731 payload
+1790745773	2734	check	check-2734	ci probe 2734 payload
+1790745773	2737	check	check-2737	ci probe 2737 payload
+1790745773	2740	check	check-2740	ci probe 2740 payload
+1790745773	2743	check	check-2743	ci probe 2743 payload
+1790745773	2746	check	check-2746	ci probe 2746 payload
+1790745773	2749	check	check-2749	ci probe 2749 payload
+1790745773	2752	check	check-2752	ci probe 2752 payload
+1790745773	2755	check	check-2755	ci probe 2755 payload
+1790745773	2758	check	check-2758	ci probe 2758 payload
+1790745773	2761	check	check-2761	ci probe 2761 payload
+1790745773	2764	check	check-2764	ci probe 2764 payload
+1790745773	2767	check	check-2767	ci probe 2767 payload
+1790745773	2770	check	check-2770	ci probe 2770 payload
+1790745773	2773	check	check-2773	ci probe 2773 payload
+1790745773	2776	check	check-2776	ci probe 2776 payload
+1790745773	2779	check	check-2779	ci probe 2779 payload
+1790745773	2782	check	check-2782	ci probe 2782 payload
+1790745773	2785	check	check-2785	ci probe 2785 payload
+1790745773	2788	check	check-2788	ci probe 2788 payload
+1790745773	2791	check	check-2791	ci probe 2791 payload
+1790745773	2794	check	check-2794	ci probe 2794 payload
+1790745773	2797	check	check-2797	ci probe 2797 payload
+1790745773	2800	check	check-2800	ci probe 2800 payload
+1790745773	2803	check	check-2803	ci probe 2803 payload
+1790745773	2806	check	check-2806	ci probe 2806 payload
+1790745773	2809	check	check-2809	ci probe 2809 payload
+1790745773	2812	check	check-2812	ci probe 2812 payload
+1790745773	2815	check	check-2815	ci probe 2815 payload
+1790745773	2818	check	check-2818	ci probe 2818 payload
+1790745773	2821	check	check-2821	ci probe 2821 payload
+1790745773	2824	check	check-2824	ci probe 2824 payload
+1790745773	2827	check	check-2827	ci probe 2827 payload
+1790745773	2830	check	check-2830	ci probe 2830 payload
+1790745773	2833	check	check-2833	ci probe 2833 payload
+1790745773	2836	check	check-2836	ci probe 2836 payload
+1790745773	2839	check	check-2839	ci probe 2839 payload
+1790745773	2842	check	check-2842	ci probe 2842 payload
+1790745773	2845	check	check-2845	ci probe 2845 payload
+1790745773	2848	check	check-2848	ci probe 2848 payload
+1790745773	2851	check	check-2851	ci probe 2851 payload
+1790745773	2854	check	check-2854	ci probe 2854 payload
+1790745773	2857	check	check-2857	ci probe 2857 payload
+1790745773	2860	check	check-2860	ci probe 2860 payload
+1790745773	2863	check	check-2863	ci probe 2863 payload
+1790745773	2866	check	check-2866	ci probe 2866 payload
+1790745773	2869	check	check-2869	ci probe 2869 payload
+1790745773	2872	check	check-2872	ci probe 2872 payload
+1790745773	2875	check	check-2875	ci probe 2875 payload
+1790745773	2878	check	check-2878	ci probe 2878 payload
+1790745773	2881	check	check-2881	ci probe 2881 payload
+1790745773	2884	check	check-2884	ci probe 2884 payload
+1790745773	2887	check	check-2887	ci probe 2887 payload
+1790745773	2890	check	check-2890	ci probe 2890 payload
+1790745773	2893	check	check-2893	ci probe 2893 payload
+1790745773	2896	check	check-2896	ci probe 2896 payload
+1790745773	2899	check	check-2899	ci probe 2899 payload
+1790745773	2902	check	check-2902	ci probe 2902 payload
+1790745773	2905	check	check-2905	ci probe 2905 payload
+1790745773	2908	check	check-2908	ci probe 2908 payload
+1790745773	2911	check	check-2911	ci probe 2911 payload
+1790745773	2914	check	check-2914	ci probe 2914 payload
+1790745773	2917	check	check-2917	ci probe 2917 payload
+1790745773	2920	check	check-2920	ci probe 2920 payload
+1790745773	2923	check	check-2923	ci probe 2923 payload
+1790745773	2926	check	check-2926	ci probe 2926 payload
+1790745773	2929	check	check-2929	ci probe 2929 payload
+1790745773	2932	check	check-2932	ci probe 2932 payload
+1790745773	2935	check	check-2935	ci probe 2935 payload
+1790745773	2938	check	check-2938	ci probe 2938 payload
+1790745773	2941	check	check-2941	ci probe 2941 payload
+1790745773	2944	check	check-2944	ci probe 2944 payload
+1790745773	2947	check	check-2947	ci probe 2947 payload
+1790745773	2950	check	check-2950	ci probe 2950 payload
+1790745773	2953	check	check-2953	ci probe 2953 payload
+1790745773	2956	check	check-2956	ci probe 2956 payload
+1790745773	2959	check	check-2959	ci probe 2959 payload
+1790745773	2962	check	check-2962	ci probe 2962 payload
+1790745773	2965	check	check-2965	ci probe 2965 payload
+1790745773	2968	check	check-2968	ci probe 2968 payload
+1790745773	2971	check	check-2971	ci probe 2971 payload
+1790745773	2974	check	check-2974	ci probe 2974 payload
+1790745773	2977	check	check-2977	ci probe 2977 payload
+1790745773	2980	check	check-2980	ci probe 2980 payload
+1790745773	2983	check	check-2983	ci probe 2983 payload
+1790745773	2986	check	check-2986	ci probe 2986 payload
+1790745773	2989	check	check-2989	ci probe 2989 payload
+1790745773	2992	check	check-2992	ci probe 2992 payload
+1790745773	2995	check	check-2995	ci probe 2995 payload
+1790745773	2998	check	check-2998	ci probe 2998 payload
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 3000 --recovery-generation 1305723.1790745148.aJc0A3
+wake annotation: latest wake-EVENT observed at drain, not current state: task-w1.status: working: lab task w1 marker
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+WARNING: queued wakes pending - drain them with bin/fm-wake-drain.sh before anything else.
+================================================================================
+SUPERVISION OPERATING INSTRUCTIONS - primary harness: claude
+================================================================================
+Current state:
+- Lock: held by this session; this session owns normal supervision unless away mode says otherwise.
+- Away/quiet mode: inactive.
+- X mode: inactive; use the default watcher cadence.
+- Supervision host: on; it takes away-posture wakes and, where the dialog mirror is verified, eligible attended wakes itself, and hands the rest to you (protocol at the end of this block).
+- Ordinary wake: the Stop-owned auto-arm (bin/fm-claude-stop-autoarm.sh) already owns watcher continuity; drain and handle the wake, and do not arm another cycle yourself.
+
+Mode: Claude Stop-hook-owned supervision.
+
+When this session owns supervision and away mode is not active:
+1. Drain first with `bin/fm-wake-drain.sh`.
+   After handling all emitted wakes and reconciling open decisions and unread status lines, run the exact `--ack-through` command printed as `WAKE_ACK_REQUIRED`; until then the work remains durable for idempotent re-handling after interruption.
+2. Routine watcher arm and re-arm are owned by the Stop `asyncRewake` hook (`bin/fm-claude-stop-autoarm.sh`), never by you.
+   Every turn end while supervision is needed launches or attaches one home-scoped watcher cycle with no model command and no model tokens.
+   An actionable close wakes you through the hook's exit-2 rewake, delivered as a `Stop hook feedback` message.
+3. On a `Stop hook feedback` wake (`signal:`, `stale:`, `check:`, or `heartbeat`), run `bin/fm-wake-drain.sh` first and handle the wake.
+   Do not run `bin/fm-watch-arm.sh` after an ordinary wake; the next turn end re-arms automatically when supervision is still needed.
+   Do not invent a wake from an attach-status line alone; drain and act only on real wake records, the drain's `OPEN DECISIONS` and `UNREAD STATUS` entries, or a real watcher reason line.
+4. On the one `Stop hook feedback` automatic-mechanism failure notice (`firstmate watcher auto-arm FAILED ...`), drain, inspect the automatic mechanism failure, and do not turn the notice into a repeating manual-arm loop.
+5. If the Stop hook does not claim the home or reports an exhausted failure, inspect its registration and watcher startup path before ending blind.
+   Keep the Stop-owned automatic mechanism as the only Claude arm owner.
+6. Treat `watcher: started ...` and `watcher: attached ...` inside automatic arm output as proof that one live cycle exists.
+   On attach, the arm follows verified identity-matched successors instead of exiting when the first cycle ends.
+7. The durable wake queue preserves actionable events between a rewake and the next Stop-launched arm, while the bounded turn-end guard prevents a blind Stop when recovery did not start.
+   No PreToolUse hook denies fleet commands based on watcher status.
+   [`watcher-continuity.md`](../watcher-continuity.md) owns the exact session-lock recovery boundary.
+8. The turn-end guard (`bin/fm-turnend-guard.sh --claude`) remains the final backstop.
+   It requires the PID-strict live-watcher and fresh-beacon predicate at the Stop boundary, except for the Claude-specific foreign-live-owner safe exit owned by [`turnend-guard.md`](../turnend-guard.md#guard-predicates); that document also owns the distinct model-aware mid-turn pull-guard rules.
+   Otherwise, it allows the stop when a watcher is healthy or an open auto-arm generation claim owns recovery, while fresh failure epochs advance the bounded one-time attended fail-open progression described there.
+9. Waiting on the hook-owned cycle is silent: do not send idle progress while the watcher is parked.
+
+The watcher itself remains `bin/fm-watch.sh`, and `bin/fm-watch-arm.sh` remains the verified arm wrapper that the Stop hook foregrounds on a home that opted out of the [supervision host](../supervision-host.md) (`config/supervision-host` holding `off`).
+Re-arm attaches to an existing healthy cycle when one is already present and follows its verified successor chain.
+See [`watcher-continuity.md`](../watcher-continuity.md) for the arm-layer successor and clean-close failure contract and the Claude ownership model.
+
+Supervision host: on for this home (`config/supervision-host` holding `off` turns it off; [`supervision-host.md`](../supervision-host.md) owns the design).
+The Stop hook runs the supervision host in the arm's place, and everything above still holds with these additions:
+1. Attended (no away record, including a quiet-mode record; see [Postures](../supervision-host.md#postures)): a headless supervision session takes the wakes the supervision branch may take and never wakes you for a routine outcome, so fewer wakes reach you; check wakes, decision wakes, and whatever it cannot take still reach you exactly as above.
+   `supervision-host: branch-outcome: ...` means it handled a wake and recorded captain outcomes for you: run `bin/fm-wake-drain.sh`, process each entry of its `BRANCH OUTCOMES` section as firstmate from the task's current state, because each entry says how long ago it was recorded (tell the captain, land or merge what is ready, answer or escalate a decision, or act on a blocker; your reply covers only entries still open, as if a settled one, such as a PR since merged, had never been listed), then run the `mark-processed` acknowledgement it prints; every drain presents them again until you do.
+   `supervision-host: the supervision session could not take this wake ...` means the wake is yours: handle it as above.
+   A failing turn may include a `supervision-host:` health note about repeated engine errors: tell the captain when it matters and handle the handed-back wake as usual; during cooldown later attended closes reach you unchanged.
+   Routine outcomes never wake you; your next drain lists only visible routine outcomes under `BRANCH OUTCOMES, ROUTINE` for awareness, with nothing to acknowledge. Silent rows do not appear there, but remain available through `bin/fm-branch-outcome.sh list`.
+2. Away (an away record exists and no daemon runs): the host hands each wake to a headless away session that runs the supervision branch's contract under the record, and you are parked.
+   Only a wake the host hands back reaches you, as `Stop hook feedback` carrying the close plus one `supervision-host: <why>` line.
+   That wake is automatic supervision, not the captain's return: drain and handle it under the away posture, and never run the return from it.
+   After the return, a `supervision-host:` line naming the captain's return during a turn means that turn has visible outcomes missing from the return brief, whether the wake was handled or handed back: relay every following `supervision-host: outcome ...` line to the captain (the rows also remain in `bin/fm-branch-outcome.sh list`), then drain and handle any queued wake before acknowledging.
+   Each such visible outcome is also a queued `check: supervision-host outcome <n> ... was recorded after the captain returned` wake, which the drain presents until acknowledged: relay each outcome once, whichever arrives first, and acknowledge its `BRANCH OUTCOMES` entry too when it has one. Silent outcomes remain in the store but do not generate a handoff line or check wake.
+3. `supervision-host: cycle boundary ...` means the host ended its park at its bound: run `bin/fm-wake-drain.sh`, handle whatever it presents, run its printed acknowledgement (an empty queue prints `--ack-through 0`), and end the turn; the next park starts at that turn end.
+4. A guarded command that exits 6 naming the branch actor's lease means the supervision session is handling that task right now: leave the lease alone and retry after it releases, which it does when its turn ends.
+5. Captain outcomes the away session records stay in the outcome store until the return drain presents them; the return brief (`bin/fm-afk-return.sh`) counts them and points you to the `BRANCH OUTCOMES` section for processing and acknowledgement ([Captain outcomes](../supervision-host.md#captain-outcomes)).
+6. `/afk` writes only the record here (`bin/fm-afk-launch.sh start-native` refuses the away daemon on this home); for `/quiet`, follow the [quiet skill](../../.agents/skills/quiet/SKILL.md).
+
+
+================================================================================
+READ-ONCE CONTRACT
+================================================================================
+Everything below is printed in full for this session start: every state/*.meta,
+a compact data/backlog.md listing, a bounded tail of every state/*.status,
+data/projects.md, data/secondmates.md, data/captain.md, data/captain-shared.md,
+and data/learnings.md.
+Do NOT re-read any of them after reading this digest, and do NOT bulk-read
+data/backlog.md or state/*.status: re-reading everything defeats the entire
+point of this command.
+
+Go to a source directly only when:
+  - this digest flagged it ABSENT (then rebuild or create it per AGENTS.md),
+  - its contents looked unparseable or corrupt,
+  - an individual full status log is needed for older wake-event history, or a
+    status line was capped and its tail matters (each task's full log path is
+    printed with its tail),
+  - a full task body is needed (bin/fm-tasks-axi.sh show <id> --full, or data/backlog.md),
+  - the backlog listing disclosed omitted queued items and this turn needs them,
+  - the NETWORK CHECKS section reported its checks still IN PROGRESS and this
+    turn needs their verdict (bin/fm-startup-network.sh report),
+  - or a STARTUP TRUNCATED banner named the stage that would have printed it, in
+    which case that stage's sources were never emitted and must be reconciled.
+
+================================================================================
+FLEET STATE
+================================================================================
+
+data/backlog.md
+--------------------------------------------------------------------------------
+ABSENT
+
+Work under way (state/*.meta)
+--------------------------------------------------------------------------------
+
+--- task-w1 ---
+window=crew:w1
+kind=ship
+backend=tmux
+endpoint: alive (backend=tmux window=crew:w1)
+status tail (last 5 line(s), each capped at 220 characters, wake-EVENT history, not current state; full log: /tmp/fm-lab.EftCLz/state/task-w1.status):
+working: lab task w1 marker
+
+--- task-w2 ---
+window=crew:w2
+kind=ship
+backend=tmux
+endpoint: alive (backend=tmux window=crew:w2)
+status tail (last 5 line(s), each capped at 220 characters, wake-EVENT history, not current state; full log: /tmp/fm-lab.EftCLz/state/task-w2.status):
+working: lab task w2 marker
+
+Orphan status logs (state/*.status without matching .meta)
+--------------------------------------------------------------------------------
+(none)
+
+AFK
+--------------------------------------------------------------------------------
+absent
+
+================================================================================
+NETWORK CHECKS
+================================================================================
+completed off the startup path in 3s: GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, and inactive terminal-outcome reconciliation.
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+These ran AFTER the sections above were composed, so re-read any record a line here names.
+
+================================================================================
+CONTEXT
+================================================================================
+
+data/projects.md
+--------------------------------------------------------------------------------
+- lab [no-mistakes] - lab project (added 2026-09-30)
+
+data/secondmates.md
+--------------------------------------------------------------------------------
+ABSENT
+
+data/captain.md
+--------------------------------------------------------------------------------
+ABSENT
+
+data/captain-shared.md (shared, main-authoritative, read-only in secondmate homes)
+--------------------------------------------------------------------------------
+ABSENT
+
+data/learnings.md
+--------------------------------------------------------------------------------
+ABSENT
+
+================================================================================
+NEXT STEP
+================================================================================
+Follow the supervision operating instructions block above for harness 'claude'.
+This script never starts supervision itself.
+
+The digest above is complete for this session start. The READ-ONCE CONTRACT
+section near the top of it governs what may still be read from disk.
+
+--- rc=0 elapsed=10.11s summary_present_at_return=yes

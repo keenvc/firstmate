@@ -1,0 +1,29 @@
+== backlog before
+# Backlog
+## In flight
+## Queued
+- [ ] task-a - task-a lab item (since 2026-09-30)
+- [ ] task-b - task-b lab item (since 2026-09-30)
+## Done
+== tasks-axi calls during session start
+--version
+update --help
+mv --help
+show task-a --file /tmp/fm-lab.EftCLz/data/backlog.md
+start task-a --file /tmp/fm-lab.EftCLz/data/backlog.md
+show task-b --file /tmp/fm-lab.EftCLz/data/backlog.md
+start task-b --file /tmp/fm-lab.EftCLz/data/backlog.md
+show task-c --file /tmp/fm-lab.EftCLz/data/backlog.md
+list --file /tmp/fm-lab.EftCLz/data/backlog.md
+list --file /tmp/fm-lab.EftCLz/data/backlog.md --state in_flight --fields blocked_by,hold_kind,hold_reason
+list --file /tmp/fm-lab.EftCLz/data/backlog.md --state held --fields blocked_by,hold_kind,hold_reason
+list --file /tmp/fm-lab.EftCLz/data/backlog.md --state queued --blocked --fields blocked_by,hold_kind,hold_reason
+ready --file /tmp/fm-lab.EftCLz/data/backlog.md
+== BACKLOG lines in digest
+== backlog after
+# Backlog
+## In flight
+- [ ] task-b - task-b lab item (since 2026-09-30)
+- [ ] task-a - task-a lab item (since 2026-09-30)
+## Queued
+## Done

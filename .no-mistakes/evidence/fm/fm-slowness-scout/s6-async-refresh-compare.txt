@@ -1,0 +1,2 @@
+base: rc=0 digest_elapsed=32.96s summary_at_return=yes summary_later=yes herdr_calls=6 truncated=1
+head: rc=0 digest_elapsed=25.78s summary_at_return=yes summary_later=yes herdr_calls=6 truncated=1

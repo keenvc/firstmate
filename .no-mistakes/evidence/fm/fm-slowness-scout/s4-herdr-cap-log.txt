@@ -1,0 +1,10 @@
+== user FM_BACKEND_HERDR_CLI_TIMEOUT=30, FM_SESSION_START_ENDPOINT_TIMEOUT default 10
+FM_BACKEND_HERDR_CLI_TIMEOUT=30	pane get p-live --session sess
+FM_BACKEND_HERDR_CLI_TIMEOUT=10	pane get p-live --session sess
+218-endpoint: alive (backend=herdr window=sess:p-live)
+225-endpoint: alive (backend=tmux window=crew:w1)
+== user FM_BACKEND_HERDR_CLI_TIMEOUT=3, FM_SESSION_START_ENDPOINT_TIMEOUT default 10
+FM_BACKEND_HERDR_CLI_TIMEOUT=3	pane get p-live --session sess
+FM_BACKEND_HERDR_CLI_TIMEOUT=3	pane get p-live --session sess
+218-endpoint: alive (backend=herdr window=sess:p-live)
+225-endpoint: alive (backend=tmux window=crew:w1)

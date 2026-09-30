@@ -1,0 +1,30 @@
+❯ Next lab step. Use your Bash tool to run exactly this one command with a 300000ms timeout, then reply only 'ok': /tmp/fmlab_cap.sh /tmp/fm-lab.EftCLz
+  /home/azureuser/.no-mistakes/evidence/01M3R9BHN6C84PXS2K03BTT79X
+  Ran 1 shell command
+● ok, captain
+✻ Worked for 44s · done 5:25 AM
+❯ Next lab step. Use your Bash tool to run exactly this one command with a 300000ms timeout, then reply only 'ok': /tmp/fmlab_trunc.sh /tmp/fm-lab.EftCLz
+  /home/azureuser/.no-mistakes/evidence/01M3R9BHN6C84PXS2K03BTT79X
+  Ran 1 shell command
+● ok, captain
+✻ Churned for 1m 23s · done 5:26 AM
+❯ Next lab step. Use your Bash tool to run exactly this one command with a 300000ms timeout, then reply only 'ok': TO=7 /tmp/fmlab_trunc.sh /tmp/fm-lab.EftCLz
+  /home/azureuser/.no-mistakes/evidence/01M3R9BHN6C84PXS2K03BTT79X
+  Ran 1 shell command
+● ok, captain
+✻ Worked for 12s · done 5:27 AM
+❯ Next lab step. Use your Bash tool to run exactly this one command with a 600000ms timeout, then reply only 'ok': /tmp/fmlab_async.sh /tmp/fm-lab.EftCLz
+  /home/azureuser/.no-mistakes/evidence/01M3R9BHN6C84PXS2K03BTT79X
+  Ran 1 shell command
+● ok, captain
+✻ Sautéed for 1m 4s · done 5:28 AM
+❯ Next lab step. Use your Bash tool to run exactly this one command with a 300000ms timeout, then reply only 'ok': /tmp/fmlab_reconcile.sh /tmp/fm-lab.EftCLz
+  /home/azureuser/.no-mistakes/evidence/01M3R9BHN6C84PXS2K03BTT79X
+  Ran 1 shell command
+● ok, captain
+✻ Brewed for 14s · done 5:29 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [OMC#5.5.0L] | Model: Opus 5.5 | 5h:[#-------]7%(2h40m) wk:[########]95%(1d2h) fable:[##------]30%(1d2h) | session:10m | ctx:[#---------]8% | 🔧8
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents

@@ -1,0 +1,4 @@
+base round 1: --- rc=0 elapsed=10.11s summary_present_at_return=yes | summary published after settle: yes
+head round 1: --- rc=0 elapsed=8.38s summary_present_at_return=yes | summary published after settle: yes
+base round 2: --- rc=0 elapsed=10.00s summary_present_at_return=yes | summary published after settle: yes
+head round 2: --- rc=0 elapsed=8.21s summary_present_at_return=yes | summary published after settle: yes
