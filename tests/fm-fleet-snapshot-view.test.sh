@@ -1195,9 +1195,93 @@ test_large_payloads_compose_through_files() {
   pass "snapshot composes >128KB payloads through files, not argv"
 }
 
+test_snapshot_term_cleanup_removes_temp_dir() {
+  # A SIGKILL leaves a task temp dir behind because the EXIT trap never runs.
+  # A trapped TERM must run snapshot_cleanup and then exit, so a graceful stop
+  # never leaks the directory either.
+  local home tmp fakebin pid tempdir status i
+  home=$(make_home term-cleanup)
+  printf '## In flight\n' > "$home/data/backlog.md"
+  fm_write_meta "$home/state/blocker.meta" \
+    "window=firstmate:fm-blocker" \
+    "worktree=$home/worktree" \
+    "project=alpha" \
+    "harness=codex" \
+    "kind=ship" \
+    "mode=ship" \
+    "yolo=off"
+  printf 'working: probe\n' > "$home/state/blocker.status"
+  tmp="$TMP_ROOT/term-tmp"
+  mkdir -p "$tmp"
+  fakebin=$(make_fakebin "$TMP_ROOT/term-fakebin")
+  # A slow backend probe holds the snapshot in its task-observation wait long
+  # enough to signal it with its temp dir already created.
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+sleep 3
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+
+  PATH="$fakebin:$PATH" FM_HOME="$home" TMPDIR="$tmp" \
+    FM_SNAPSHOT_CREW_STATE_TIMEOUT=10 "$SNAPSHOT" --json \
+    > "$TMP_ROOT/term.out" 2>&1 &
+  pid=$!
+  tempdir=
+  i=0
+  while [ "$i" -lt 50 ]; do
+    tempdir=$(find "$tmp" -maxdepth 1 -type d -name 'fm-fleet-tasks.*' -print 2>/dev/null | head -1)
+    [ -n "$tempdir" ] && break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if [ -z "$tempdir" ]; then
+    kill -KILL "$pid" 2>/dev/null || true
+    fail "snapshot never created its task temp dir"
+  fi
+
+  kill -TERM "$pid"
+  i=0
+  while [ "$i" -lt 50 ]; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    fail "SIGTERM must run snapshot cleanup and exit, not no-op"
+  fi
+  wait "$pid" 2>/dev/null
+  status=$?
+  [ "$status" = 143 ] || fail "SIGTERM must exit 143 after cleanup (got $status)"
+  [ ! -e "$tempdir" ] || fail "snapshot TERM cleanup must remove its task temp dir"
+  pass "snapshot TERM cleanup removes its temp dir and exits"
+}
+
+test_snapshot_startup_reap_removes_aged_temp_dirs() {
+  # Belt-and-suspenders for a SIGKILL'd run: a later snapshot reaps an aged
+  # /tmp/fm-fleet-tasks.* directory while leaving a fresh concurrent one alone.
+  local home tmp fakebin
+  home=$(make_home reap-tmp)
+  printf '## In flight\n' > "$home/data/backlog.md"
+  tmp="$TMP_ROOT/reap-tmp"
+  mkdir -p "$tmp/fm-fleet-tasks.aged" "$tmp/fm-fleet-tasks.fresh"
+  touch -t 202001010000 "$tmp/fm-fleet-tasks.aged"
+  fakebin=$(make_fakebin "$home")
+  PATH="$fakebin:$PATH" FM_HOME="$home" TMPDIR="$tmp" "$SNAPSHOT" --json \
+    > /dev/null 2>&1 || fail "snapshot must succeed while reaping aged temp dirs"
+  [ ! -e "$tmp/fm-fleet-tasks.aged" ] \
+    || fail "startup reap must remove an aged task temp dir"
+  [ -e "$tmp/fm-fleet-tasks.fresh" ] \
+    || fail "startup reap must keep a fresh task temp dir"
+  pass "snapshot startup reap removes aged task temp dirs"
+}
+
 test_empty_fleet_json
 test_fixture_snapshot_json
 test_large_payloads_compose_through_files
+test_snapshot_term_cleanup_removes_temp_dir
+test_snapshot_startup_reap_removes_aged_temp_dirs
 test_home_summary_excludes_secondmate_from_child_inventory
 test_undated_captain_hold_phrasing_and_aging
 test_hold_buckets_are_total_and_text_blind
