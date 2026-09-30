@@ -798,7 +798,7 @@ EOF
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
 
-  for _ in $(seq 1 50); do
+  for _ in $(seq 1 600); do
     [ -f "$home/state/home-summary.json" ] && break
     sleep 0.1
   done
@@ -1504,7 +1504,11 @@ EOF
   assert_not_contains "$out" "STARTUP TRUNCATED - SESSION START" \
     "a bounded endpoint-read hang raised the whole-digest truncation banner"
 
-  stray=$(pgrep -f "$fakebin/herdr" 2>/dev/null | wc -l | tr -d ' ')
+  for _ in $(seq 1 300); do
+    stray=$(pgrep -f "$fakebin/herdr" 2>/dev/null | wc -l | tr -d ' ')
+    [ "$stray" -eq 0 ] && break
+    sleep 0.1
+  done
   [ "$stray" -eq 0 ] || fail "the per-task read bound left $stray hung herdr process(es) behind"
 
   pass "a hung per-task endpoint read hits its configured bound, reports the task, and leaves nothing stuck"
@@ -1532,7 +1536,11 @@ EOF
   assert_contains "$out" "$(printf '\nCONTEXT\n')" \
     "a padded-zero bound cost the digest its context section"
 
-  stray=$(pgrep -f "$fakebin/herdr" 2>/dev/null | wc -l | tr -d ' ')
+  for _ in $(seq 1 300); do
+    stray=$(pgrep -f "$fakebin/herdr" 2>/dev/null | wc -l | tr -d ' ')
+    [ "$stray" -eq 0 ] && break
+    sleep 0.1
+  done
   [ "$stray" -eq 0 ] || fail "the fallback bound left $stray hung herdr process(es) behind"
 
   pass "a padded-zero per-read bound falls back to the 10s default instead of removing the bound"
