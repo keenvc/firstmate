@@ -391,6 +391,9 @@ case "$QUEUED_LIMIT" in ''|*[!0-9]*|0) QUEUED_LIMIT=20 ;; esac
 ENDPOINT_TIMEOUT=${FM_SESSION_START_ENDPOINT_TIMEOUT:-10}
 case "$ENDPOINT_TIMEOUT" in ''|*[!0-9]*) ENDPOINT_TIMEOUT=10 ;; esac
 [ "$ENDPOINT_TIMEOUT" -gt 0 ] 2>/dev/null || ENDPOINT_TIMEOUT=10
+if [ -z "${FM_BACKEND_HERDR_CLI_TIMEOUT:-}" ] || [ "$FM_BACKEND_HERDR_CLI_TIMEOUT" -gt "$ENDPOINT_TIMEOUT" ]; then
+  export FM_BACKEND_HERDR_CLI_TIMEOUT="$ENDPOINT_TIMEOUT"
+fi
 BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
 
 RULE='================================================================================'
@@ -709,12 +712,6 @@ if [ "$READ_ONLY" -eq 0 ]; then
     rm -f "$COMPLETION_FILE" 2>/dev/null || true
   fi
   fm_trace_context_session_start "$CONFIG" "$STATE/.trace-context-effective"
-  # A full locked start publishes this home's current structured summary.
-  # Publication is side-band and best-effort, so it can never change the
-  # session-start result. A context re-emit is not another session start.
-  if [ "$REEMIT" -eq 0 ]; then
-    "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
-  fi
   # Every network call and the potentially slow inactive-outcome startup scan
   # are launched HERE, detached and bounded, so they run concurrently with the
   # whole digest below instead of in front of it. Step 7 harvests whatever has
@@ -1083,6 +1080,22 @@ if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
       printf '\nSESSION_START_AGENTS_BASELINE: not recorded - a later supported rebuild will re-emit AGENTS.md.\n'
     fi
   fi
+fi
+
+# A full locked start publishes this home's current structured summary, but only
+# after the digest above is complete: the refresh is a fleet-wide per-task read
+# (15-25s of CPU on a large home) and nothing in this digest reads its result.
+# Publication is side-band and best-effort, so it can never change the
+# session-start result, and it is detached the way the deferred network stage is
+# (stdio off the digest's pipe, nohup, its own process group) so neither the
+# harness reading this output nor the digest's runtime bound waits on it.
+# A context re-emit is not another session start.
+if [ "$READ_ONLY" -eq 0 ] && [ "$REEMIT" -eq 0 ]; then
+  (
+    set -m 2>/dev/null || true
+    nohup "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort \
+      >/dev/null 2>&1 </dev/null &
+  ) || true
 fi
 
 exit 0

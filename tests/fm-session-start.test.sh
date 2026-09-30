@@ -553,7 +553,11 @@ make_fake_herdr_hanging_read() {
 #!/usr/bin/env bash
 set -u
 if [ "\${1:-}" = pane ] && [ "\${2:-}" = get ]; then
-  [ "\${3:-}" = "$hangpane" ] && sleep 300
+  if [ "\${3:-}" = "$hangpane" ]; then
+    trap 'kill \$! 2>/dev/null; exit 0' TERM INT HUP
+    sleep 300 &
+    wait \$!
+  fi
   [ "\${3:-}" = "$live" ] && exit 0
   exit 1
 fi
@@ -793,6 +797,11 @@ EOF
   # secondmates.md, captain-shared.md, and learnings.md deliberately absent
 
   out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+
+  for _ in $(seq 1 50); do
+    [ -f "$home/state/home-summary.json" ] && break
+    sleep 0.1
+  done
 
   jq -e --arg home "$home" '
     .schema == "fm-secondmate-home-summary.v1"

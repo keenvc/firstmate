@@ -2128,7 +2128,7 @@ SH
   grep -F "$(printf 'signal\ttask.status\tneeds-decision:')" "$state/.wake-queue" >/dev/null \
     || fail "the still-open keyed decision was not queued as a needs-decision: $(cat "$state/.wake-queue")"
   [ -s "$reads" ] || fail "the classification made no read through the span reader, so the bound was not exercised"
-  while IFS=$(printf '\t') read -r start length; do
+  while IFS=$'\t' read -r start length; do
     [ "$start" -ge "$prior" ] && [ "$length" -le "$appended" ] \
       || fail "classifying a ${appended}-byte span read ${length} bytes from offset ${start} of a ${prior}-byte history"
   done < "$reads"
