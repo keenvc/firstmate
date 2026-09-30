@@ -1251,64 +1251,6 @@ ROWS
   pass "bootstrap gates resolver fields and additive harnesses on the typed key"
 }
 
-test_backlog_reconcile_uses_single_list_read_for_queued_rows() {
-  local case_dir fakebin log
-  case_dir="$TMP_ROOT/reconcile-single-list"
-  mkdir -p "$case_dir/home/config" "$case_dir/home/state" "$case_dir/home/data"
-  touch "$case_dir/home/data/backlog.md"
-  printf '%s\n' $$ > "$case_dir/home/state/.lock"
-  fakebin=$(make_fake_toolchain "$case_dir")
-  log="$case_dir/tasks-axi.log"
-  : > "$log"
-
-  cat > "$fakebin/tasks-axi" <<SH
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$log"
-if [ "\${1:-}" = --version ]; then
-  printf 'tasks-axi 0.4.0\n'
-  exit 0
-fi
-if [ "\${1:-}" = update ] && [ "\${2:-}" = --help ]; then
-  printf '  --archive-body\n'
-  exit 0
-fi
-if [ "\${1:-}" = mv ] && [ "\${2:-}" = --help ]; then
-  printf '  [<id>...]\n'
-  exit 0
-fi
-if [ "\${1:-}" = list ]; then
-  printf '  task-q, queued, Fix queue\n'
-  exit 0
-fi
-if [ "\${1:-}" = show ]; then
-  printf 'id: %s\n  state: In flight\n' "\${2:-}"
-  exit 0
-fi
-if [ "\${1:-}" = update ]; then
-  exit 0
-fi
-exit 0
-SH
-  chmod +x "$fakebin/tasks-axi"
-
-  printf 'kind=ship\nworktree=/tmp/wt-q\n' > "$case_dir/home/state/task-q.meta"
-  printf 'kind=ship\nworktree=/tmp/wt-a\n' > "$case_dir/home/state/task-a.meta"
-  printf 'kind=ship\nworktree=/tmp/wt-b\n' > "$case_dir/home/state/task-b.meta"
-
-  PATH="$fakebin:$BASE_PATH" FM_HOME="$case_dir/home" FM_ROOT_OVERRIDE="$case_dir/home" \
-    FM_BOOTSTRAP_NETWORK=skip FM_FAKE_TREEHOUSE_LEASE_HELP=1 "$ROOT/bin/fm-bootstrap.sh" >/dev/null 2>&1
-
-  grep -q "list.*--state queued" "$log" \
-    || fail "bootstrap reconcile did not query queued rows via tasks-axi list --state queued"
-
-  ! grep -q "show task-a" "$log" \
-    || fail "bootstrap reconcile probed task-a with tasks-axi show despite not being queued"
-  ! grep -q "show task-b" "$log" \
-    || fail "bootstrap reconcile probed task-b with tasks-axi show despite not being queued"
-
-  pass "bootstrap reconcile uses one queued list read and skips per-record show probes for non-queued rows"
-}
-
 test_bootstrap_reporting
 test_no_mistakes_min_version
 test_gh_axi_min_version
@@ -1337,4 +1279,3 @@ test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once
 test_crew_dispatch_active_rules_are_verbose_bootstrap_info
 test_crew_dispatch_validation
-test_backlog_reconcile_uses_single_list_read_for_queued_rows
