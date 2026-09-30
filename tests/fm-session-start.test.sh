@@ -524,8 +524,16 @@ make_fake_herdr_deadly_read() {
 set -u
 if [ "\${1:-}" = pane ] && [ "\${2:-}" = get ]; then
   if [ "\${3:-}" = "$killpane" ]; then
-    read_shell=\$(sed 's/^[^)]*) //' /proc/\$PPID/stat 2>/dev/null | awk '{print \$2}')
-    kill -KILL "\$read_shell" 2>/dev/null
+    # Walk up to the endpoint read's own shell (the \`bash -c\` that sourced
+    # fm-backend.sh); the bounded-CLI wrappers add a variable number of hops.
+    read_shell=\$PPID
+    while [ -n "\$read_shell" ] && [ "\$read_shell" -gt 1 ]; do
+      if tr '\\0' ' ' < /proc/\$read_shell/cmdline 2>/dev/null | grep -q 'fm-backend\\.sh'; then
+        kill -KILL "\$read_shell" 2>/dev/null
+        break
+      fi
+      read_shell=\$(sed 's/^[^)]*) //' /proc/\$read_shell/stat 2>/dev/null | awk '{print \$2}')
+    done
     exit 0
   fi
   [ "\${3:-}" = "$live" ] && exit 0

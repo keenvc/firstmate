@@ -581,7 +581,10 @@ print_status_tail() {
 fm_session_start_endpoint_read() {  # <backend> <target> [expected-label]
   local backend=$1 target=$2 label=${3:-}
   # shellcheck disable=SC2016  # Positional parameters expand inside the child bash, not here.
-  fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
+  # The backend CLI keeps its own process group under its own bound; cap it at
+  # this read's bound so the outer kill cannot strand a hung CLI for the
+  # adapter's default 10s.
+  FM_BACKEND_HERDR_CLI_TIMEOUT=$ENDPOINT_TIMEOUT fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
     . "$1"
     fm_backend_target_exists "$2" "$3" "$4"
   ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label"
