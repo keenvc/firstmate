@@ -54,7 +54,7 @@ wait_for_text() {
     # Include the full scrollback: a long restored transcript keeps growing
     # above the viewport, so a fixed window can drop the earliest asserted
     # rows (the restored tool output) off the top as later turns render.
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S - >"$file" 2>/dev/null || true
+    capture_full "$file"
     grep -Fq "$text" "$file" 2>/dev/null && return 0
     sleep 0.05
     i=$((i + 1))
