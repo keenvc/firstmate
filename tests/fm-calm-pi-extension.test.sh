@@ -20,6 +20,15 @@ PI_OPERATIONAL_INPUT="$ROOT/.pi/extensions/lib/fm-operational-input.ts"
 PI_PACKAGE_DIR=${FM_PI_PACKAGE_DIR:-"$(npm root -g 2>/dev/null)/@earendil-works/pi-coding-agent"}
 TMUX_SOCKET="fm-calm-$$"
 TMUX_SESSION="fm-calm-e2e"
+# Restored E2E transcripts can exceed 600 lines, so any capture that must see
+# the earliest restored rows uses full scrollback; a fixed window silently
+# drops the top of the transcript as later turns render and has produced a
+# deterministic CI failure (missing CALM_E2E_OUTPUT) with the same suite green
+# locally.
+capture_full() {
+  local file=$1
+  tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S - >"$file" 2>/dev/null || true
+}
 # Verified against Pi 0.81.1 and 0.82.0 (docs/calm-mode-feasibility.md). This is
 # known-good evidence, not a support ceiling: the fixtures below run against whatever
 # Pi is actually installed, and record_pi_version_evidence never rejects a newer
@@ -42,10 +51,10 @@ trap cleanup EXIT
 wait_for_text() {
   local file=$1 text=$2 i=0
   while [ "$i" -lt 120 ]; do
-    # Include recent scrollback: expanding a long restored transcript can move
-    # the asserted tool output above the current viewport while the footer and
-    # editor remain visible.
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$file" 2>/dev/null || true
+    # Include the full scrollback: a long restored transcript keeps growing
+    # above the viewport, so a fixed window can drop the earliest asserted
+    # rows (the restored tool output) off the top as later turns render.
+    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S - >"$file" 2>/dev/null || true
     grep -Fq "$text" "$file" 2>/dev/null && return 0
     sleep 0.05
     i=$((i + 1))
@@ -2618,7 +2627,7 @@ TS
     elif [ "$calm_state" = on ]; then
       # Nothing appears to wait for, so give Pi's listing a moment to repaint.
       sleep 1
-      tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$TMP_ROOT/queued-escape-pane"
+      capture_full "$TMP_ROOT/queued-escape-pane"
     else
       wait_for_text "$TMP_ROOT/queued-escape-pane" "Follow-up:" \
         || fail "Pi queued-row $label case never listed the queued notification"
@@ -4217,7 +4226,7 @@ JSON
     # Include scrollback: the built-in tool rows this documented bound keeps visible
     # (see below) lengthen the transcript enough to push earlier genuine content, such
     # as the original user prompt, above the plain viewport.
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$hidden_snapshot"
+    capture_full "$hidden_snapshot"
     # Wait for the redraw this block actually asserts: the collapsed-thinking adapter
     # (unconditional, unaffected by the built-in tool gate below) hides, and the
     # retained genuine rows are back on screen. Built-in tool rows from before this
@@ -4476,7 +4485,7 @@ JS
   # confirmation, so it must not overwrite it: the captain has to keep seeing where
   # their export landed. The export-data assertions above take seconds of real time,
   # so this snapshot is taken well after that repaint has settled rather than racing it.
-  tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$export_settled_snapshot"
+  capture_full "$export_settled_snapshot"
   assert_contains "$(cat "$export_settled_snapshot")" "Session exported to: $export_file" \
     "Calm's post-export repaint overwrote Pi's export confirmation"
   assert_not_contains "$(cat "$export_settled_snapshot")" "fm_watch_arm_pi" \
@@ -4746,7 +4755,7 @@ JS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Escape
   active_screen_wait=0
   while [ "$active_screen_wait" -lt 200 ]; do
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$boat_cleared_snapshot"
+    capture_full "$boat_cleared_snapshot"
     if ! grep -Fq '╲▁▁▁╱' "$boat_cleared_snapshot" &&
       [ "$(grep -Fc 'Operation aborted' "$boat_cleared_snapshot" || true)" -ge 1 ]; then
       break
@@ -4797,7 +4806,7 @@ JS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Escape
   active_screen_wait=0
   while [ "$active_screen_wait" -lt 200 ]; do
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$boat_cleared_snapshot"
+    capture_full "$boat_cleared_snapshot"
     if ! grep -Fq '╲▁▁▁╱' "$boat_cleared_snapshot" &&
       [ "$(grep -Fc 'Operation aborted' "$boat_cleared_snapshot" || true)" -ge 2 ]; then
       break
