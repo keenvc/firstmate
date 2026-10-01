@@ -1,0 +1,10 @@
+send_rc=0
+send_rc=0
+SHALLOW_LEN=166
+DEEP_LEN=166
+--- shallow pane line ---
+: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+--- deep pane line ---
+: Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+resolved_from_root=/tmp/fm-live-doorbell.FIrUd7/deep/one/two/three/four/five/six/seven/eight-secondmate-homes-nest-under-long-worktree-paths/state-home/state/t1.inbox/001.msg
+PASS doorbell deep-home brevity

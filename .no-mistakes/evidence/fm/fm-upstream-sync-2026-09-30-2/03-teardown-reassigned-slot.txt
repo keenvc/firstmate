@@ -1,0 +1,6 @@
+ok - A: stale record on a slot claimed by another task retired records-only (rc=0), claimant's slot and record untouched
+ok - A2: claimant then tore down normally and returned its pool slot
+ok - B: a slot this task still claims, with a second live record naming it, still refuses before any mutation (rc=1)
+ok - C: an unclaimed slot with two records still refuses (rc=1)
+ok - D: a task's own slot claim still tears down and returns the slot
+TMP=/tmp/fm-live-teardown.qAYAPh

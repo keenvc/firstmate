@@ -1,0 +1,38 @@
+### tests/fm-test-run.test.sh — #6192 acceptance cases (PASS)
+ok - portable shard union, disjointness, and coverage guard hold
+ok - portable parallel lanes are fully hinted and packed within 5% of each other
+ok - portable serial shards are a deterministic disjoint cover of the serial lane
+ok - coverage guard bounds the unmeasured share and serial packing within twenty minutes
+ok - serial packing accepts the exact budget and refuses one millisecond above it
+ok - portable serial shard lanes refuse mismatched, out-of-range, and countless names
+
+### The only failing case in this file (environment, not this change)
+The runner's own concurrency case runs the watcher-wake-lock family, which includes tests/fm-session-lock-ancestry.test.sh.
+That script asserts an orphaned pty-host is reparented to PID 1. This host runs a systemd --user subreaper (PID 1285),
+so orphans reparent there instead of PID 1 and the assertion cannot hold. The ancestry test file is byte-identical
+between the base commit 23e55847 and the target b9ebe4cb (git diff is empty), so this is not introduced by the sync.
+not ok - --jobs on a proven family must be admitted, got 1:  FM_TEST_BEGIN 2026-10-01T20:16:49Z tests/fm-session-lock-ancestry.test.sh family=watcher-wake-lock expected_gate_skip=none
+not ok - the pty-host was not reparented to init after the daemon ended
+FM_TEST_END 2026-10-01T20:18:36Z tests/fm-session-lock-ancestry.test.sh exit=1 duration_ms=106727 gate_skip=false
+exit=1
+
+### Proof this host reparents orphans to systemd --user, not PID 1
+$ ( sleep 6 & echo $! > /tmp/childpid ); sleep 0.7; ps -o pid,ppid,comm -p $(cat /tmp/childpid)
+    PID    PPID COMMAND
+ 963814    1285 sleep
+$ ps -o pid,ppid,comm,args -p 1285
+    PID    PPID COMMAND         COMMAND
+   1285       1 systemd         /usr/lib/systemd/systemd --user
+
+### tests/fm-session-lock-ancestry.test.sh standalone (same failure, unchanged from base)
+ok - session-lock: a version-named Claude Code session is identified from its install path and argv[0]
+ok - session-lock: a harness that is pid 1 of its own namespace is examined, not skipped
+ok - session-lock: ordinary script paths under a harness directory are not harness processes
+ok - session-lock: ownership stops at the first non-harness gap above the contiguous run
+ok - session-lock: a live version-named session holding the lock is not mistaken for a stale owner
+ok - session-lock: a trusted same-session id keeps owning a recycled background chain, and nothing weaker does
+ok - session-lock: a trusted id anchors the lock on the model-loop process, anything else on the outermost pid
+ok - session-lock e2e: a version-named session claims the home and arms supervision
+ok - session-lock e2e: a session parented by a harness-named daemon claims the home and arms supervision
+ok - session-lock e2e: a version-named session under a harness-named daemon keeps its own lock
+not ok - the pty-host was not reparented to init after the daemon ended

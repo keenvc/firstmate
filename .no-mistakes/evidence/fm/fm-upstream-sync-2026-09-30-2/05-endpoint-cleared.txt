@@ -1,0 +1,7 @@
+warning: You appear to have cloned an empty repository.
+ok - E1: an explicitly cleared endpoint tears down without --force/--legacy-record and closes the backlog row
+warning: You appear to have cloned an empty repository.
+ok - E2: a cleared endpoint still refuses unlanded work (rc=1) and mutates nothing
+warning: You appear to have cloned an empty repository.
+ok - E3: a missing window without an endpoint_cleared stamp still refuses (rc=1)
+TMP=/tmp/fm-live-cleared.NaC9sp

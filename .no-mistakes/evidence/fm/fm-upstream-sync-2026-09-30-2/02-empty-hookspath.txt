@@ -1,0 +1,13 @@
+## #6216: a repository with core.hooksPath set to the empty string
+commit rc=0  stderr=[]
+repository pre-commit ran: no
+commit body:
+  fix: empty hooksPath live
+
+## #6216 adversarial: unresolvable and valueless core.hooksPath (git 2.43.0)
+[unresolvable] git usable in that repo: no
+[unresolvable] commit rc=128; HEAD moved: no
+[unresolvable] first stderr line: fatal: failed to expand user dir in: '~fm-no-such-user-6171/hooks'
+[valueless] git usable in that repo: no
+[valueless] commit rc=128; HEAD moved: no
+[valueless] first stderr line: error: missing value for 'core.hookspath'

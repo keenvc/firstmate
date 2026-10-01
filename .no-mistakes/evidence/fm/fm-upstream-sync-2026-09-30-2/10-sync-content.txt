@@ -1,0 +1,16 @@
+## Sync content present at the re-attested head
+HEAD: b9ebe4cb2c3b88d1a4fffaef05de1b1928707153
+
+eb77f02b  ancestor-of-HEAD=yes  ci: rebalance portable test groups and enforce a packing budget (#6192)
+bd744684  ancestor-of-HEAD=yes  fix(bin): run no repository hook when core.hooksPath is empty (#6216)
+65c75b0d  ancestor-of-HEAD=yes  fix(bin): let a stale record on a reassigned slot retire records-only (#6213)
+23e55847  ancestor-of-HEAD=yes  fix(bin): keep the steering doorbell short under deep homes (#6240)
+
+## docs/architecture.md at HEAD (fork's newer wording kept, and it encodes #6213's both-records case)
+Teardown is fail-closed for ship worktrees: dirty worktrees refuse, and committed work must be landed before the worktree is returned.
+Teardown reads a pool slot's owner claim before checking whether other task records name its live path: a claim naming another task leaves that slot untouched while this record's own cleanup continues, even when both records name the slot.
+For a claim naming this task or no claim, a conflicting record still refuses teardown, even with `--force`; endpoint identity checks remain independent.
+[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the full proof, and [`bin/fm-wake-lib.sh`](../bin/fm-wake-lib.sh) owns the claim.
+
+## bin/fm-teardown.sh at HEAD carries the #6213 records-only hunk
+2390:  fm_treehouse_slot_owner_state "$slot" "$record_id"
