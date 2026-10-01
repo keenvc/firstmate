@@ -1,0 +1,19 @@
+job-level timeout-minutes by job:
+  lint: 60
+  test-coverage: 5
+  tests-portable-parallel-1: 60
+  tests-portable-parallel-2: 60
+  tests-portable-serial: 60
+  tests-herdr: 75
+  tests-timing-aggregate: 5
+  macos-stock-bash: 60
+  invariants: 5
+distinct job-level values: [5, 60, 75]
+normal(60m) jobs: 5
+   - lint
+   - tests-portable-parallel-1
+   - tests-portable-parallel-2
+   - tests-portable-serial
+   - macos-stock-bash
+heavy job tests-herdr step tripwire: 20m (name=Run real-Herdr family (serial, required))
+SEMANTIC PARSE OK: Normal tier is a single shared 60-minute bound; fast 5, heavy 75 > normal 60

@@ -1,0 +1,8 @@
+# Adversarial check: does the fixed full-scrollback capture see the earliest restored row
+# that the old fixed 600-line window drops? (real tmux, isolated non-default socket)
+socket=fm-capture-check-3868468
+old_fixed_600_window_lines=624
+new_full_scrollback_lines=902
+old window sees marker: NO (drops the earliest restored row - the CI failure mode)
+new full capture sees marker: YES
+teardown: kill-server done
