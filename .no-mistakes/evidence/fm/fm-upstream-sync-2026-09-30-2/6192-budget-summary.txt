@@ -1,0 +1,16 @@
+=== #6192 packing budget boundary (the guard that owns the rebalance) ===
+
+ok - proven-isolated scheduling ignores parallel hints
+ok - family, all, changed, and script selections ignore parallel hints
+ok - portable shard union, disjointness, and coverage guard hold
+ok - portable parallel lanes are fully hinted and packed within 5% of each other
+ok - portable serial shards are a deterministic disjoint cover of the serial lane
+ok - coverage guard bounds the unmeasured share and serial packing within twenty minutes
+ok - serial packing accepts the exact budget and refuses one millisecond above it
+ok - portable serial shard lanes refuse mismatched, out-of-range, and countless names
+
+=== coverage guard metrics (from bin/fm-test-run.sh --check-coverage) ===
+  FM_TEST_COVERAGE ok total=251 parallel=24 parallel_max_ms=665545 parallel_imbalance_ms=2 parallel_unhinted=0 serial=211 serial_shards=9 serial_unhinted=10 serial_max_ms=1074843 serial_budget_ms=1200000 herdr=16
+
+  serial_max_ms 1074843 <= serial_budget_ms 1200000 : WITHIN
+  headroom: 125157 ms

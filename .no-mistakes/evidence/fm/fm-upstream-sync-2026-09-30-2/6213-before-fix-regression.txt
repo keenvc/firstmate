@@ -1,0 +1,6 @@
+
+=== #6213 regression: same case with the fix REVERTED (upstream pre-#6213 fm-teardown.sh) ===
+ok - fm-teardown: a close that genuinely failed refuses and keeps the record naming the surviving endpoint, and the same teardown finishes once the close works
+ok - fm-teardown: forced secondmate cleanup still refuses on a child endpoint close that failed
+ok - fm-teardown: a stale record on a claimed slot retires, then the claimant tears down
+exit=0

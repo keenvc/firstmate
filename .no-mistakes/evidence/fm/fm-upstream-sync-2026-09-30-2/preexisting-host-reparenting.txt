@@ -1,0 +1,21 @@
+=== are the 2 fm-test-run failures merge fallout or the recorded host issue? ===
+
+--- is fm-session-lock-ancestry.test.sh in this sync diff? ---
+  matches in sync diff: 0
+--- does this host reparent orphans to PID 1? ---
+  pid 1 is: systemd
+  orphaned child ppid: 1285 (expected 1 for the assertion to hold)
+  subreaper: systemd
+
+--- the failing assertion site ---
+    kill -TERM "$daemon"
+    i=0
+    while [ "$i" -lt 200 ] && { kill -0 "$daemon" 2>/dev/null || [ "$(ps -o ppid= -p "$ptyhost" 2>/dev/null | tr -d ' ')" != 1 ]; }; do
+      sleep 0.05
+      i=$((i + 1))
+    done
+    [ "$(ps -o ppid= -p "$ptyhost" 2>/dev/null | tr -d ' ')" = 1 ] || fail "the pty-host was not reparented to init after the daemon ended"
+    kill -0 "$frontend" 2>/dev/null || fail "the front-end died with the daemon, so the recycled case cannot be exercised"
+  
+    # Phase 2: the same session id over the broken chain - the reported drift.
+    fire_phase "$dir" 2 'export CLAUDE_CODE_SESSION_ID=S1; export CLAUDE_PID=$$'

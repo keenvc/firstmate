@@ -1,0 +1,18 @@
+=== #6216 ADVERSARIAL: a broken (non-empty) core.hooksPath must still REFUSE ===
+host git: git version 2.43.0
+
+--- unresolvable core.hooksPath ---
+plain `git status` in such a repo: exit 128  -> git resolves hooksPath eagerly
+git commit exit: 128
+  | fatal: failed to expand user dir in: '~nonexistent-user-xyz/hooks'
+HEAD moved?          NO (refused)
+repo hook silently skipped? no hook ran, and no commit was made
+
+--- valueless core.hooksPath ---
+plain `git status` in such a repo: exit 128  -> git resolves hooksPath eagerly
+git commit exit: 128
+  | error: missing value for 'core.hookspath'
+  | fatal: bad config variable 'core.hookspath' in file '.git/config' at line 10
+HEAD moved?          NO (refused)
+repo hook silently skipped? no hook ran, and no commit was made
+

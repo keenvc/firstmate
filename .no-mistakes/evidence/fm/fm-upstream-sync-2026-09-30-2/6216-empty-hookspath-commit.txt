@@ -1,0 +1,19 @@
+=== #6216 empty core.hooksPath runs NO repository hook and still strips the trailer ===
+
+--- before ---
+git commit exit: 1
+stderr:
+  | fatal: The empty string is not a valid path
+  | fm-git-strip-ai-trailers: cannot resolve this repository's hooks directory; refusing to skip its pre-commit hook
+HEAD moved?            NO (no commit)
+repository hook ran?   NO
+
+--- after ---
+git commit exit: 0
+committed message:
+  | feat: a real change
+  | Co-Authored-By: A Human <human@example.com>
+AI trailer present?    NO (stripped)
+human trailer kept?    YES
+repository hook ran?   NO
+

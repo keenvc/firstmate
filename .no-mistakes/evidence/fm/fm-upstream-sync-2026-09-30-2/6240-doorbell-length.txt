@@ -1,0 +1,15 @@
+=== #6240 keep the steering doorbell short under deep homes ===
+shallow state dir : /tmp/dbell.wu3z3l/s/state (25 chars)
+deep    state dir : /tmp/dbell.wu3z3l/d/fleet-home-segment-1/fleet-home-segment-2/fleet-home-segment-3/fleet-home-segment-4/fleet-home-segment-5/fleet-home-segment-6/fleet-home-segment-7/fleet-home-segment-8/fleet-home-segment-9/fleet-home-segment-10/state (236 chars)
+depth delta       : 211 chars
+
+--- before (bin-before) ---
+shallow: 201 chars | : Firstmate instruction waiting: list '/tmp/dbell.wu3z3l/s/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/tmp/dbell.wu3z3l/s/state/t1.inbox'/handled/.
+deep   : 623 chars | : Firstmate instruction waiting: list '/tmp/dbell.wu3z3l/d/fleet-home-segment-1/fleet-home-segment-2/fleet-home-segment-3/fleet-home-segment-4/fleet-home-segment-5/fleet-home-segment-6/fleet-home-segment-7/fleet-home-segment-8/fleet-home-segment-9/fleet-home-segment-10/state/t1.inbox'/*.msg and, in numeric order, read and act on each, then mv each handled file to '/tmp/dbell.wu3z3l/d/fleet-home-segment-1/fleet-home-segment-2/fleet-home-segment-3/fleet-home-segment-4/fleet-home-segment-5/fleet-home-segment-6/fleet-home-segment-7/fleet-home-segment-8/fleet-home-segment-9/fleet-home-segment-10/state/t1.inbox'/handled/.
+grows with home depth? YES (+422 chars)
+
+--- after (bin-after) ---
+shallow: 166 chars | : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+deep   : 166 chars | : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your 't1.inbox' steering inbox, read and act on each in numeric order, then mv each into its handled/.
+grows with home depth? NO
+

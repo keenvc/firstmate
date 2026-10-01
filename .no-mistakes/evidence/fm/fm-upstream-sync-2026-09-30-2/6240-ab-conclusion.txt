@@ -1,0 +1,26 @@
+=== #6240 A/B: are the codex and grok live failures caused by this merge? ===
+
+Method: the SAME live e2e driven twice, once with this branch (AFTER) and once with
+bin/fm-task-inbox-lib.sh + bin/fm-spawn.sh + the test reverted to the pre-sync
+commit 4aecf233 (BEFORE), limited to codex and grok via FM_SEND_INBOX_LIVE_HARNESSES.
+
+--- AFTER (this branch, all installed harnesses) ---
+  ok - claude (2.1.286 (Claude Code)): the doorbell reached a real worker, which acted and acked with the mv
+  not ok - codex (codex-cli 0.118.0): doorbell not honored within 200s (acted=no acked=no)
+  ok - opencode (opencode v2.0.19): the doorbell reached a real worker, which acted and acked with the mv
+  ok - pi (0.99.1): the doorbell reached a real worker, which acted and acked with the mv
+  not ok - grok (grok 1.0.44 (5b807183dd79) [stable]): doorbell not honored within 200s (acted=no acked=no)
+  not ok - live steering-inbox doorbell guard found failures above
+
+--- BEFORE (pre-sync code, codex+grok only) ---
+  not ok - codex (codex-cli 0.118.0): doorbell not honored within 200s (acted=no acked=no)
+  not ok - grok (grok 1.0.44 (5b807183dd79) [stable]): doorbell not honored within 200s (acted=no acked=no)
+  not ok - live steering-inbox doorbell guard found failures above
+
+--- grok root cause, from its own pane in the BEFORE run ---
+       ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Weekly limit left: 0% · Grok 4.5 (high) · always-approve ─╯
+
+CONCLUSION: codex and grok fail IDENTICALLY (acted=no acked=no) on the pre-sync code,
+so neither failure is merge fallout. grok names its own cause: the account has 0% of
+its weekly limit left, so it cannot answer any prompt. claude, opencode and pi all
+honored the NEW doorbell with no brief at all.

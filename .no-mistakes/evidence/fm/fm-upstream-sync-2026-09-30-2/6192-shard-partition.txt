@@ -1,0 +1,19 @@
+=== #6192 do the 9 CI serial shards partition the serial lane exactly once? ===
+
+  shard 1of9:   1 scripts
+  shard 2of9:  21 scripts
+  shard 3of9:  27 scripts
+  shard 4of9:  26 scripts
+  shard 5of9:  26 scripts
+  shard 6of9:  27 scripts
+  shard 7of9:  27 scripts
+  shard 8of9:  28 scripts
+  shard 9of9:  28 scripts
+
+  serial lane total      : 211
+  union of all 9 shards  : 211
+  duplicates across shards: 0
+  in lane but no shard    : 0
+  in a shard but not lane : 0
+
+  RESULT: the 9 shards are an exact partition of the serial lane.

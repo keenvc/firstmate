@@ -1,0 +1,36 @@
+=== #6240 LIVE: real tmux pane, 80x24, deep home ===
+deep state dir: 240 chars
+
+--- before : doorbell typed into a live 80-col pane ---
+line length 631 chars -> occupies 9 non-empty terminal rows
+  | bash-5.2$ : Firstmate instruction waiting: list '/tmp/dbpane.UjD0mk/home/fleet-h
+  | ome-segment-1/fleet-home-segment-2/fleet-home-segment-3/fleet-home-segment-4/fle
+  | et-home-segment-5/fleet-home-segment-6/fleet-home-segment-7/fleet-home-segment-8
+  | /fleet-home-segment-9/fleet-home-segment-10/state/t1.inbox'/*.msg and, in numeri
+  | c order, read and act on each, then mv each handled file to '/tmp/dbpane.UjD0mk/
+  | home/fleet-home-segment-1/fleet-home-segment-2/fleet-home-segment-3/fleet-home-s
+  | egment-4/fleet-home-segment-5/fleet-home-segment-6/fleet-home-segment-7/fleet-ho
+  | me-segment-8/fleet-home-segment-9/fleet-home-segment-10/state/t1.inbox'/handled/
+  | .
+
+--- after : doorbell typed into a live 80-col pane ---
+line length 166 chars -> occupies 3 non-empty terminal rows
+  | bash-5.2$ : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your '
+  | t1.inbox' steering inbox, read and act on each in numeric order, then mv each in
+  | to its handled/.
+
+--- adversarial: press Enter in the bare (dead-agent) pane ---
+inbox contents after Enter (record must be untouched, nothing executed):
+  | 001.msg
+  | 002.msg
+  | handled
+pane after Enter:
+  | bash-5.2$ : Firstmate instruction waiting: list "$FM_TASK_INBOX"/*.msg in your '
+  | t1.inbox' steering inbox, read and act on each in numeric order, then mv each in
+  | to its handled/.
+  | bash-5.2$
+
+worker resolves its inbox from $FM_TASK_INBOX in that same pane:
+  | -segment-7/fleet-home-segment-8/fleet-home-segment-9/fleet-home-segment-10/state
+  | /t1.inbox/002.msg
+  | bash-5.2$

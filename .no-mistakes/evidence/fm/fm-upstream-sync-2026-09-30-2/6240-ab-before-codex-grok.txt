@@ -1,0 +1,17 @@
+# codex (codex-cli 0.118.0): idle composer never classified empty; proceeding as production does (advisory check skips only on pending)
+# codex (codex-cli 0.118.0): re-rang the doorbell once (watcher's role) at 100s
+not ok - codex (codex-cli 0.118.0): doorbell not honored within 200s (acted=no acked=no)
+# grok (grok 1.0.44 (5b807183dd79) [stable]): idle composer never classified empty; proceeding as production does (advisory check skips only on pending)
+# grok (grok 1.0.44 (5b807183dd79) [stable]): re-rang the doorbell once (watcher's role) at 100s
+not ok - grok (grok 1.0.44 (5b807183dd79) [stable]): doorbell not honored within 200s (acted=no acked=no)
+#                                                                                                                                                                                                                              █
+#                                                                                                                                                                                                                              █
+#                                                                                                                                                                                                                              █
+#                                                                                                                                                                                                                              █
+#                                                                                                                                                                                                                              █
+#                                                                                                                                                                                                                              █
+#     ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+#     │ ❯                                                                                                                                                                                                                    │
+#     ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Weekly limit left: 0% · Grok 4.5 (high) · always-approve ─╯
+#     Shift+Tab:mode  │  Ctrl+x:shortcuts
+not ok - live steering-inbox doorbell guard found failures above
