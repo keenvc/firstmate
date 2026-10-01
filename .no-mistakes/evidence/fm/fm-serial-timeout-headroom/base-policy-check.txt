@@ -1,0 +1,17 @@
+job                              timeout-minutes
+  lint                             30
+  test-coverage                    5
+  tests-portable-parallel-1        30
+  tests-portable-parallel-2        30
+  tests-portable-serial            30
+  tests-herdr                      75
+  tests-timing-aggregate           5
+  macos-stock-bash                 30
+  invariants                       5
+Traceback (most recent call last):
+  File "/home/azureuser/.no-mistakes/evidence/01M3WMA4D4K3RGF28BYPTP6PDD/verify-ci-timeout-policy.py", line 100, in <module>
+    main(sys.argv[1], sys.argv[2])
+  File "/home/azureuser/.no-mistakes/evidence/01M3WMA4D4K3RGF28BYPTP6PDD/verify-ci-timeout-policy.py", line 57, in main
+    assert normal == EXPECTED_NORMAL, (
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: normal tier must be the single 60-minute shared budget, got 30

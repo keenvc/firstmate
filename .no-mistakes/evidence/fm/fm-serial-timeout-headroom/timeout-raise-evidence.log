@@ -1,0 +1,56 @@
+===== change under test (3 commits on top of 947d898f) =====
+  cc552ae3 ci: raise the Normal timeout tier 30 to 60 minutes for serial-shard headroom
+   .github/workflows/ci.yml        | 10 +++++-----
+   docs/fm-test-portable-shards.md |  4 ++--
+   tests/fm-ci-workflow.test.sh    |  6 +++---
+   3 files changed, 10 insertions(+), 10 deletions(-)
+  1bcb9a07 docs: reconcile the timeout policy prose with the raised Normal bound
+   docs/fm-test-portable-shards.md | 3 ++-
+   1 file changed, 2 insertions(+), 1 deletion(-)
+  0a4a1af2 no-mistakes(review): docs: align Normal-tier timeout references with 60-minute bound
+   bin/fm-test-run.sh        | 4 ++--
+   tests/fm-test-run.test.sh | 2 +-
+   2 files changed, 3 insertions(+), 3 deletions(-)
+
+===== semantic policy check: TARGET (0a4a1af2) =====
+job                              timeout-minutes
+  lint                             60
+  test-coverage                    5
+  tests-portable-parallel-1        60
+  tests-portable-parallel-2        60
+  tests-portable-serial            60
+  tests-herdr                      75
+  tests-timing-aggregate           5
+  macos-stock-bash                 60
+  invariants                       5
+
+fast=5 normal=60 heavy=75 distinct_job_values=[5, 60, 75]
+herdr family-run step=20 under job backstop=75
+POLICY OK: every job in one tier; normal tier shares the 60-minute budget; heavy 75 > normal 60.
+DOCS OK: tier table states 60 minutes and the prose names the evidence bar.
+
+===== semantic policy check: BASE (23e55847) — expected to reject 30 =====
+job                              timeout-minutes
+  lint                             30
+  test-coverage                    5
+  tests-portable-parallel-1        30
+  tests-portable-parallel-2        30
+  tests-portable-serial            30
+  tests-herdr                      75
+  tests-timing-aggregate           5
+  macos-stock-bash                 30
+  invariants                       5
+Traceback (most recent call last):
+  File "/home/azureuser/.no-mistakes/evidence/01M3WMA4D4K3RGF28BYPTP6PDD/verify-ci-timeout-policy.py", line 100, in <module>
+    main(sys.argv[1], sys.argv[2])
+  File "/home/azureuser/.no-mistakes/evidence/01M3WMA4D4K3RGF28BYPTP6PDD/verify-ci-timeout-policy.py", line 57, in main
+    assert normal == EXPECTED_NORMAL, (
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: normal tier must be the single 60-minute shared budget, got 30
+
+===== live product: bin/fm-test-run.sh --check-coverage =====
+FM_TEST_COVERAGE ok total=251 parallel=24 parallel_max_ms=665545 parallel_imbalance_ms=2 parallel_unhinted=0 serial=211 serial_shards=9 serial_unhinted=10 serial_max_ms=1074843 serial_budget_ms=1200000 herdr=16
+
+===== repo guard test (requires ruby; absent in this env) =====
+not ok - ruby is required to parse .github/workflows/ci.yml as YAML
+exit=1

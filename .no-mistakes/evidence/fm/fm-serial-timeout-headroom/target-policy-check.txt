@@ -1,0 +1,15 @@
+job                              timeout-minutes
+  lint                             60
+  test-coverage                    5
+  tests-portable-parallel-1        60
+  tests-portable-parallel-2        60
+  tests-portable-serial            60
+  tests-herdr                      75
+  tests-timing-aggregate           5
+  macos-stock-bash                 60
+  invariants                       5
+
+fast=5 normal=60 heavy=75 distinct_job_values=[5, 60, 75]
+herdr family-run step=20 under job backstop=75
+POLICY OK: every job in one tier; normal tier shares the 60-minute budget; heavy 75 > normal 60.
+DOCS OK: tier table states 60 minutes and the prose names the evidence bar.
