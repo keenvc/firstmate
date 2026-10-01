@@ -126,7 +126,8 @@ The workflow retains per-PR supersession without cancelling main pushes or chang
 
 CI job timeouts follow one three-tier policy, so the workflow reads as a policy rather than as a collection of per-job numbers.
 Every tier is a hang tripwire with headroom above the healthy duration, never a packing estimate or a runtime target.
-A lane that reaches its tier bound needs investigation and a distribution or runtime fix, not a larger timeout to fit the same work.
+A lane that reaches its tier bound needs investigation and a distribution or runtime fix before the tier changes again.
+Raising a bound is a deliberate owner decision that must cite observed evidence of lost headroom - a job killed at the bound with its assertions still passing - not a way to fit the same work into a slower lane.
 
 | Tier | Jobs | Bound | Rationale |
 |---|---|---|---|
