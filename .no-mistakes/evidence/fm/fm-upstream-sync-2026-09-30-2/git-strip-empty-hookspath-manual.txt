@@ -1,0 +1,9 @@
+### Manual reproduction: empty core.hooksPath runs no repository hook (upstream #6216)
+core.hooksPath=[]
+commit exit=0
+commit stderr/stdout=[]
+default repository pre-commit hook ran? no
+committed body:
+fix: empty hooksPath
+
+Cursor trailer present? 0

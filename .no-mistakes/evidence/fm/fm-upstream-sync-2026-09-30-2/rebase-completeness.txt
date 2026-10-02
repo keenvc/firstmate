@@ -1,0 +1,11 @@
+### Rebase completeness: target tree vs fork-main-with-PR#16 tip 5a367585
+$ git diff --stat 5a367585 950ab0f3
+ docs/fm-test-portable-shards.md | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+The only difference is the fork's own fork-specific wording in docs/fm-test-portable-shards.md;
+every PR #16 file (.github/workflows/ci.yml, tests/fm-calm-pi-extension.test.sh, tests/fm-ci-workflow.test.sh,
+tests/fm-test-run.test.sh, bin/fm-test-run.sh) is byte-identical to fork main.
+
+$ git diff --stat 5a367585 950ab0f3 -- .github/workflows/ci.yml tests/fm-calm-pi-extension.test.sh tests/fm-ci-workflow.test.sh tests/fm-test-run.test.sh bin/fm-test-run.sh
+(no output above = byte-identical)
