@@ -1,0 +1,37 @@
+commit 916ad55350490471c27592d25b18a292c479b550
+Author: keenvc <nmurray@gmail.com>
+Date:   Fri Oct 2 04:56:04 2026 +0000
+
+    docs: correct the portable hint-table coverage claims for this fork
+    
+    The hint tables' five measured CI runs are upstream's, and they cover the
+    lane sizes upstream held when they ran. This fork's serial lane carries
+    additional fork-only members no upstream run measured, so state that they
+    pack on the PORTABLE_SERIAL_DEFAULT_WEIGHT_MS default until the fork
+    refreshes its own hints, and point at bin/fm-test-run.sh --check-coverage
+    for the live lane size and unmeasured share instead of a count copied here.
+    Generalize the refresh command's -R owner placeholder to match.
+
+diff --git a/docs/fm-test-portable-shards.md b/docs/fm-test-portable-shards.md
+index bbe07dfb..71f65aab 100644
+--- a/docs/fm-test-portable-shards.md
++++ b/docs/fm-test-portable-shards.md
+@@ -12,7 +12,8 @@ Local timings are not interchangeable with CI timings: platform and machine load
+ Both hint tables were refreshed on 2026-09-30 from five Ubuntu CI runs: [36583881812](https://github.com/kunchenguid/firstmate/actions/runs/36583881812), [36658498535](https://github.com/kunchenguid/firstmate/actions/runs/36658498535), [36663947738](https://github.com/kunchenguid/firstmate/actions/runs/36663947738), [36664663190](https://github.com/kunchenguid/firstmate/actions/runs/36664663190), and [36669175457](https://github.com/kunchenguid/firstmate/actions/runs/36669175457).
+ Use the slowest successful `duration_ms` per script across their uploaded portable timing artifacts and completed `FM_TEST_END` log markers, with the two version/platform exceptions below.
+ All artifact records were cross-checked against the corresponding job's markers.
+-This covers all 24 parallel and 201 serial members; an existing live-capability skip is a portable-runner measurement, not a timing claim for the unavailable live integration.
++Those runs are upstream's, and their records cover all 24 parallel members and the 201 serial members the lane held upstream; an existing live-capability skip is a portable-runner measurement, not a timing claim for the unavailable live integration.
++This fork's serial lane carries additional fork-only members that no upstream run measured, so each of them packs on the `PORTABLE_SERIAL_DEFAULT_WEIGHT_MS` default until the fork refreshes its own hints from its own green CI runs; read the current lane size and unmeasured share from `bin/fm-test-run.sh --check-coverage` rather than from a count copied here.
+ Observed maxima provide conservative packing weights, not an upper bound on future durations.
+ 
+ Two serial-5 jobs were cancelled at their 30-minute cap and uploaded no artifact.
+@@ -78,7 +79,7 @@ Refresh the CI-derived hints by downloading the per-shard timing artifacts from
+ 
+ ```sh
+ for run in <run-id> <run-id> <run-id>; do
+-  gh-axi run download "$run" -R kunchenguid/firstmate --dir "/tmp/fm-serial/$run"
++  gh-axi run download "$run" -R <owner>/firstmate --dir "/tmp/fm-serial/$run"
+ done
+ jq -r '.scripts[] | select(.exit == 0) | [.path, .duration_ms] | @tsv' /tmp/fm-serial/*/fm-test-timing-portable-serial-*/*.json \
+   | awk -F'\t' '$2 > m[$1] { m[$1] = $2 } END { for (p in m) print p, m[p] }' \

@@ -1,0 +1,10 @@
+tests/fm-backend-herdr-probe-timeout.test.sh
+tests/fm-claim.test.sh
+tests/fm-cline-harness.test.sh
+tests/fm-cline-signals-live-e2e.test.sh
+tests/fm-hold-reverify.test.sh
+tests/fm-openhands-harness.test.sh
+tests/fm-openhands-signals-live-e2e.test.sh
+tests/fm-provider-lane-cap.test.sh
+tests/fm-quota-wall-live-e2e.test.sh
+tests/fm-watcher-continuity.test.sh
