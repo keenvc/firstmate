@@ -1,0 +1,22 @@
+Calm E2E serial-6 determinism - before/after reproduction (real Pi TUI in tmux)
+
+Pre-fix test (git 51581a18, 180x44 pane, -S -600 captures) + Pi 1.0.0:
+  $ PATH=/tmp/pi100/... FM_PI_PACKAGE_DIR=/tmp/pi100/... bash <pre-fix test>
+  not ok - calm mode was not off by default (missing: 'CALM_E2E_OUTPUT')
+  -> reproduces CI serial 6 runs 36929988626 / 36938007991 / 36945567914 exactly.
+
+Fixed test (HEAD 71fab4e8, 180x120 pane, full-scrollback captures) + Pi 1.0.0:
+  $ PATH=/tmp/pi100/... FM_PI_PACKAGE_DIR=/tmp/pi100/... bash tests/fm-calm-pi-extension.test.sh
+  ... gets past the whole calm-off default-view block (CALM_E2E_OUTPUT, fm_watch_arm_pi,
+      synthetic presentation row, Thinking..., fm-calm.ts) ...
+  not ok - /calm changed the active Ctrl+O expansion state (missing: 'escape to interrupt')
+  -> the only remaining Pi 1.0.0 delta is the C-o expansion footer, the tracked porting
+     work the CI pin note references; the serial-6 default-view failure is gone.
+
+CI-pinned version (0.99.2), full suite:
+  $ PATH=/tmp/pi0992/... FM_PI_PACKAGE_DIR=/tmp/pi0992/... bash tests/fm-calm-pi-extension.test.sh
+  EXIT=0, 15/15 ok, no skips.
+
+Local default Pi (0.99.1), full suite:
+  $ bash tests/fm-calm-pi-extension.test.sh
+  EXIT=0, 15/15 ok, no skips.

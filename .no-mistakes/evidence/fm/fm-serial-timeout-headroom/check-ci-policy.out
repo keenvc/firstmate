@@ -1,0 +1,6 @@
+job timeouts: {'invariants': 5, 'lint': 60, 'macos-stock-bash': 60, 'test-coverage': 5, 'tests-herdr': 75, 'tests-portable-parallel-1': 60, 'tests-portable-parallel-2': 60, 'tests-portable-serial': 60, 'tests-timing-aggregate': 5}
+distinct job-level timeout values: [5, 60, 75]
+pi install commands:
+  tests-portable-parallel-1: npm install -g @earendil-works/pi-coding-agent@0.99.2
+  tests-portable-serial: npm install -g @earendil-works/pi-coding-agent@0.99.2
+PASS: normal tier 60m across all 5 jobs; distinct values 5/60/75; both pi installs pinned @0.99.2
