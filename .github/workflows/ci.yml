@@ -112,10 +112,13 @@ jobs:
           set -eu
           npm install -g tasks-axi
           tasks-axi --version
+      # Pinned for the same reason as the serial-shard install below: Pi 1.0.0
+      # moved the interactive TUI onto the alternate screen and breaks the live
+      # extension E2Es. Unpin once those E2Es are ported to the 1.0.0 renderer.
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install -g @earendil-works/pi-coding-agent
+          npm install -g @earendil-works/pi-coding-agent@0.99.2
           npm ls -g --depth 0 @earendil-works/pi-coding-agent
       - name: Run portable parallel shard 1
         run: |
@@ -216,10 +219,15 @@ jobs:
       # The Pi extension tests read the installed Pi package's own types and
       # runtime, so without it they gate-skip and pass silently. It is a public
       # npm package and needs no credential, so CI can hold the real thing.
+      # The version is pinned like the other tool installs above: Pi 1.0.0
+      # moved the interactive TUI onto the alternate screen, which drops the
+      # earliest restored-transcript rows out of every pane capture and fails
+      # the live calm/extension E2Es (serial 6, runs 36929988626, 36938007991,
+      # 36945567914). Unpin once those E2Es are ported to the 1.0.0 renderer.
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          npm install -g @earendil-works/pi-coding-agent
+          npm install -g @earendil-works/pi-coding-agent@0.99.2
           npm ls -g --depth 0 @earendil-works/pi-coding-agent
       - name: Run portable serial shard ${{ matrix.shard }}
         env:
