@@ -1,0 +1,15 @@
+lint                                          timeout-minutes=60  name=Lint ${{ matrix.partition }}
+test-coverage                                 timeout-minutes=5  name=Test coverage guard
+tests-portable-parallel-1                     timeout-minutes=60  name=Behavior portable parallel 1
+tests-portable-parallel-2                     timeout-minutes=60  name=Behavior portable parallel 2
+tests-portable-serial                         timeout-minutes=60  name=Behavior portable serial ${{ matrix.shard }}
+tests-herdr                                   timeout-minutes=75  name=Behavior tests (Herdr)
+tests-timing-aggregate                        timeout-minutes=5  name=Behavior timing aggregate
+macos-stock-bash                              timeout-minutes=60  name=Stock macOS Bash snapshot compatibility
+invariants                                    timeout-minutes=5  name=Repo invariants
+
+distinct job-level timeout values: [5, 60, 75]
+counts: {60: 5, 5: 3, 75: 1}
+normal jobs all 60: True
+fast jobs all 5: True
+heavy backstop 75 > normal 60: True
