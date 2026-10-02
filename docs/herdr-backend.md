@@ -633,6 +633,7 @@ It hands the visible pane's ANSI viewport plus Herdr's capability facts to the f
 - Bare agent-glyph rows, including muse's `⟩`, which the adapter's retired local pattern silently omitted.
 - opencode's left bar.
 - The Pi separator region this adapter pioneered, admitted only when native `agent get` identity is exactly Pi and state is idle or done.
+- The agy composer row - a bare `>` above a full-width rule - admitted only when native `agent get` identity is exactly agy.
 
 ### Pi composer states
 

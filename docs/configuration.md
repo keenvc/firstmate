@@ -494,6 +494,7 @@ Backend guides and other documents refer here instead of restating the resolutio
 
 `fm-teardown.sh <id>` takes a task id directly and validates the complete metadata-only endpoint identity before any runtime dispatch or cleanup mutation.
 Missing, empty, duplicate, malformed, backend-inconsistent, or task-mismatched endpoint records are preserved and refused.
+A windowless record carrying an explicit `endpoint_cleared=<reason>` stamp is accepted as already-closed agent-less evidence with no flag and no `--force`, which is how a lane whose pane or workspace was closed by hand can still be retired; the unlanded-work refusal is unchanged, and [`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns the stamp's shape.
 
 Legacy tmux metadata remains cleanup-compatible when its exact window name is `fm-<id>`; opaque non-tmux endpoints require their recorded `endpoint_task_id=` binding.
 
@@ -768,7 +769,7 @@ cline is likewise verified for crewmate and scout launches ONLY, refused for a s
 openhands is likewise verified for crewmate and scout launches ONLY, refused for a secondmate for the same reason - no hook surface and no primary supervision protocol; [`docs/verification/openhands.md`](verification/openhands.md) owns that evidence, including the per-task HOME required because the SDK profile store is hardcoded under `~/.openhands/profiles`.
 openhands also needs `LLM_API_KEY` before spawning, taken from the environment or from the optional gitignored `config/openhands-llm.env`, and `LLM_MODEL` from `--model` (a LiteLLM id such as `fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash`).
 
-Its private worker config disables Claude Code imports (including the captain's hooks) and, unless the home sets `config/keep-ai-trailers` (see "Commit attribution"), Devin commit attribution without editing user or project config; [`fm-devin-config.sh`](../bin/fm-devin-config.sh) owns these enforced settings and [Devin verification](verification/devin.md) owns the live evidence and observed model availability.
+Devin's private worker config disables Claude Code imports (including the captain's hooks) and, unless the home sets `config/keep-ai-trailers` (see "Commit attribution"), Devin commit attribution without editing user or project config; [`fm-devin-config.sh`](../bin/fm-devin-config.sh) owns these enforced settings and [Devin verification](verification/devin.md) owns the live evidence and observed model availability.
 
 ### Verification and primary supervision
 New harnesses get verified through a supervised trial task before joining the set.
