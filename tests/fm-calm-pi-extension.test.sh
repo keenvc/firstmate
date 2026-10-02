@@ -20,6 +20,15 @@ PI_OPERATIONAL_INPUT="$ROOT/.pi/extensions/lib/fm-operational-input.ts"
 PI_PACKAGE_DIR=${FM_PI_PACKAGE_DIR:-"$(npm root -g 2>/dev/null)/@earendil-works/pi-coding-agent"}
 TMUX_SOCKET="fm-calm-$$"
 TMUX_SESSION="fm-calm-e2e"
+# Restored E2E transcripts can exceed 600 lines, so any capture that must see
+# the earliest restored rows uses full scrollback; a fixed window silently
+# drops the top of the transcript as later turns render and has produced a
+# deterministic CI failure (missing CALM_E2E_OUTPUT) with the same suite green
+# locally.
+capture_full() {
+  local file=$1
+  tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S - >"$file" 2>/dev/null || true
+}
 # Verified against Pi 0.81.1 and 0.82.0 (docs/calm-mode-feasibility.md). This is
 # known-good evidence, not a support ceiling: the fixtures below run against whatever
 # Pi is actually installed, and record_pi_version_evidence never rejects a newer
@@ -42,10 +51,10 @@ trap cleanup EXIT
 wait_for_text() {
   local file=$1 text=$2 i=0
   while [ "$i" -lt 120 ]; do
-    # Include recent scrollback: expanding a long restored transcript can move
-    # the asserted tool output above the current viewport while the footer and
-    # editor remain visible.
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$file" 2>/dev/null || true
+    # Include the full scrollback: a long restored transcript keeps growing
+    # above the viewport, so a fixed window can drop the earliest asserted
+    # rows (the restored tool output) off the top as later turns render.
+    capture_full "$file"
     grep -Fq "$text" "$file" 2>/dev/null && return 0
     sleep 0.05
     i=$((i + 1))
@@ -2618,7 +2627,7 @@ TS
     elif [ "$calm_state" = on ]; then
       # Nothing appears to wait for, so give Pi's listing a moment to repaint.
       sleep 1
-      tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$TMP_ROOT/queued-escape-pane"
+      capture_full "$TMP_ROOT/queued-escape-pane"
     else
       wait_for_text "$TMP_ROOT/queued-escape-pane" "Follow-up:" \
         || fail "Pi queued-row $label case never listed the queued notification"
@@ -4172,12 +4181,12 @@ TS
   cat >"$session_file" <<JSON
 {"type":"session","version":3,"id":"11111111-1111-4111-8111-111111111111","timestamp":"$now","cwd":"$project"}
 {"type":"message","id":"a0000001","parentId":null,"timestamp":"$now","message":{"role":"user","content":[{"type":"text","text":"Show a deterministic tool example."}],"timestamp":1}}
-{"type":"message","id":"a0000002","parentId":"a0000001","timestamp":"$now","message":{"role":"assistant","content":[{"type":"thinking","thinking":"first internal reasoning block"},{"type":"text","text":"I will run one command."},{"type":"toolCall","id":"call_calm_e2e","name":"bash","arguments":{"command":"printf 'CALM_E2E_OUTPUT\\n'"}}],"api":"anthropic-messages","provider":"anthropic","model":"claude-sonnet-4-5","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":2}}
+{"type":"message","id":"a0000002","parentId":"a0000001","timestamp":"$now","message":{"role":"assistant","content":[{"type":"thinking","thinking":"first internal reasoning block"},{"type":"text","text":"I will run one command."},{"type":"toolCall","id":"call_calm_e2e","name":"bash","arguments":{"command":"printf 'CALM_E2E_OUTPUT\\n'"}}],"api":"calm-e2e-api","provider":"calm-e2e","model":"delayed","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":2}}
 {"type":"message","id":"a0000003","parentId":"a0000002","timestamp":"$now","message":{"role":"toolResult","toolCallId":"call_calm_e2e","toolName":"bash","content":[{"type":"text","text":"CALM_E2E_OUTPUT"}],"details":{},"isError":false,"timestamp":3}}
-{"type":"message","id":"a0000004","parentId":"a0000003","timestamp":"$now","message":{"role":"assistant","content":[{"type":"thinking","thinking":"second internal reasoning block"},{"type":"toolCall","id":"call_grep_e2e","name":"grep","arguments":{"pattern":"CALM_EXPORT_GREP","path":"."}},{"type":"toolCall","id":"call_find_e2e","name":"find","arguments":{"pattern":"CALM_EXPORT_FIND*","path":"."}}],"api":"anthropic-messages","provider":"anthropic","model":"claude-sonnet-4-5","usage":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":4}}
+{"type":"message","id":"a0000004","parentId":"a0000003","timestamp":"$now","message":{"role":"assistant","content":[{"type":"thinking","thinking":"second internal reasoning block"},{"type":"toolCall","id":"call_grep_e2e","name":"grep","arguments":{"pattern":"CALM_EXPORT_GREP","path":"."}},{"type":"toolCall","id":"call_find_e2e","name":"find","arguments":{"pattern":"CALM_EXPORT_FIND*","path":"."}}],"api":"calm-e2e-api","provider":"calm-e2e","model":"delayed","usage":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":4}}
 {"type":"message","id":"a0000005","parentId":"a0000004","timestamp":"$now","message":{"role":"toolResult","toolCallId":"call_grep_e2e","toolName":"grep","content":[{"type":"text","text":"sample.txt:1:CALM_EXPORT_GREP"}],"details":{},"isError":false,"timestamp":5}}
 {"type":"message","id":"a0000006","parentId":"a0000005","timestamp":"$now","message":{"role":"toolResult","toolCallId":"call_find_e2e","toolName":"find","content":[{"type":"text","text":"CALM_EXPORT_FIND.txt"}],"details":{},"isError":false,"timestamp":6}}
-{"type":"message","id":"a0000007","parentId":"a0000006","timestamp":"$now","message":{"role":"assistant","content":[{"type":"thinking","thinking":"third internal reasoning block"},{"type":"toolCall","id":"call_watch_e2e","name":"fm_watch_arm_pi","arguments":{}}],"api":"anthropic-messages","provider":"anthropic","model":"claude-sonnet-4-5","usage":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":7}}
+{"type":"message","id":"a0000007","parentId":"a0000006","timestamp":"$now","message":{"role":"assistant","content":[{"type":"thinking","thinking":"third internal reasoning block"},{"type":"toolCall","id":"call_watch_e2e","name":"fm_watch_arm_pi","arguments":{}}],"api":"calm-e2e-api","provider":"calm-e2e","model":"delayed","usage":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"toolUse","timestamp":7}}
 {"type":"message","id":"a0000008","parentId":"a0000007","timestamp":"$now","message":{"role":"toolResult","toolCallId":"call_watch_e2e","toolName":"fm_watch_arm_pi","content":[{"type":"text","text":"watcher: started Pi extension arm child 1"}],"details":{"ok":true,"message":"watcher: started Pi extension arm child 1"},"isError":false,"timestamp":8}}
 {"type":"custom","id":"a0000009","parentId":"a0000008","timestamp":"$now","customType":"firstmate-synthetic-input-presentation","data":{"content":"FIRSTMATE WATCHER WAKE: signal: /tmp/probe.status\\n\\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.","kind":"watcher"}}
 {"type":"custom_message","id":"a0000010","parentId":"a0000009","timestamp":"$now","customType":"firstmate-synthetic-input","content":"FIRSTMATE WATCHER WAKE: signal: /tmp/probe.status\\n\\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.","display":false,"details":{"kind":"watcher"}}
@@ -4186,10 +4195,18 @@ TS
 {"type":"message","id":"a0000013","parentId":"a0000012","timestamp":"$now","message":{"role":"user","content":[{"type":"text","text":"FIRSTMATE_OP: v1 watcher: ASCII_ONLY_NEAR_MISS"}],"timestamp":13}}
 {"type":"message","id":"a0000014","parentId":"a0000013","timestamp":"$now","message":{"role":"user","content":[{"type":"text","text":"Ordinary captain text before \u2063FIRSTMATE_OP: v1 watcher: EMBEDDED_CURRENT_NEAR_MISS"}],"timestamp":14}}
 {"type":"message","id":"a0000015","parentId":"a0000014","timestamp":"$now","message":{"role":"user","content":[{"type":"text","text":"\u2063ordinary captain text after unrelated separator"}],"timestamp":15}}
-{"type":"message","id":"a0000016","parentId":"a0000015","timestamp":"$now","message":{"role":"assistant","content":[{"type":"text","text":"The deterministic tool example is complete."}],"api":"anthropic-messages","provider":"anthropic","model":"claude-sonnet-4-5","usage":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":16}}
+{"type":"message","id":"a0000016","parentId":"a0000015","timestamp":"$now","message":{"role":"assistant","content":[{"type":"text","text":"The deterministic tool example is complete."}],"api":"calm-e2e-api","provider":"calm-e2e","model":"delayed","usage":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":3,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":16}}
 JSON
 
-  tmux -L "$TMUX_SOCKET" new-session -d -s "$TMUX_SESSION" -x 180 -y 44 \
+  # Pi 1.0.0 renders the interactive TUI on the alternate screen, so the pane
+  # history no longer retains earlier transcript rows: the default view is the
+  # whole surface the test can assert on. The restored fixture transcript is
+  # taller than the old 44-row pane, which pushed its earliest rows (the bash
+  # tool output the calm-off assertions need) off the top and made this E2E
+  # fail deterministically wherever Pi 1.0.0 was installed (CI serial 6, runs
+  # 36929988626, 36938007991, and 36945567914). Give the detached pane enough
+  # rows to hold the entire restored transcript on every Pi version.
+  tmux -L "$TMUX_SOCKET" new-session -d -s "$TMUX_SESSION" -x 180 -y 120 \
     "cd '$project' && env FM_HOME='$home' PI_CODING_AGENT_DIR='$config' FM_OPERATIONAL_INPUT_SCRIPT='$OPERATIONAL_INPUT' PI_OFFLINE=1 pi --approve --no-skills --no-prompt-templates --no-context-files --session '$session_file'; rc=\$?; printf '\nPI_EXIT=%s\n' \"\$rc\"; sleep 30"
   wait_for_text "$default_snapshot" "The deterministic tool example is complete." \
     || fail "Pi calm E2E did not reach the restored session transcript"
@@ -4217,7 +4234,7 @@ JSON
     # Include scrollback: the built-in tool rows this documented bound keeps visible
     # (see below) lengthen the transcript enough to push earlier genuine content, such
     # as the original user prompt, above the plain viewport.
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$hidden_snapshot"
+    capture_full "$hidden_snapshot"
     # Wait for the redraw this block actually asserts: the collapsed-thinking adapter
     # (unconditional, unaffected by the built-in tool gate below) hides, and the
     # retained genuine rows are back on screen. Built-in tool rows from before this
@@ -4476,7 +4493,7 @@ JS
   # confirmation, so it must not overwrite it: the captain has to keep seeing where
   # their export landed. The export-data assertions above take seconds of real time,
   # so this snapshot is taken well after that repaint has settled rather than racing it.
-  tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$export_settled_snapshot"
+  capture_full "$export_settled_snapshot"
   assert_contains "$(cat "$export_settled_snapshot")" "Session exported to: $export_file" \
     "Calm's post-export repaint overwrote Pi's export confirmation"
   assert_not_contains "$(cat "$export_settled_snapshot")" "fm_watch_arm_pi" \
@@ -4746,7 +4763,7 @@ JS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Escape
   active_screen_wait=0
   while [ "$active_screen_wait" -lt 200 ]; do
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$boat_cleared_snapshot"
+    capture_full "$boat_cleared_snapshot"
     if ! grep -Fq '╲▁▁▁╱' "$boat_cleared_snapshot" &&
       [ "$(grep -Fc 'Operation aborted' "$boat_cleared_snapshot" || true)" -ge 1 ]; then
       break
@@ -4797,7 +4814,7 @@ JS
   tmux -L "$TMUX_SOCKET" send-keys -t "$TMUX_SESSION" Escape
   active_screen_wait=0
   while [ "$active_screen_wait" -lt 200 ]; do
-    tmux -L "$TMUX_SOCKET" capture-pane -p -t "$TMUX_SESSION" -S -600 >"$boat_cleared_snapshot"
+    capture_full "$boat_cleared_snapshot"
     if ! grep -Fq '╲▁▁▁╱' "$boat_cleared_snapshot" &&
       [ "$(grep -Fc 'Operation aborted' "$boat_cleared_snapshot" || true)" -ge 2 ]; then
       break
