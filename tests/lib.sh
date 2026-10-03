@@ -58,6 +58,14 @@ export FM_TEST_SEAM=1
 # under the marker. A case that verifies the refusal sets FM_TASK_ID itself.
 unset FM_TASK_ID
 
+# Clear an operator or worker shell's FM_HOME. The guard and instruction
+# renderers prefer it over FM_ROOT_OVERRIDE when resolving config, so a leaked
+# value points a fixture at the live home's config directory and silently
+# changes x-mode and supervision-host behavior (tests/fm-watcher-lock.test.sh's
+# guard-xmode case read the live home this way). Suites that need an FM_HOME set
+# it explicitly per subprocess below.
+unset FM_HOME
+
 # Clear the tasks-axi env overrides. An operator shell exports TASKS_AXI_FILE
 # (and may export TASKS_AXI_BACKEND) at its real home's backlog, and tasks-axi
 # resolves that env AHEAD of the .tasks.toml a fixture copies, so a suite that
