@@ -1,0 +1,14 @@
+LAB=/tmp/fm-live-adaptive.gq8z3e
+
+=== scenario A: 5.5s core read within a 20s budget (adapts UP past old 5s ceiling) ===
+latency=5.5 budget=20 wall=6s
+printed: (none)
+checked_at=2026-09-16T08:00:00Z error=null
+wake-queue: (empty)
+
+=== scenario B: 6.0s core read, 6s bound -> budget refusal, silent, record stale ===
+latency=6.0 budget=6 wall=5s
+printed: (none)
+checked_at=2026-09-15T08:00:00Z error=null
+wake-queue: (empty)
+LAB=/tmp/fm-live-adaptive.gq8z3e

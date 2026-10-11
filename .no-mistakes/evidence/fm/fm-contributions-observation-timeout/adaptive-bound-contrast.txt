@@ -1,0 +1,4 @@
+OLD (base e0d95ac7) core read 5.5s, budget 20:
+  rc=0 checked_at=2026-09-15T08:00:00Z
+NEW (f52211f8) core read 5.5s, budget 20:
+  rc=0 checked_at=2026-09-16T08:00:00Z
