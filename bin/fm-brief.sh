@@ -245,7 +245,7 @@ for a in "$@"; do
     --forge=*) FORGE=${a#--forge=}; FORGE_SET=1 ;;
     --shape) want_value=shape ;;
     --shape=*) SHAPE=${a#--shape=}; SHAPE_SET=1 ;;
-    --pr-draft-hold) want_value=pr-draft-hold ;;
+    --pr-draft-hold) want_value="pr-draft-hold" ;;
     --pr-draft-hold=*) PR_DRAFT_HOLD=${a#--pr-draft-hold=}; PR_DRAFT_HOLD_SET=1 ;;
     # yolo never reaches the worker: it is firstmate's merge authority, not a
     # brief input. Refuse it loudly so it is never silently dropped here and then

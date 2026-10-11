@@ -95,7 +95,7 @@ for a in "$@"; do
     --yolo=*) YOLO=${a#--yolo=}; YOLO_SET=1 ;;
     --branch-prefix) want_value="branch-prefix" ;;
     --branch-prefix=*) BRANCH_PREFIX=${a#--branch-prefix=} ;;
-    --pr-draft-hold) want_value=pr-draft-hold ;;
+    --pr-draft-hold) want_value="pr-draft-hold" ;;
     --pr-draft-hold=*) PR_DRAFT_HOLD=${a#--pr-draft-hold=}; PR_DRAFT_HOLD_SET=1 ;;
     *) POS+=("$a") ;;
   esac
