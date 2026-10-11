@@ -393,6 +393,13 @@ case "$QUEUED_LIMIT" in ''|*[!0-9]*|0) QUEUED_LIMIT=20 ;; esac
 ENDPOINT_TIMEOUT=${FM_SESSION_START_ENDPOINT_TIMEOUT:-10}
 case "$ENDPOINT_TIMEOUT" in ''|*[!0-9]*) ENDPOINT_TIMEOUT=10 ;; esac
 [ "$ENDPOINT_TIMEOUT" -gt 0 ] 2>/dev/null || ENDPOINT_TIMEOUT=10
+ENDPOINT_HERDR_TIMEOUT=$ENDPOINT_TIMEOUT
+case "${FM_BACKEND_HERDR_CLI_TIMEOUT:-}" in
+  ''|*[!0-9]*) ;;
+  *) if [ "$FM_BACKEND_HERDR_CLI_TIMEOUT" -gt 0 ] && [ "$FM_BACKEND_HERDR_CLI_TIMEOUT" -lt "$ENDPOINT_TIMEOUT" ]; then
+       ENDPOINT_HERDR_TIMEOUT=$FM_BACKEND_HERDR_CLI_TIMEOUT
+     fi ;;
+esac
 BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
 
 RULE='================================================================================'
@@ -582,8 +589,11 @@ print_status_tail() {
 # per read; that cost is a few milliseconds per task and buys the isolation.
 fm_session_start_endpoint_read() {  # <backend> <target> [expected-label]
   local backend=$1 target=$2 label=${3:-}
+  # The backend CLI keeps its own process group under its own bound; cap it at
+  # this read's bound so the outer kill cannot strand a hung CLI for the
+  # adapter's default 10s.
   # shellcheck disable=SC2016  # Positional parameters expand inside the child bash, not here.
-  fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
+  FM_BACKEND_HERDR_CLI_TIMEOUT=$ENDPOINT_HERDR_TIMEOUT fm_run_timed "$ENDPOINT_TIMEOUT" bash -c '
     . "$1"
     fm_backend_target_exists "$2" "$3" "$4"
   ' _ "$SCRIPT_DIR/fm-backend.sh" "$backend" "$target" "$label"
