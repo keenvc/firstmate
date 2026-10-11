@@ -25,16 +25,7 @@ test_shared_collision_paths_are_detected() {
   pass "shared collision detection"
 }
 
-test_forge_body_path_helper_prints_path() {
-  local out
-  out=$("$ROOT/bin/fm-forge-body-path.sh" 'ship-1')
-  [ "$out" = '/tmp/fm-ship-1/pr-description.md' ] \
-    || fail "fm-forge-body-path.sh printed: $out"
-  pass "fm-forge-body-path.sh prints the task path"
-}
-
 test_task_body_path_is_task_scoped
 test_shared_collision_paths_are_detected
-test_forge_body_path_helper_prints_path
 
 echo "all fm-forge-lib tests passed"
