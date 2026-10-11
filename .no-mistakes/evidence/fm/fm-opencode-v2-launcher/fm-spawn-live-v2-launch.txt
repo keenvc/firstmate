@@ -1,0 +1,17 @@
+# real bin/fm-spawn.sh driven against real opencode v2.0.26 (opencode --version)
+# fake tmux only captures the send-keys launch literal; opencode itself is the real binary
+
+### spawn: live-opencode-v2-a (args: --model anthropic/claude-sonnet-4-5 --effort high)
+meta: harness=opencode
+model=anthropic/claude-sonnet-4-5
+effort=high
+launch:
+export COMPACT_ADVISER_DISABLE=1; export FM_TASK_INBOX='/tmp/live-opencode-v2.9AiOMM/home/state/live-opencode-v2-a.inbox'; export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='/tmp/live-opencode-v2.9AiOMM/home/state/live-opencode-v2-a.git-hooks'; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI OPENCODE_CONFIG_CONTENT='{"permission":{"*":"allow"},"model":"anthropic/claude-sonnet-4-5"}' opencode --standalone --prompt "$('/home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M4P7Y4R31F2QYHZ6R3FS0TT2/bin/fm-operational-input.sh' encode launch-brief < '/tmp/live-opencode-v2.9AiOMM/home/data/live-opencode-v2-a/launch-brief.md')"
+
+### spawn: live-opencode-v2-b (args: )
+meta: harness=opencode
+model=default
+effort=default
+launch:
+export COMPACT_ADVISER_DISABLE=1; export FM_TASK_INBOX='/tmp/live-opencode-v2.9AiOMM/home/state/live-opencode-v2-b.inbox'; export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0='/tmp/live-opencode-v2.9AiOMM/home/state/live-opencode-v2-b.git-hooks'; env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI OPENCODE_CONFIG_CONTENT='{"permission":{"*":"allow"}}' opencode --standalone --prompt "$('/home/azureuser/.no-mistakes/worktrees/6f716179fc56/01M4P7Y4R31F2QYHZ6R3FS0TT2/bin/fm-operational-input.sh' encode launch-brief < '/tmp/live-opencode-v2.9AiOMM/home/data/live-opencode-v2-b/launch-brief.md')"
+
