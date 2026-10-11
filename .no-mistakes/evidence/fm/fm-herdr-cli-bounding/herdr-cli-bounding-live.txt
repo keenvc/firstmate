@@ -1,0 +1,41 @@
+Live validation of fm/fm-herdr-cli-bounding (e7f8bd04) - Herdr CLI bounding + session-start clamp
+=================================================================================================
+
+Branch: fm/fm-herdr-cli-bounding
+Base:   e0d95ac770dee9dde8a59330656357ab2e5fd74e
+Target: e7f8bd04a08ad8e577283014cb0c482f71c86533
+
+1) Shared bound normalizer (bin/fm-timeout-lib.sh fm_bound_seconds), executed live:
+   unset(empty) -> 10
+   abc          -> 10
+   00           -> 10
+   0            -> 10
+   3            -> 3
+   60           -> 60
+   (empty)      -> 10
+   10           -> 10
+
+2) fm_backend_herdr_bounded live bound + reap of a TERM-ignoring hung process:
+   FM_BACKEND_HERDR_CLI_TIMEOUT=2 fm_backend_herdr_bounded bash -c 'trap "" TERM; sleep 30'
+   -> rc=124 elapsed=2s
+   hung shell pid=86023 -> still alive after 6s settle: 0 (reaped)
+
+3) Real Herdr throwaway lab (bin/fm-herdr-lab.sh) with real herdr 0.9.3:
+   session: fm-lab-boundcheck-136944-30228 (non-default fm-lab-*)
+   provision: ok
+   fm_backend_herdr_client_status herdr <lab>  -> true|true  (server running, compatible)
+   fm_backend_herdr_socket_path <lab>          -> /home/azureuser/.config/herdr/sessions/fm-lab-boundcheck-136944-30228/herdr.sock
+   fm_backend_herdr_cli <lab> status --json    -> {"server":{...,"running":true,...,"session":"fm-lab-boundcheck-136944-30228"}, "client":{...,"session":"fm-lab-boundcheck-136944-30228"}}
+   teardown: ok (fleet-state tripwire verified; default session untouched)
+
+4) Committed end-to-end tests (drive the real scripts against a TERM-ignoring fake herdr):
+   tests/fm-backend-herdr-probe-timeout.test.sh:
+     ok - capture read: a TERM-ignoring hung herdr is bounded and its process is reaped
+     ok - composer_state probe: a TERM-ignoring hung herdr is bounded and its process is reaped
+     ok - fm_backend_herdr_cli: the shared read owner bounds and reaps a hung herdr
+     ok - fm_backend_herdr_cli: the long-lived server launch stays exempt from the bound
+   tests/fm-session-start.test.sh (relevant new cases):
+     ok - a herdr CLI bound tighter than the per-read bound is kept for the endpoint read
+     ok - the per-read bound caps a looser herdr CLI bound, so a hung herdr never outlives the read
+     ok - unset, non-numeric, and zero-padded herdr CLI timeouts resolve to the 10s default, not the read bound minus one
+   (full tests/fm-session-start.test.sh completed: "# fm-session-start.test.sh: all assertions passed")
