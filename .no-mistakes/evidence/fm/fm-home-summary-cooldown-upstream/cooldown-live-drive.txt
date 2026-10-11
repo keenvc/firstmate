@@ -1,0 +1,45 @@
+
+==== baseline direct publish (SNAP 2098) ====
+rc=0
+generated=2098-06-01T00:00:00Z
+log_exists=no
+
+==== induce a REAL failed best-effort refresh (failbin jq -> producer exit 7) ====
+rc=0
+log_mtime=1791748344
+now=1791748344
+failure_recorded=yes
+
+==== scenario 1: recent failure suppresses the next best-effort refresh (SNAP would be 2099) ====
+rc=0 elapsed=0s generated=2098-06-01T00:00:00Z
+ledger_unchanged=yes
+
+==== scenario 5 (stampede): 1 real failure then 4 triggers must not re-run the producer ====
+run1 rc=0
+producer_attempts_after_run1=1
+run2 rc=0
+run3 rc=0
+run4 rc=0
+run5 rc=0
+producer_attempts_after_run5=1
+
+==== scenario 2a: expired error log resumes best-effort cadence (SNAP 2100) ====
+rc=0
+generated=2100-06-01T00:00:00Z
+
+==== scenario 2b: missing error log lets best-effort publish (SNAP 2101) ====
+rc=0
+generated=2101-06-01T00:00:00Z
+
+==== scenario 3: DIRECT refresh is never cooled down even with a fresh error log (SNAP 2102) ====
+log_age_seconds=0
+rc=0
+generated=2102-06-01T00:00:00Z
+
+==== scenario 4: cooldown=0 disables the guard (fresh log, best-effort, SNAP 2103) ====
+rc=0
+generated=2103-06-01T00:00:00Z
+
+==== final ledger after successful refresh leaves the error log untouched ====
+log_mtime_after=1791748345
+now=1791748345
