@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regression test for the fm-spawn.sh treehouse-get worktree-detection settle
-# loop (bin/fm-spawn.sh, the `for _ in $(seq 1 60)` loop after `treehouse get`).
+# loop (bin/fm-spawn.sh, the treehouse-get settle poll after `treehouse get`).
 #
 # On some tmux/WSL setups a brand-new window's pane_current_path transiently
 # reports a stale, unrelated-but-real path on the very first poll, before the
@@ -110,6 +110,7 @@ run_settle_spawn() {
     FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
     FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_PANE_STALE="$STALE_DIR" \
     FM_FAKE_PANE_STALE_READS="$STALE_READS" FM_FAKE_PANE_COUNTFILE="$COUNTFILE" \
+    FM_SPAWN_TREEHOUSE_SETTLE_SECONDS="${FM_SPAWN_TREEHOUSE_SETTLE_SECONDS-}" \
     PATH="$FAKEBIN_DIR:$PATH" \
     "$SPAWN" "$id" "$PROJ_DIR" --mode no-mistakes --yolo off 2>&1
 }
@@ -221,9 +222,30 @@ test_primary_checkout_that_never_settles_fails_at_the_deadline() {
   pass "a pane stuck on the primary checkout fails loudly at the deadline"
 }
 
+# The refusal must name the configured settle limit, not a hard-coded 60s default.
+test_failure_message_reports_configured_settle_seconds() {
+  local rec id out status
+  id=settle-timeout-message-z5
+  rec=$(make_primary_case settle-timeout-message "$id" 100000)
+  read_settle_record "$rec"
+  fm_test_fake_sleep_noop "$FAKEBIN_DIR"
+
+  FM_SPAWN_TREEHOUSE_SETTLE_SECONDS=7
+  out=$(run_settle_spawn "$id")
+  status=$?
+  unset FM_SPAWN_TREEHOUSE_SETTLE_SECONDS
+  [ "$status" -ne 0 ] || fail "spawn should refuse when the pane never settles"$'\n'"$out"
+  assert_contains "$out" "within 7s" \
+    "the refusal did not report the configured FM_SPAWN_TREEHOUSE_SETTLE_SECONDS limit"
+  assert_not_contains "$out" "within 60s" \
+    "the refusal still named the old hard-coded 60s limit"
+  pass "the settle refusal reports FM_SPAWN_TREEHOUSE_SETTLE_SECONDS in the message"
+}
+
 test_single_stale_first_read_is_not_accepted
 test_already_settled_pane_costs_one_confirm_read
 test_transient_primary_checkout_is_not_accepted
 test_primary_checkout_that_never_settles_fails_at_the_deadline
+test_failure_message_reports_configured_settle_seconds
 
 echo "# all fm-spawn-worktree-settle tests passed"
