@@ -1,0 +1,17 @@
+=== Target commit test suite (tests/fm-spawn-worktree-settle.test.sh) ===
+ok - a single transient stale pane_current_path read is not accepted as the worktree
+ok - an already-settled pane confirms on the next read, not a whole extra cycle
+ok - a transient primary-checkout pane read is not accepted as the worktree
+ok - a pane stuck on the primary checkout fails loudly at the deadline
+ok - the settle refusal reports FM_SPAWN_TREEHOUSE_SETTLE_SECONDS in the message
+ok - the default limit tolerates a worktree that settles past the old 60-poll deadline
+ok - the default refusal reports the 180s default limit
+ok - a configured limit below the acquisition time shortens the actual poll loop
+ok - invalid FM_SPAWN_TREEHOUSE_SETTLE_SECONDS values fall back to the default
+# all fm-spawn-worktree-settle tests passed
+
+=== Before/after repro (real bin/fm-spawn.sh binary, 65-stale-read pane fixture) ===
+BASE (e0d95ac) error: treehouse get did not enter an isolated worktree within 60s
+  (last seen '<...>/primary': it is the repository's primary checkout ...); EXIT 1
+TARGET (97e8a7f5): spawned beforeafter-past60 harness=codex kind=ship mode=no-mistakes
+  yolo=off window=firstmate:fm-beforeafter-past60 worktree=<...>/slot; EXIT 0
