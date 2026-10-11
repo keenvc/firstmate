@@ -1,0 +1,10 @@
+### refusals (space form) ###
+path=/tmp/pr-body rc=1 stderr=error: forge body file '/tmp/pr-body' is a fixed shared /tmp name; use --body inline, /tmp/fm-<task-id>/pr-description.md, or another path under /tmp/fm-<task-id>/
+path=/tmp/pr-body.md rc=1 stderr=error: forge body file '/tmp/pr-body.md' is a fixed shared /tmp name; use --body inline, /tmp/fm-<task-id>/pr-description.md, or another path under /tmp/fm-<task-id>/
+path=/tmp/issue-body rc=1 stderr=error: forge body file '/tmp/issue-body' is a fixed shared /tmp name; use --body inline, /tmp/fm-<task-id>/pr-description.md, or another path under /tmp/fm-<task-id>/
+path=/tmp/issue-body.md rc=1 stderr=error: forge body file '/tmp/issue-body.md' is a fixed shared /tmp name; use --body inline, /tmp/fm-<task-id>/pr-description.md, or another path under /tmp/fm-<task-id>/
+### refusals (equals form) ###
+path=/tmp/pr-body.md rc=1 stderr=error: forge body file '/tmp/pr-body.md' is a fixed shared /tmp name; use --body inline, /tmp/fm-<task-id>/pr-description.md, or another path under /tmp/fm-<task-id>/
+path=/tmp/issue-body rc=1 stderr=error: forge body file '/tmp/issue-body' is a fixed shared /tmp name; use --body inline, /tmp/fm-<task-id>/pr-description.md, or another path under /tmp/fm-<task-id>/
+### missing path argument ###
+rc=2 stderr=error: fm-gh-axi: --body-file requires a path

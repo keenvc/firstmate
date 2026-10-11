@@ -1,0 +1,5 @@
+### pass-through (task-scoped + lane-unique) ###
+path=/tmp/fm-vm-task-directPR/pr-description.md rc=0 forwarded=pr create --title ok --body-file /tmp/fm-vm-task-directPR/pr-description.md 
+path=/tmp/pr-body-v12-ux-home.md rc=0 forwarded=pr create --title ok --body-file /tmp/pr-body-v12-ux-home.md 
+### equals-form pass-through ###
+rc=0 forwarded=issue create --title x --body-file=/tmp/fm-x-1/pr-description.md 

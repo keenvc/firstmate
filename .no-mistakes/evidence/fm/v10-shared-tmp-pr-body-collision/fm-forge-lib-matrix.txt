@@ -1,0 +1,9 @@
+body_file(my-task-42)=/tmp/fm-my-task-42/pr-description.md
+COLLISION  /tmp/pr-body
+COLLISION  /tmp/pr-body.md
+COLLISION  /tmp/issue-body
+COLLISION  /tmp/issue-body.md
+ok         /tmp/fm-lane/pr-description.md
+ok         /tmp/pr-body-v12-ux-home.md
+ok         /tmp/fm-my-task-42/pr-description.md
+ok         /other/dir/pr-body.md
