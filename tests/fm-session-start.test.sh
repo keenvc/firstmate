@@ -1638,6 +1638,41 @@ EOF
   pass "the per-read bound caps a looser herdr CLI bound, so a hung herdr never outlives the read"
 }
 
+test_endpoint_herdr_cli_timeout_default_not_widened() {
+  local rec root home fakebin out status=0 start elapsed cli
+  rec=$(new_world endpoint-herdr-cli-default)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  make_fake_herdr_hanging_endpoint_read "$fakebin" "p-live" "p-slow"
+
+  printf 'window=sess:p-slow\nkind=ship\nbackend=herdr\n' > "$home/state/task-a-slow.meta"
+  printf 'window=sess:p-live\nkind=ship\nbackend=herdr\n' > "$home/state/task-z-live.meta"
+
+  for cli in unset abc 00; do
+    status=0
+    start=$SECONDS
+    if [ "$cli" = unset ]; then
+      out=$(unset FM_BACKEND_HERDR_CLI_TIMEOUT; FM_HOME_SUMMARY_TIMEOUT=5 FM_SESSION_START_ENDPOINT_TIMEOUT=20 \
+        run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+    else
+      out=$(FM_HOME_SUMMARY_TIMEOUT=5 FM_SESSION_START_ENDPOINT_TIMEOUT=20 FM_BACKEND_HERDR_CLI_TIMEOUT="$cli" \
+        run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+    fi
+    elapsed=$((SECONDS - start))
+
+    expect_code 0 "$status" "a hung endpoint read under FM_BACKEND_HERDR_CLI_TIMEOUT=$cli must not fail the digest"
+    assert_contains "$out" \
+      "endpoint: error (backend=herdr window=sess:p-slow - the endpoint read died or hit its 20s bound; the digest continued past it)" \
+      "a hung endpoint read under FM_BACKEND_HERDR_CLI_TIMEOUT=$cli was not turned into its own error line"
+    [ "$elapsed" -lt 16 ] || fail "FM_BACKEND_HERDR_CLI_TIMEOUT=$cli was widened beyond the 10s default: the hung herdr read ran ${elapsed}s"
+  done
+
+  pass "unset, non-numeric, and zero-padded herdr CLI timeouts resolve to the 10s default, not the read bound minus one"
+}
+
 test_perl_timeout_fallback_reports_signal_death_nonzero() {
   local toolbin cmd rc=0
   command -v perl >/dev/null 2>&1 || { echo "skip: perl not found (this case pins the perl mechanism only)"; return 0; }
@@ -3153,6 +3188,7 @@ test_endpoint_read_hang_is_bounded_and_reported
 test_endpoint_bound_rejects_padded_zero
 test_endpoint_herdr_cli_bound_tighter_than_read_bound_is_kept
 test_endpoint_read_caps_a_looser_herdr_cli_bound
+test_endpoint_herdr_cli_timeout_default_not_widened
 test_perl_timeout_fallback_reports_signal_death_nonzero
 test_abnormal_digest_death_banners_and_exits_zero
 test_composition_invokes_real_scripts

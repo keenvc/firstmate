@@ -387,9 +387,8 @@ FM_BACKEND_HERDR_CLI_TIMEOUT=${FM_BACKEND_HERDR_CLI_TIMEOUT:-10}
 # own status, or 124 when the bound fires, and kills the whole child process
 # group so a hung herdr and anything it spawned cannot outlive the call.
 fm_backend_herdr_bounded() {  # <command...>
-  local bound=$FM_BACKEND_HERDR_CLI_TIMEOUT
-  case "$bound" in ''|*[!0-9]*|0) bound=10 ;; esac
-  [ "$bound" -gt 0 ] 2>/dev/null || bound=10
+  local bound
+  bound=$(fm_bound_seconds "${FM_BACKEND_HERDR_CLI_TIMEOUT:-}" 10)
   fm_run_timed "$bound" "$@"
 }
 

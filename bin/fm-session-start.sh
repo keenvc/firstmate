@@ -394,12 +394,8 @@ ENDPOINT_TIMEOUT=${FM_SESSION_START_ENDPOINT_TIMEOUT:-10}
 case "$ENDPOINT_TIMEOUT" in ''|*[!0-9]*) ENDPOINT_TIMEOUT=10 ;; esac
 [ "$ENDPOINT_TIMEOUT" -gt 1 ] 2>/dev/null || ENDPOINT_TIMEOUT=10
 ENDPOINT_HERDR_TIMEOUT=$((10#$ENDPOINT_TIMEOUT - 1))
-case "${FM_BACKEND_HERDR_CLI_TIMEOUT:-}" in
-  ''|*[!0-9]*) ;;
-  *) if [ "$FM_BACKEND_HERDR_CLI_TIMEOUT" -gt 0 ] && [ "$FM_BACKEND_HERDR_CLI_TIMEOUT" -lt "$ENDPOINT_HERDR_TIMEOUT" ]; then
-       ENDPOINT_HERDR_TIMEOUT=$FM_BACKEND_HERDR_CLI_TIMEOUT
-     fi ;;
-esac
+herdr_cli_timeout=$(fm_bound_seconds "${FM_BACKEND_HERDR_CLI_TIMEOUT:-}" 10)
+[ "$herdr_cli_timeout" -lt "$ENDPOINT_HERDR_TIMEOUT" ] && ENDPOINT_HERDR_TIMEOUT=$herdr_cli_timeout
 BACKLOG_FIELDS=blocked_by,hold_kind,hold_reason
 
 RULE='================================================================================'
