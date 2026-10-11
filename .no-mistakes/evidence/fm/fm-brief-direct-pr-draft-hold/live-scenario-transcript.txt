@@ -1,0 +1,34 @@
+=== pr-draft-hold live drive transcript (git worktree of f86bbff2) ===
+
+S1 direct-PR per-brief draft-hold scaffold:
+$ bin/fm-brief.sh hold-task-1 v10proj --mode direct-PR --pr-draft-hold do-not-auto-ready
+scaffolded: .../hold-task-1/brief.md (ship, mode=direct-PR pr-draft-hold=do-not-auto-ready; replace {TASK} and {FIRSTMATE_SPEC})
+  -> brief contains: "Delivery contract: mode=direct-PR pr-draft-hold=do-not-auto-ready"
+  -> DoD: "open a **draft** pull request", "gh-axi pr edit <number> --add-label do-not-auto-ready",
+     "draft: yes", "do **not** mark it ready", done line "PR {url} draft hold"
+
+S2 no-mistakes per-brief draft-hold scaffold:
+$ bin/fm-brief.sh hold-task-2 v10proj --mode no-mistakes --pr-draft-hold do-not-auto-ready
+  -> brief contains: "Delivery contract: mode=no-mistakes pr-draft-hold=do-not-auto-ready"
+  -> CI-green done line: "PR {url} checks green draft hold"
+
+S3 project-level registry token:
+$ bin/fm-project-mode.sh --pr-draft-hold v10proj      -> "do-not-auto-ready" (exit 0)
+$ bin/fm-project-mode.sh --pr-draft-hold ecommerce    -> "" (no token, exit 0)
+$ bin/fm-project-mode.sh v10proj                      -> "direct-PR off" (token does not leak)
+
+S4 local-only refusal:   error: ... pr-draft-hold applies only to no-mistakes or direct-PR (got mode=local-only)  [exit 1]
+S5 gerrit refusal:       error: ... pr-draft-hold is refused on forge=gerrit; it applies only to GitHub pull requests [exit 1]
+S6 empty label refusal:  error: --pr-draft-hold requires a non-empty label [exit 1]
+S7 space label refusal:  error: ... pr-draft-hold label must not contain a space (got 'two words') [exit 1]
+S8 scout refusal:        error: --forge, --shape, and --pr-draft-hold apply only to ship briefs ... [exit 1]
+
+S9 promotion auto-inherits registry token:
+$ bin/fm-promote.sh promote-hold-9 --mode direct-PR --yolo off   (project=.../v10proj registered with the token)
+  -> "promoted promote-hold-9 to ship mode=direct-PR ..."
+  -> ship-instructions.md: "Delivery contract: mode=direct-PR pr-draft-hold=do-not-auto-ready"
+
+S10 spawn consistency notice wiring (component-level, real briefs + real registry query):
+  spawn's sed extracts pr-draft-hold=do-not-auto-ready from the real brief;
+  a brief with a divergent label (different-label) vs standing token do-not-auto-ready
+  triggers NOTICE condition (mismatch detected).
