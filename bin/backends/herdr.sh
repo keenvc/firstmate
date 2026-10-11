@@ -389,6 +389,7 @@ FM_BACKEND_HERDR_CLI_TIMEOUT=${FM_BACKEND_HERDR_CLI_TIMEOUT:-10}
 fm_backend_herdr_bounded() {  # <command...>
   local bound=$FM_BACKEND_HERDR_CLI_TIMEOUT
   case "$bound" in ''|*[!0-9]*|0) bound=10 ;; esac
+  [ "$bound" -gt 0 ] 2>/dev/null || bound=10
   fm_run_timed "$bound" "$@"
 }
 
