@@ -38,6 +38,12 @@
 #   prints a one-line deviation notice and continues, because the registered
 #   prefix is the captain's standing preference and the brief agreement above
 #   already guarantees the worker's instructions match the branch.
+#   A project may also register pr-draft-hold=<label> in data/projects.md; a ship
+#   spawn reads it through bin/fm-project-mode.sh --pr-draft-hold and, when the
+#   brief's recorded "Delivery contract:" pr-draft-hold disagrees with it, prints
+#   a one-line deviation notice and continues, because the registered token is the
+#   captain's standing preference and the brief is what the worker received
+#   (bin/fm-brief.sh --pr-draft-hold owns the flag).
 #   --base-branch is the optional branch selected at intake for a ship or scout
 #   to start from and target instead of origin's default branch. A fresh launch
 #   resets its pooled copy to origin/<branch>, refusing when the project has no
