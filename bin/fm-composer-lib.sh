@@ -398,7 +398,7 @@ fm_composer_strip_ghost() {
 # tmux agy endpoint reaches the submit core with no recorded harness, and its
 # bare `>` composer verdict is `unknown`, so the busy footer is the only
 # turn-started acknowledgement that path can read.
-FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working(\.\.\.|…)|Ctrl\+c:cancel|ctrl\+c to stop|esc[[:space:]]+to[[:space:]]+cancel|esc twice to interrupt|^[[:space:]]*❭ Guide Devin while it works$'
+FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working(\.\.\.|…)|Ctrl\+c:cancel|ctrl\+c to stop|esc[[:space:]]+to[[:space:]]+cancel|esc twice to interrupt|^[[:space:]]*❭ Guide Devin while it works$|\(Press ESC to stop\)|Enter to steer · Ctrl\+Enter to queue'
 FM_DELIVERY_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'
 # Devin 3000.11.1: the working composer and interrupt hint are independent
 # delivery signals. Neither is used as semantic worker-state evidence.
@@ -407,6 +407,10 @@ FM_DELIVERY_DEVIN_BUSY_REGEX_DEFAULT='esc twice to interrupt|^[[:space:]]*❭ Gu
 # composer reads `Type to queue message...`, with a `Type to queue next message`
 # footer. Independent delivery signals, never semantic worker-state evidence.
 FM_DELIVERY_CORTEX_BUSY_REGEX_DEFAULT='\(esc to interrupt\)|Type to queue message\.\.\.|Type to queue next message'
+# Factory Droid 0.251.0: the spinner row ends `(Press ESC to stop)` and the
+# working composer placeholder reads `Enter to steer · Ctrl+Enter to queue`.
+# Independent delivery signals, never semantic worker-state evidence.
+FM_DELIVERY_DROID_BUSY_REGEX_DEFAULT='\(Press ESC to stop\)|Enter to steer · Ctrl\+Enter to queue'
 # Command Code 1.74.1 renders one status row while a turn runs, for example
 # ` ○ Contemplificating…  esc to interrupt • 2s • ↓ 41`: the `esc to interrupt`
 # token and the bullet-framed elapsed cell are independent delivery signals, and
@@ -473,6 +477,7 @@ fm_busy_lines_match() {  # [harness]
       claude) regex=$FM_DELIVERY_CLAUDE_BUSY_REGEX_DEFAULT ;;
       devin) regex=$FM_DELIVERY_DEVIN_BUSY_REGEX_DEFAULT ;;
       cortex) regex=$FM_DELIVERY_CORTEX_BUSY_REGEX_DEFAULT ;;
+      droid) regex=$FM_DELIVERY_DROID_BUSY_REGEX_DEFAULT ;;
       commandcode) regex=$FM_DELIVERY_COMMANDCODE_BUSY_REGEX_DEFAULT ;;
       codex) regex=$FM_DELIVERY_CODEX_BUSY_REGEX_DEFAULT ;;
       opencode) regex=$FM_DELIVERY_OPENCODE_BUSY_REGEX_DEFAULT ;;
@@ -522,7 +527,7 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # bright for the default ghost ceiling, so fm_composer_classify_screen reads its
 # screen with a raised one. FM_COMPOSER_IDLE_RE overrides for an unverified harness;
 # matching is case-insensitive.
-FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$'
+FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$|^Enter to steer · Ctrl\+Enter to queue$'
 
 # Opencode draws a mode/model footer line INSIDE its left-bar composer
 # ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed

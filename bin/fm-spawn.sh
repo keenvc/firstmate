@@ -234,7 +234,7 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|cortex)
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|cortex|droid)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -548,6 +548,8 @@
 #     __COMMANDCODEMOD__ --mod and --mod-option arguments of the busy-state mod
 #     __CORTEXBIN__ resolved Cortex Code executable
 #     __CORTEXPLUGIN__ private per-task Cortex plugin directory with lifecycle hooks
+#     __DROIDBIN__  resolved Factory Droid executable
+#     __DROIDSETTINGS__ private per-task Factory Droid runtime settings JSON with lifecycle hooks
 #     __AGYBIN__    resolved, agy-verified executable for an agy launch
 #     __OPENCODEBIN__ quoted concrete opencode executable path resolved from PATH -
 #                  the same binary the version-gate probe reads, so the recorded
@@ -2445,7 +2447,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-  '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | commandcode | polytoken | cortex)
+  '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | commandcode | polytoken | cortex | droid)
     ARG3=${POS[1]:-}
     ;;
   *' '*)
@@ -2837,6 +2839,12 @@ launch_template() {
   # because Cortex loads Claude-compatible hooks, and Herdr's claude integration
   # hook claims a pane as a claude session whenever that variable is set.
   cortex) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI __CORTEXBIN__ --dangerously-allow-all-tool-calls --plugin-dir __CORTEXPLUGIN__ __MODELFLAG____EFFORTFLAG__-- "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # Factory Droid receives the typed launch envelope as its positional prompt.
+  # --auto high grants full worker autonomy, and --settings loads the private
+  # per-task runtime settings JSON (bin/fm-droid-settings.sh) carrying
+  # sessionDefaultSettings (model, reasoningEffort, autonomyMode) and the
+  # SessionStart/UserPromptSubmit/Stop/SessionEnd lifecycle hooks.
+  droid) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI __DROIDBIN__ --auto high --settings __DROIDSETTINGS__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   # Kimi Code rejects a positional prompt, so it launches bare and receives
   # only an absolute brief pointer after the TUI readiness gate below.
   # Its turn-end signal is a globally configured Stop hook plus a guarded
@@ -2967,7 +2975,9 @@ esac
 # docs/supervision-protocols/ carries no polytoken primary wake protocol.
 # cortex has none either: only its worker lifecycle hooks are verified, and
 # docs/supervision-protocols/ carries no cortex wake protocol (cortex 1.1.104).
-if [ "$KIND" = secondmate ] && { [ "$HARNESS" = muse ] || [ "$HARNESS" = gemini ] || [ "$HARNESS" = agy ] || [ "$HARNESS" = devin ] || [ "$HARNESS" = commandcode ] || [ "$HARNESS" = polytoken ] || [ "$HARNESS" = cortex ]; }; then
+# droid has none either: only its worker lifecycle hooks are verified, and
+# docs/supervision-protocols/ carries no droid wake protocol (droid 0.251.0).
+if [ "$KIND" = secondmate ] && { [ "$HARNESS" = muse ] || [ "$HARNESS" = gemini ] || [ "$HARNESS" = agy ] || [ "$HARNESS" = devin ] || [ "$HARNESS" = commandcode ] || [ "$HARNESS" = polytoken ] || [ "$HARNESS" = cortex ] || [ "$HARNESS" = droid ]; }; then
   echo "error: $HARNESS is a verified crewmate/scout adapter only and cannot run a secondmate; it has no primary supervision protocol. Select a harness verified for secondmates." >&2
   exit 1
 fi
@@ -3020,6 +3030,12 @@ commandcode)
 cortex)
   CORTEX_BIN=$(command -v cortex) || {
     echo "error: cortex executable not found on PATH" >&2
+    exit 1
+  }
+  ;;
+droid)
+  DROID_BIN=$(command -v droid) || {
+    echo "error: droid executable not found on PATH" >&2
     exit 1
   }
   ;;
@@ -5991,7 +6007,7 @@ BUSY_GEN=
     }
     [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
     ;;
-  gemini | devin | commandcode | polytoken | cortex)
+  gemini | devin | commandcode | polytoken | cortex | droid)
     if [ "$RAW_LAUNCH" -eq 0 ]; then
       BUSY_GEN=$("$FM_ROOT/bin/fm-busy-event.sh" arm "$STATE_REAL" "$ID") || {
         echo "error: failed to arm the busy-state contract for $ID" >&2
@@ -6087,6 +6103,11 @@ BUSY_GEN=
   cortex)
     if [ "$RAW_LAUNCH" -eq 0 ]; then
       "$SCRIPT_DIR/fm-cortex-plugin.sh" "$STATE_REAL" "$ID" "$BUSY_GEN" || exit 1
+    fi
+    ;;
+  droid)
+    if [ "$RAW_LAUNCH" -eq 0 ]; then
+      FM_KEEP_AI_TRAILERS="$KEEP_AI_TRAILERS" "$SCRIPT_DIR/fm-droid-settings.sh" "$STATE_REAL" "$ID" "$BUSY_GEN" "$MODEL" "$EFFORT" || exit 1
     fi
     ;;
   gemini)
@@ -6925,6 +6946,10 @@ cortex)
   LAUNCH=${LAUNCH//__CORTEXBIN__/"$(shell_quote "$CORTEX_BIN")"}
   LAUNCH=${LAUNCH//__CORTEXPLUGIN__/"$(shell_quote "$STATE_REAL/$ID.cortex-plugin")"}
   ;;
+droid)
+  LAUNCH=${LAUNCH//__DROIDBIN__/"$(shell_quote "$DROID_BIN")"}
+  LAUNCH=${LAUNCH//__DROIDSETTINGS__/"$(shell_quote "$STATE_REAL/$ID.droid-settings.json")"}
+  ;;
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
 opencode)
   # The resolved absolute path probed for the version gate above, so the pane
@@ -6975,7 +7000,7 @@ case "$LAUNCH" in
   ;;
 esac
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin | commandcode | cortex)
+claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin | commandcode | cortex | droid)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac

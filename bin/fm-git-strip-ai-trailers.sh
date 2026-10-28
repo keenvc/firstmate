@@ -131,12 +131,12 @@ fm_is_ai_attribution_line() {
   esac
   name=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
   case "$email" in
-  noreply@anthropic.com | cursoragent@* | noreply@openai.com | copilot@github.com | noreply@commandcode.ai | noreply@snowflake.com)
+  noreply@anthropic.com | cursoragent@* | noreply@openai.com | copilot@github.com | noreply@commandcode.ai | noreply@snowflake.com | 138933559+factory-droid\[bot\]@users.noreply.github.com)
     return 0
     ;;
   esac
   case "$name" in
-  cursor | 'cursor agent' | claude | 'claude code' | 'github copilot' | copilot | codex | chatgpt | gemini | 'google gemini' | grok | openai | commandcodebot | 'snowflake coco' | 'cortex code')
+  cursor | 'cursor agent' | claude | 'claude code' | 'github copilot' | copilot | codex | chatgpt | gemini | 'google gemini' | grok | openai | commandcodebot | 'snowflake coco' | 'cortex code' | 'factory-droid[bot]' | 'factory droid' | droid)
     return 0
     ;;
   esac

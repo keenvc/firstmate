@@ -152,6 +152,7 @@ fm_quota_single_provider_table() {
     'kimi kimi' \
     'cursor cursor' \
     'agy agy' \
+    'droid factory' \
     'muse meta'
 }
 
@@ -183,6 +184,7 @@ fm_quota_provider_for_harness() {
     grok)         printf 'grok\n' ;;
     kimi)         printf 'kimi\n' ;;
     cursor)       printf 'cursor\n' ;;
+    droid)        printf 'factory\n' ;;
     muse)         printf 'meta\n' ;;
     *)            return 1 ;;
   esac

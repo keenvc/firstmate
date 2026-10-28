@@ -44,6 +44,8 @@
 #   cortex-hook      Cortex Code per-task plugin hooks (UserPromptSubmit opens;
 #                    Stop, which also fires on an Escape interrupt, and
 #                    SessionEnd close)
+#   droid-hook       Factory Droid per-task --settings hooks (UserPromptSubmit
+#                    opens; Stop and SessionEnd close)
 #   codex-hook, codex-appserver  reserved: Codex, gated by
 #                    fm_busy_codex_semantic_source
 #   kimi-wire, kimi-hook  reserved: standalone Kimi, gated by fm_busy_kimi_verified
@@ -244,6 +246,7 @@ fm_busy_sources_for_harness() {  # <harness>
     gemini*) adapter=gemini-hook ;;
     devin) adapter=devin-hook ;;
     cortex) adapter=cortex-hook ;;
+    droid) adapter=droid-hook ;;
     commandcode) adapter=commandcode-mod ;;
     polytoken) adapter=polytoken-hook ;;
     pi|pi-signed) adapter=pi-ext ;;
