@@ -557,6 +557,9 @@
 #     __DROIDSETTINGS__ firstmate-owned per-task droid runtime settings file
 #                   (model, reasoning effort, autonomy, busy-state and turn-end
 #                   hooks) passed through --settings for that one process
+#     __DROIDROLEPIN__ the fixed worker-role system-prompt paragraph
+#     __DROIDHOME__ firstmate-owned per-task HOME whose .factory omits the
+#                   captain's MCP server catalog
 #     __OPENCODEBIN__ quoted concrete opencode executable path resolved from PATH -
 #                  the same binary the version-gate probe reads, so the recorded
 #                  major can never describe a different executable than the pane
@@ -2672,6 +2675,55 @@ kiro_hook_path_validate() {  # <state-dir> <id>
 # Droid-managed model.
 FM_DROID_DEFAULT_MODEL=${FM_DROID_DEFAULT_MODEL:-deepseek-v4.1-flash-1017}
 
+# droid_home_prepare <task-home> <captain-home>: build the isolated HOME a droid
+# worker launches with.
+#
+# WHY: droid reads its MCP servers from `<config-home>/mcp.json`, and every
+# session starts each enabled server as a child process (measured 2026-10-29 on
+# this box: seven children, six of them Python, about 1.2G each). A fleet of
+# droid workers therefore spends gigabytes on MCP servers no task asked for.
+# `--settings` cannot suppress them (`"mcpServers": {}` and per-server disabled
+# entries in the runtime layer were both measured to have no effect), droid has
+# no CLI flag for it, and the user and project mcp.json layers union rather than
+# override. The one mechanism droid does honour is the config home it reads, so
+# the worker gets its own HOME whose `.factory` carries every user entry except
+# `mcp.json`.
+#
+# The rest of the captain's home is linked in, not copied, so git identity, gh
+# auth, and per-tool caches keep working for the worker while no secret is
+# duplicated. settings.json is written locally rather than linked: it carries the
+# captain's hooks (Herdr's pane-state hook) with no custom-model API keys, and
+# bin/fm-droid-trust.sh then records folder trust in it, leaving the captain's
+# own store untouched.
+droid_home_prepare() {  # <task-home> <captain-home>
+  local home=$1 src=$2 entry base
+  rm -rf -- "$home" || return 1
+  mkdir -p "$home/.factory" || return 1
+  for entry in "$src"/* "$src"/.[!.]* "$src"/..?*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    base=${entry##*/}
+    [ "$base" != .factory ] || continue
+    ln -s -- "$entry" "$home/$base" || return 1
+  done
+  if [ -d "$src/.factory" ]; then
+    for entry in "$src/.factory"/* "$src/.factory"/.[!.]* "$src/.factory"/..?*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      base=${entry##*/}
+      case "$base" in mcp.json | settings.json) continue ;; esac
+      ln -s -- "$entry" "$home/.factory/$base" || return 1
+    done
+  fi
+  if [ -f "$src/.factory/settings.json" ] && command -v jq >/dev/null 2>&1; then
+    if ! jq -c 'if (.hooks | type) == "object" then {hooks: .hooks} else {} end' \
+      "$src/.factory/settings.json" >"$home/.factory/settings.json" 2>/dev/null; then
+      printf '{}\n' >"$home/.factory/settings.json"
+    fi
+  else
+    printf '{}\n' >"$home/.factory/settings.json"
+  fi
+  [ -s "$home/.factory/settings.json" ] || printf '{}\n' >"$home/.factory/settings.json"
+}
+
 # The worker-role pin every droid launch appends to its system prompt. droid
 # loads a repository's AGENTS.md into context (verified live 2026-10-29: a probe
 # inside a firstmate checkout adopted the supervisor persona and addressed its
@@ -3022,7 +3074,9 @@ launch_template() {
   # --append-system-prompt carries the worker-role pin (FM_DROID_ROLE_PIN):
   # droid loads the repository's AGENTS.md into context, so a firstmate-repo
   # worktree would otherwise hand the worker the supervisor persona.
-  droid) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI __DROIDBIN__ --settings __DROIDSETTINGS__ --auto high --append-system-prompt __DROIDROLEPIN__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # HOME is the per-task home droid_home_prepare built: every user entry linked
+  # except the mcp.json catalog, so a worker starts no user-level MCP servers.
+  droid) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI HOME=__DROIDHOME__ __DROIDBIN__ --settings __DROIDSETTINGS__ --auto high --append-system-prompt __DROIDROLEPIN__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   # Kimi Code rejects a positional prompt, so it launches bare and receives
   # only an absolute brief pointer after the TUI readiness gate below.
   # Its turn-end signal is a globally configured Stop hook plus a guarded
@@ -6077,23 +6131,10 @@ agy)
     echo "warning: could not pre-register agy workspace trust for $WT; the launch will answer the folder-trust dialog in window $T instead" >&2
   fi
   ;;
-droid)
-  # droid's folder-trust dialog preselects the trust row, so a failed
-  # registration is not fatal: the post-launch gate answers the dialog itself
-  # and, on a path that was not pre-registered, refuses to count a busy turn as
-  # ready until it has done so.
-  if [ "$KIND" = secondmate ]; then
-    droid_trust_args=(--secondmate-home "$PROJ_ABS" "$ID")
-  else
-    droid_trust_args=("$WT" "$PROJ_ABS")
-  fi
-  if "$FM_ROOT/bin/fm-droid-trust.sh" "${droid_trust_args[@]}" >/dev/null; then
-    DROID_TRUST_PREREGISTERED=1
-  else
-    echo "warning: could not pre-register droid folder trust for $WT; the launch will answer the 'Trust this folder?' dialog in window $T instead" >&2
-  fi
-  ;;
 esac
+# droid's own folder-trust pre-registration runs later, after the relaunch
+# retirement section: its per-task HOME is itself a retired wiring directory, so
+# it must be built after that retirement has run (see the droid block below).
 
 # Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
 # create GOTMPDIR, so mkdir before it is used; fm-teardown removes the whole root.
@@ -6239,6 +6280,30 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: could not retire $RELAUNCH_PRIOR_HARNESS wiring for task $ID; refusing to arm the replacement" >&2
     exit 1
   }
+fi
+# droid's isolated HOME and folder trust come AFTER the relaunch retirement
+# above, because that retirement owns state/<id>.droid-home as a wiring
+# directory: preparing it earlier would leave the replacement launching into a
+# home this same run had just deleted.
+if [ "$HARNESS" = droid ] && [ "$RAW_LAUNCH" -eq 0 ]; then
+  DROID_HOME="$STATE_REAL/$ID.droid-home"
+  if ! droid_home_prepare "$DROID_HOME" "$HOME"; then
+    echo "error: could not build the isolated droid home at $DROID_HOME; refusing to launch a worker that would load the captain's MCP servers" >&2
+    exit 1
+  fi
+  if [ ! -e "$HOME/.factory/auth.v2.file" ] && [ -z "${FACTORY_API_KEY:-}" ]; then
+    echo "notice: no droid credential found in ~/.factory; the launch will park on droid's login screen until droid is signed in once in the captain's own home" >&2
+  fi
+  if [ "$KIND" = secondmate ]; then
+    droid_trust_args=(--secondmate-home "$PROJ_ABS" "$ID")
+  else
+    droid_trust_args=("$WT" "$PROJ_ABS")
+  fi
+  if HOME="$DROID_HOME" "$FM_ROOT/bin/fm-droid-trust.sh" "${droid_trust_args[@]}" >/dev/null; then
+    DROID_TRUST_PREREGISTERED=1
+  else
+    echo "warning: could not pre-register droid folder trust for $WT; the launch will answer the 'Trust this folder?' dialog in window $T instead" >&2
+  fi
 fi
 if [ "$HARNESS" = polytoken ] && [ "$RAW_LAUNCH" -eq 0 ]; then
   fm_polytoken_require_hooks_free "$WT" || exit 1
@@ -7517,6 +7582,7 @@ droid)
   LAUNCH=${LAUNCH//__DROIDBIN__/"$(shell_quote "$DROID_BIN")"}
   LAUNCH=${LAUNCH//__DROIDSETTINGS__/"$(shell_quote "${DROID_SETTINGS_PATH:-$STATE_REAL/$ID.droid-settings.json}")"}
   LAUNCH=${LAUNCH//__DROIDROLEPIN__/"$(shell_quote "$FM_DROID_ROLE_PIN")"}
+  LAUNCH=${LAUNCH//__DROIDHOME__/"$(shell_quote "${DROID_HOME:-$HOME}")"}
   ;;
 opencode)
   # The resolved absolute path probed for the version gate above, so the pane

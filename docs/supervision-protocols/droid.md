@@ -17,6 +17,6 @@ When this session owns supervision and away mode is not active:
    Take the helm from that digest; do not re-run the whole session start because the turn began.
 
 The mate's launch carries all of this wiring in the parent home's `state/<id>.droid-settings.json`, passed to droid through `--settings` for that one process.
-The captain's `~/.factory/settings.json` is never rewritten for worker wiring; the only droid write there is the folder-trust pre-registration of the mate's home, which is a per-path entry later launches reuse.
+The mate also runs with a parent-owned per-task `HOME` (`state/<id>.droid-home`) whose droid config omits the captain's MCP server catalog and carries the mate home's own trust entry, so neither the captain's settings store nor the captain's MCP servers are touched.
 The pre-tool seatbelts are not wired for droid.
 See [`turnend-guard.md`](../turnend-guard.md) for the guard predicate, loop bound, and fail-open tradeoffs, and [`sessionstart-nudge.md`](../sessionstart-nudge.md) for the run-tier transport.

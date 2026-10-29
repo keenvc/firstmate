@@ -1229,7 +1229,7 @@ kiro (Kiro CLI, V2 engine only) is likewise verified for crewmate and scout laun
 A kiro hook command must be one unquoted token, so a kiro spawn refuses before launch when that per-task home path contains whitespace or a shell-special character (such as a quote or `$`) and asks for an `FM_HOME` or `FM_STATE_OVERRIDE` free of them.
 
 droid (Factory Droid CLI) is verified for crewmate, scout, AND secondmate launches, because its own hook surface carries the two duties a primary needs: the session-start digest arrives as `SessionStart` `additionalContext`, and the turn boundary blocks through `Stop` exit 2 ([`docs/supervision-protocols/droid.md`](supervision-protocols/droid.md)).
-Its model, reasoning effort, autonomy level, and lifecycle hooks all ride a firstmate-owned per-task runtime settings file passed through `--settings`, so the captain's `~/.factory/settings.json` is never rewritten for worker wiring; the only write there is the folder-trust pre-registration through `bin/fm-droid-trust.sh`.
+Its model, reasoning effort, autonomy level, and lifecycle hooks all ride a firstmate-owned per-task runtime settings file passed through `--settings`, and the worker launches with a firstmate-owned per-task `HOME` whose droid config omits the captain's MCP server catalog, so no worker starts the user-level MCP servers ([`docs/verification/droid.md`](verification/droid.md) owns both measurements).
 [`docs/verification/droid.md`](verification/droid.md) owns the live evidence, and the adapter reference owns its model-validation probe and rendered signals.
 devin is verified for crewmate and scout launches only; a secondmate is refused because Devin has no verified primary supervision protocol.
 

@@ -53,6 +53,44 @@ Live captures of a real TUI session (`droid --settings <file>` in an isolated tm
 - A hook printing `{"suppressOutput":true}` kept its line out of the transcript on `UserPromptSubmit` and `Stop`.
 - `SessionStart` `hookSpecificOutput.additionalContext` reached model context: a hook injecting `The secret word is ZORBLAX-7731.` was answered `ZORBLAX-7731` on the next prompt.
 
+## MCP isolation
+
+droid starts every enabled MCP server from `<config-home>/mcp.json` as a child of the session. Measured on this box on 2026-10-29, launching a TUI on the captain's home with a plain runtime settings file:
+
+```
+$ ps -eo pid=,ppid=,comm=,args= | awk -v root=<droid-pid> '$2==root'
+  python  .../calcom_mcp_server.py
+  python  .../stripe_server.py
+  python  .../zyte_mcp_server.py
+  npm     exec dataforseo-mcp-server
+  python  .../twenty_server.py
+  python  .../heyreach_server.py
+  python  .../mergify_server.py
+children=7
+```
+
+Suppression attempts that do NOT work, each measured by the same child count:
+
+- `--settings` with `"mcpServers": {}` - still 7.
+- `--settings` with `"mcpServers": {"calcom": {"disabled": true}}` - still 7.
+- A project `.factory/mcp.json` naming those servers disabled - still 7; the user and project layers union rather than replace.
+- `droid --help`, `droid exec --help`, and `droid mcp --help` expose no disable switch.
+
+What works is the config home: `bin/fm-spawn.sh` builds `state/<id>.droid-home`, links every entry of the captain's home into it (so git identity, gh auth, and caches still resolve) except that `.factory/mcp.json` is left out and `.factory/settings.json` is generated with the captain's hooks plus folder trust. A droid TUI launched with `HOME` pointed there, same model and runtime settings:
+
+```
+$ tr '\0' '\n' </proc/<droid-pid>/environ | grep '^HOME='
+HOME=.../state/e2e-droid.droid-home
+$ ps -eo pid=,ppid=,comm=,args= | awk -v root=<droid-pid> '$2==root'
+children=0
+$ test -e .../state/e2e-droid.droid-home/.factory/mcp.json; echo $?
+1
+```
+
+The same session answered its brief, and a full scout lifecycle (spawn, steer, interrupt, relaunch, exit, teardown) passed with the isolated home; teardown removed both `state/<id>.droid-home` and `state/<id>.droid-settings.json`.
+
+`FACTORY_HOME_OVERRIDE` relocates the config home but was measured to break authentication (a full config copy still rendered droid's login screen), so the launch isolates `HOME` instead.
+
 ## Folder trust
 
 An unregistered fresh directory rendered a bordered dialog: heading `Trust this folder?`, selected row `1. Trust this folder`, footer `Enter to confirm · Esc to exit`.

@@ -558,11 +558,10 @@ fm_control_harness_wiring_paths() {  # <harness> <worktree> <state-dir> <id> [ki
     gemini) printf '%s\n' "$state/$id.gemini-settings.json" ;;
     # droid's busy-state and turn-end hooks, its model, and its autonomy level all
     # ride one firstmate-owned runtime settings file the launch passes to
-    # --settings, so retiring that one file retires the whole incarnation. The
-    # captain's own ~/.factory/settings.json is never written for worker wiring:
-    # the only write there is the worktree trust pre-registration, which is a
-    # per-path entry a later launch reuses and teardown leaves alone (the same
-    # posture as agy's trust store).
+    # --settings, so retiring that one file retires the whole incarnation. Its
+    # per-task HOME goes with it: that home is where the launch kept the captain's
+    # MCP catalog out, and it is a symlink farm plus one generated settings file,
+    # so removing it deletes no user data.
     droid) printf '%s\n' "$state/$id.droid-settings.json" ;;
     devin) printf '%s\n' "$state/$id.devin-config.json" ;;
     # cortex's lifecycle hooks live in a firstmate-owned plugin directory the
@@ -624,6 +623,13 @@ fm_control_harness_wiring_dirs() {  # <harness> <state-dir> <id>
   local harness=${1-} state=${2-} id=${3-}
   [ -n "$state" ] && [ -n "$id" ] || return 1
   case "$harness" in
+    droid)
+      # droid's per-task HOME is a symlink farm plus one generated settings
+      # file, so it retires as a directory: removing it deletes no user data,
+      # and it is where the launch kept the captain's MCP server catalog out of
+      # the worker's droid session.
+      printf '%s\n' "$state/$id.droid-home"
+      ;;
     polytoken)
       printf '%s\n' "$state/$id.polytoken-config"
       printf '%s\n' "$state/$id.polytoken-sessions"
