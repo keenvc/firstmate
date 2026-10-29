@@ -222,6 +222,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": ".agents/skills/harness-adapters/references/harness/droid.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": ".agents/skills/harness-adapters/references/harness/gemini.md",
       "audience": "agent-runtime"
     },
@@ -494,6 +498,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": "docs/supervision-protocols/droid.md",
+      "audience": "agent-runtime"
+    },
+    {
       "path": "docs/supervision-protocols/cursor.md",
       "audience": "agent-runtime"
     },
@@ -559,6 +567,10 @@
     },
     {
       "path": "docs/verification/cortex.md",
+      "audience": "maintainer-verification"
+    },
+    {
+      "path": "docs/verification/droid.md",
       "audience": "maintainer-verification"
     },
     {

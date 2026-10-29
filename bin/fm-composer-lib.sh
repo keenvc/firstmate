@@ -39,6 +39,21 @@
 #               (tmux exact process name, herdr native agent probe). Opt-in:
 #               only then is a TITLED rounded top rule tolerated as a
 #               composer; without it a titled box stays ambiguous.
+#   droid=1     the caller proved the pane's foreground process is Factory Droid
+#               (tmux exact process name, herdr native agent probe). Droid's
+#               composer is a rounded box whose prompt row leads with `>`, a
+#               SHELL glyph the global safety rule never accepts as a container
+#               proof, and droid draws a status/footer row directly below it.
+#               With this capability proved, that `>` row IS the box's glyph
+#               proof and droid's own footer row is recognized as furniture, so
+#               an idle composer reads `empty` instead of the `unknown` the
+#               unproven shell-glyph box must return.
+#   droid=ask  the caller can probe identity lazily (it declares identity=1)
+#               and has no foreground-process proof of its own: the verdict is
+#               `need-identity` when the bottom-most shape is a rounded box that
+#               closed over an unproven `>` prompt row, the only shape a Droid
+#               identity would change. A probe answering `droid` then proves it,
+#               as droid=1 does. Other callers never see this sentinel.
 #   cortex=ask  the caller can probe identity lazily (it declares identity=1)
 #               and has no foreground-process proof of its own: the verdict
 #               is `need-identity` when the bottom-most composer shape is a
@@ -452,7 +467,8 @@ fm_composer_strip_ghost() {
 # bin/fm-busy-lib.sh, which forbids classifying a harness from rendered text.
 # Matching a footer to confirm a keystroke landed is a different question from
 # asking what a worker is doing, and the two must not be conflated.
-# Delivery-only rendered busy footers per harness. claude/codex: "esc to
+# Delivery-only rendered busy footers per harness. droid: "(Press ESC to stop)"
+# and its "Enter to steer" working composer; claude/codex: "esc to
 # interrupt"; opencode: "esc interrupt"; pi: "Working..."; omp: "Working…"; grok: "Ctrl+c:cancel"; agy: "esc to cancel";
 # devin: "esc twice to interrupt" and its "❭ Guide Devin while it works" working composer;
 # cortex: "(esc to interrupt)" on its spinner row and "Type to queue message..." in its working composer;
@@ -487,8 +503,10 @@ fm_composer_strip_ghost() {
 # fm_composer_queued_enter_verdict convert that to `empty`; and the submit core
 # takes its pre-typing baseline with no harness, so without the literal an
 # already-busy kiro pane reads `idle` and wrongly arms the idle-to-busy
-# confirmation.
-FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working(\.\.\.|…)|Ctrl\+c:cancel|ctrl\+c to stop|esc[[:space:]]+to[[:space:]]+cancel|esc twice to interrupt|^[[:space:]]*❭ Guide Devin while it works$|^[[:space:]]*›[[:space:]]+Kiro is working'
+# confirmation. droid's `(Press ESC to stop)` is the same class of literal: an
+# explicit droid endpoint reaches the submit core with no recorded harness, so
+# the footer is the only turn-started acknowledgement that path can read.
+FM_DELIVERY_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working(\.\.\.|…)|Ctrl\+c:cancel|ctrl\+c to stop|esc[[:space:]]+to[[:space:]]+cancel|esc twice to interrupt|\(Press ESC to stop\)|^[[:space:]]*❭ Guide Devin while it works$|^[[:space:]]*›[[:space:]]+Kiro is working'
 FM_DELIVERY_CLAUDE_BUSY_REGEX_DEFAULT='esc to interrupt|…[[:space:]]+\([0-9]+[smh]'
 # Devin 3000.11.1: the working composer and interrupt hint are independent
 # delivery signals. Neither is used as semantic worker-state evidence.
@@ -540,6 +558,14 @@ FM_DELIVERY_CURSOR_BUSY_REGEX_DEFAULT='ctrl\+c to stop'
 # acknowledgement. Delivery guard only; recorded worker state comes from the
 # agy-regex fold in bin/fm-busy-lib.sh.
 FM_DELIVERY_AGY_BUSY_REGEX_DEFAULT='esc[[:space:]]+to[[:space:]]+cancel'
+# droid (Factory Droid CLI) pins a spinner row above its composer while a turn
+# runs - `⠰ Thinking...  (Press ESC to stop)` - and its working composer reads
+# `> Enter to steer · Ctrl+Enter to queue` instead of the idle ghost (verified
+# live, droid 0.251.0). Both tokens are absent when the turn settles. The
+# footer's elapsed `[⏱ Ns]` cell is deliberately NOT matched: droid keeps it
+# after a turn ends, so it is not a busy signal at all. Delivery guard only;
+# recorded worker state comes from the droid-hook writer in bin/fm-busy-lib.sh.
+FM_DELIVERY_DROID_BUSY_REGEX_DEFAULT='\(Press ESC to stop\)|Enter to steer · Ctrl\+Enter to queue'
 # polytoken renders a live elapsed row above its composer separators while a
 # turn runs - ` Running for 11.12s`, with a leading space and an unanchored
 # tail of border furniture (verified live, 0.8.19; the turn-end rows are
@@ -582,6 +608,7 @@ fm_busy_lines_match() {  # [harness]
       omp) regex=$FM_DELIVERY_OMP_BUSY_REGEX_DEFAULT ;;
       grok) regex=$FM_DELIVERY_GROK_BUSY_REGEX_DEFAULT ;;
       agy) regex=$FM_DELIVERY_AGY_BUSY_REGEX_DEFAULT ;;
+      droid) regex=$FM_DELIVERY_DROID_BUSY_REGEX_DEFAULT ;;
       polytoken) regex=$FM_DELIVERY_POLYTOKEN_BUSY_REGEX_DEFAULT ;;
       kiro) regex=$FM_DELIVERY_KIRO_BUSY_REGEX_DEFAULT ;;
       kimi) regex=$FM_DELIVERY_KIMI_BUSY_REGEX_DEFAULT ;;
@@ -626,7 +653,11 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # screen with a raised one. kiro's bare `›` composer needs no entry here: see
 # FM_COMPOSER_HINTED_IDLE_RE_DEFAULT below. FM_COMPOSER_IDLE_RE overrides for an unverified harness;
 # matching is case-insensitive.
-FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$'
+# Factory Droid renders `Try "<rotating suggestion>"` as dim ghost text after
+# the `>` glyph inside its bordered composer (verified live, droid 0.251.0), and
+# its terminal cursor parks on the first ghost letter, leaving a reverse-video
+# remnant that the plain-row anchors below resolve to `empty`.
+FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$|^Try ".*"$'
 
 # KIRO ONLY (fm_composer_kiro_scope): idle placeholders that carry a submit hint
 # typed input never renders, so the whole anchored row proves an empty composer
@@ -992,8 +1023,8 @@ _fm_composer_titled_rule_row() {  # <trimmed-row> <plain-rule-spaces>
 
 # Row-scan results are returned through FM_COMPOSER_SCAN_* globals (bash 3.2
 # has no nameref); they are internal to this owner.
-_fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] [cortex]
-  local pane=$1 cy=${2:-} cortex_proven=${4:-0}
+_fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] [cortex] [droid]
+  local pane=$1 cy=${2:-} cortex_proven=${4:-0} droid_proven=${5:-0}
   local line indent left_stripped trimmed kind family side_family
   local top_inner top_spaces='' geometry_check=0 geometry_ambiguous=0 titled_top=0 titled_cand=0
   local content_inner content_spaces bottom_inner bottom_spaces glyph
@@ -1003,6 +1034,10 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
   FM_COMPOSER_SCAN_BOX_TOP=-1
   FM_COMPOSER_SCAN_BOX_BOTTOM=-1
   FM_COMPOSER_SCAN_BOX_AMBIG=0
+  # 1 when the bottom-most box closed over an UNPROVEN `>` prompt row: the one
+  # shape a Factory Droid identity changes (the droid=ask capability).
+  FM_COMPOSER_SCAN_DROID_CANDIDATE=0
+  FM_COMPOSER_SCAN_DROID_PROVEN=$droid_proven
   # 1 when the selected (bottom-most, or cursor-holding) complete box is a
   # titled rounded box with an agent prompt glyph row that went unproven: the
   # one shape a Cortex identity would change (see the cortex=ask capability).
@@ -1032,7 +1067,7 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
   FM_COMPOSER_SCAN_LEFTBAR_GLYPH=
   local leftbar_start=-1 pi_open=-1 pi_lines=0 pi_max
   local probe row_glyph row_glyph_row
-  local box_glyph_row=-1 box_glyph='' pi_glyph_row=-1 pi_glyph=''
+  local box_glyph_row=-1 box_glyph='' pi_glyph_row=-1 pi_glyph='' row_shell_row=-1 box_shell_row=-1
   pi_max=$FM_COMPOSER_PI_MAX_LINES
   case "$pi_max" in ''|*[!0-9]*|0) pi_max=8 ;; esac
   while IFS= read -r line; do
@@ -1058,6 +1093,7 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
     # the agent-glyph test. A border row never carries a proof.
     row_glyph=''
     row_glyph_row=-1
+    row_shell_row=-1
     if [ -z "$kind" ]; then
       probe=$trimmed
       case "$probe" in
@@ -1071,6 +1107,16 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
       if fm_composer_leading_agent_glyph_var glyph "$probe"; then
         row_glyph=$glyph
         row_glyph_row=$row
+      elif [ "$droid_proven" = 1 ] && fm_composer_leading_shell_glyph_var glyph "$probe"; then
+        # A proved Droid pane: its own prompt glyph is `>`, inside its bordered
+        # composer, so that row is the box's container proof here.
+        row_glyph=$glyph
+        row_glyph_row=$row
+      fi
+      # Remember an UNPROVEN shell-glyph prompt row so an identity-asking
+      # caller can be told the verdict depends on who owns this pane.
+      if [ "$droid_proven" != 1 ] && fm_composer_leading_shell_glyph_var glyph "$probe"; then
+        row_shell_row=$row
       fi
     fi
     # Pi separator rows: a solid `─` rule at least 8 columns wide. A separator
@@ -1151,6 +1197,7 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
       content_rows=0
       box_glyph_row=-1
       box_glyph=''
+      box_shell_row=-1
       geometry_ambiguous=0
       geometry_check=1
       titled_top=0
@@ -1225,6 +1272,8 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
             FM_COMPOSER_SCAN_BOX_GLYPH=$box_glyph
             FM_COMPOSER_SCAN_CORTEX_CANDIDATE=0
             [ "$titled_cand" != 1 ] || [ "$box_glyph_row" -lt 0 ] || FM_COMPOSER_SCAN_CORTEX_CANDIDATE=1
+            FM_COMPOSER_SCAN_DROID_CANDIDATE=0
+            [ "$box_glyph_row" -ge 0 ] || [ "$box_shell_row" -lt 0 ] || FM_COMPOSER_SCAN_DROID_CANDIDATE=1
           fi
         else
           FM_COMPOSER_SCAN_BOX_TOP=$top
@@ -1234,6 +1283,8 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
           FM_COMPOSER_SCAN_BOX_GLYPH=$box_glyph
           FM_COMPOSER_SCAN_CORTEX_CANDIDATE=0
           [ "$titled_cand" != 1 ] || [ "$box_glyph_row" -lt 0 ] || FM_COMPOSER_SCAN_CORTEX_CANDIDATE=1
+          FM_COMPOSER_SCAN_DROID_CANDIDATE=0
+          [ "$box_glyph_row" -ge 0 ] || [ "$box_shell_row" -lt 0 ] || FM_COMPOSER_SCAN_DROID_CANDIDATE=1
         fi
         FM_COMPOSER_SCAN_INCOMPLETE_BOX_FROM=-1
       else
@@ -1266,6 +1317,9 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
           if [ "$box_glyph_row" -lt 0 ] && [ "$row_glyph_row" -ge 0 ]; then
             box_glyph_row=$row_glyph_row
             box_glyph=$row_glyph
+          fi
+          if [ "$box_glyph_row" -lt 0 ] && [ "$row_shell_row" -ge 0 ] && [ "$box_shell_row" -lt 0 ]; then
+            box_shell_row=$row_shell_row
           fi
           [ "$indent" = "$current_indent" ] || geometry_ambiguous=1
           if [ "$geometry_check" = 1 ]; then
@@ -1526,6 +1580,26 @@ _fm_composer_row_is_pi_status() {  # <trimmed-row>
 _fm_composer_row_is_cortex_status() {  # <trimmed-row>
   case "$1" in
     '>> '*' | '*teams*' | '*plan*) return 0 ;;
+  esac
+  return 1
+}
+
+# _fm_composer_row_is_droid_status: 0 when the trimmed row is Factory Droid's
+# footer cell row drawn directly under its composer, for example
+# `[⏱ 3s] 9 config issues — /diagnostics ... MCP ✗ | TMUX ⧉` (verified live,
+# droid 0.251.0). The wording follows the captain's diagnosis state and the
+# terminal, so the match needs the `/diagnostics` cell plus either the
+# `<n> config issues` cell or the leading elapsed `[⏱` cell. It is consulted
+# ONLY on a pane whose Droid identity was proved (droid=1), because a `>` row in
+# a box is not a container proof on any other harness.
+_fm_composer_row_is_droid_status() {  # <trimmed-row>
+  case "$1" in
+    *'/diagnostics'*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *'config issues'*) return 0 ;;
+    *'[⏱ '*) return 0 ;;
   esac
   return 1
 }
@@ -1865,6 +1939,9 @@ _fm_composer_row_is_composer_furniture() {  # <trimmed-row> <proof-glyph>
   local row=$1 proof=$2 glyph=''
   [ -n "$row" ] || return 1
   _fm_composer_row_is_omp_status "$row" && return 0
+  if [ "$FM_COMPOSER_SCAN_DROID_PROVEN" = 1 ] && _fm_composer_row_is_droid_status "$row"; then
+    return 0
+  fi
   _fm_composer_row_is_braille_furniture "$row" && return 0
   fm_composer_idle_matches "$row" \
     "${FM_COMPOSER_MODE_HINT_RE:-$FM_COMPOSER_MODE_HINT_RE_DEFAULT}" sensitive && return 0
@@ -2077,8 +2154,14 @@ _fm_composer_select_cursorless() {
     trimmed=$raw
     fm_composer_normalize_trim_var trimmed
     if [ -n "$trimmed" ] && ! fm_composer_row_has_edge "$trimmed"; then
-      FM_COMPOSER_SELECTED_KIND=
-      return 1
+      # A proved Droid pane draws its own status cell row under the composer;
+      # that row is furniture, not a lower live shape.
+      if [ "$FM_COMPOSER_SCAN_DROID_PROVEN" = 1 ] && _fm_composer_row_is_droid_status "$trimmed"; then
+        :
+      else
+        FM_COMPOSER_SELECTED_KIND=
+        return 1
+      fi
     fi
   fi
   [ -n "$FM_COMPOSER_SELECTED_KIND" ]
@@ -2241,7 +2324,7 @@ fm_composer_dialog_sink_release() {
 
 fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
   local caps=$1 screen=$2 cy=${3:-} identity=${4:-}
-  local styled=0 cursor=0 has_identity=0 cortex_proven=0 cortex_ask=0 kv plain
+  local styled=0 cursor=0 has_identity=0 cortex_proven=0 cortex_ask=0 droid_proven=0 droid_ask=0 kv plain
   # Note the dialog before any early return so a pending picker is still named.
   fm_composer_note_blocking_dialog "$screen" || true
   while IFS= read -r kv; do
@@ -2251,6 +2334,8 @@ fm_composer_classify_screen() {  # <caps> <screen> [cursor_row] [identity]
       identity=1) has_identity=1 ;;
       cortex=1) cortex_proven=1 ;;
       cortex=ask) cortex_ask=1 ;;
+      droid=1) droid_proven=1 ;;
+      droid=ask) droid_ask=1 ;;
     esac
   done <<EOF
 $caps
@@ -2264,6 +2349,7 @@ EOF
         local FM_COMPOSER_GHOST_LUMA_MAX=160
         ;;
       cortex) cortex_proven=1 ;;
+      droid) droid_proven=1 ;;
     esac
   fi
   [ "$cursor" = 1 ] || cy=''
@@ -2271,13 +2357,20 @@ EOF
     case "$cy" in *[!0-9]*) printf 'unknown'; return 0 ;; esac
   fi
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
-  _fm_composer_scan_screen "$plain" "$cy" '' "$cortex_proven"
+  _fm_composer_scan_screen "$plain" "$cy" '' "$cortex_proven" "$droid_proven"
   # The lazy Cortex identity pass: only a caller that asked for it
   # (cortex=ask), has not yet supplied an identity, and sees a titled rounded
   # glyph box as its selected shape needs the probe; every other read keeps
   # its verdict without one.
   if [ "$cortex_ask" = 1 ] && [ "$has_identity" = 1 ] && [ -z "$identity" ] \
      && [ "$FM_COMPOSER_SCAN_CORTEX_CANDIDATE" = 1 ]; then
+    printf 'need-identity'
+    return 0
+  fi
+  # The lazy Droid identity pass, the same shape: a rounded box that closed over
+  # an unproven `>` prompt row is the one shape a droid identity changes.
+  if [ "$droid_ask" = 1 ] && [ "$has_identity" = 1 ] && [ -z "$identity" ] \
+     && [ "$FM_COMPOSER_SCAN_DROID_CANDIDATE" = 1 ]; then
     printf 'need-identity'
     return 0
   fi

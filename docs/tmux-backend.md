@@ -62,7 +62,7 @@ The same scoping covers multi-process launchers without a special case, so the P
 Direct executable identities `pi`, `pi-signed`, and `Pi` remain accepted exactly, and similar or prefixed process names are not accepted through those exact Pi-family entries.
 Muse is likewise anchored to the exact `muse` launcher identity or the installed `muse-bin-<version>` prefix, so unrelated names such as `musescore` and `amuse` remain ambiguous.
 omp is anchored to the exact `omp` identity for the same reason, so `ompd` and `comp` remain ambiguous.
-AGY, Devin, and Command Code are anchored to the exact `agy`, `devin`, and `command-code` identities for the same reason, so unrelated names containing any of those fragments remain ambiguous.
+AGY, droid, Devin, and Command Code are anchored to the exact `agy`, `droid`, `devin`, and `command-code` identities for the same reason, so unrelated names containing any of those fragments remain ambiguous.
 Polytoken is anchored to the exact `polytoken` identity for the same reason, so unrelated names containing that fragment remain ambiguous.
 Cortex is anchored to the exact `cortex` identity for the same reason.
 An unrelated tool that ships a binary named exactly `cortex` is still classified as an agent when it is a pane's foreground process, because the exact name is the only identity Cortex Code carries.

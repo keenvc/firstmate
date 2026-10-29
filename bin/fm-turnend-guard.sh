@@ -10,6 +10,10 @@
 # fleet-touching command itself, can sit blind for hours.
 # This script is push-based: verified harness turn-end hooks invoke it every time
 # the primary is about to end a turn.
+# droid (Factory Droid CLI) blocks exactly like codex: its Stop hook's exit
+# status 2 feeds stderr back to the model as a continuation, and its payload
+# carries the snake_case stop_hook_active flag the default loop guard already
+# reads, so one Stop can be blocked at most once (verified live on 0.251.0).
 # Claude and codex can block directly by preserving exit status 2 and stderr.
 # OpenCode and pi adapters use the same predicate and force one bounded
 # follow-up because their turn-end events are passive. Grok delegates native
@@ -101,6 +105,7 @@ WATCH="$SCRIPT_DIR/fm-watch.sh"
 CLAUDE_MODE=0
 CURSOR_MODE=0
 AGY_MODE=0
+DROID_MODE=0
 SYNC_WAIT_MS=${FM_CLAUDE_AUTOARM_SYNC_WAIT_MS:-800}
 EPOCH_FRESH=${FM_CLAUDE_AUTOARM_EPOCH_FRESH:-15}
 BLOCK_BUDGET=${FM_CLAUDE_TURNEND_BLOCK_BUDGET:-3}
@@ -113,7 +118,8 @@ for arg in "$@"; do
     --claude) CLAUDE_MODE=1 ;;
     --cursor) CURSOR_MODE=1 ;;
     --agy) AGY_MODE=1 ;;
-    *) echo "usage: $(basename "$0") [--claude|--cursor|--agy]" >&2; exit 2 ;;
+    --droid) DROID_MODE=1 ;;
+    *) echo "usage: $(basename "$0") [--claude|--cursor|--agy|--droid]" >&2; exit 2 ;;
   esac
 done
 
@@ -122,15 +128,19 @@ allow_exit() {
   exit 0
 }
 
-# A Claude secondmate's home carries .fm-busy-stop (bin/fm-spawn.sh), and this
-# guard is then the only Stop writer of the parent home's busy record for that
+# A Claude or droid secondmate's home carries .fm-busy-stop (bin/fm-spawn.sh), and
+# this guard is then the only Stop writer of the parent home's busy record for that
 # gen: every exit records the Stop's outcome, busy when exit 2 blocks it into a
 # continuation and idle otherwise. Claude runs Stop hooks in parallel, so a
-# second Stop writer could land after this one and flip the verdict.
+# second Stop writer could land after this one and flip the verdict; droid runs
+# its Stop hook chain sequentially, and the spawn gives it no other Stop writer.
 # shellcheck disable=SC2329 # Invoked by the EXIT trap below.
 record_parent_stop_state() {
-  local status=$? pointer="$FM_ROOT/.fm-busy-stop" key value writer='' state='' id='' gen='' verdict=idle event=stop
-  [ "$CLAUDE_MODE" -eq 1 ] || return 0
+  local status=$? pointer="$FM_ROOT/.fm-busy-stop" key value writer='' state='' id='' gen='' verdict=idle event=stop source=claude-hook
+  if [ "$CLAUDE_MODE" -eq 0 ] && [ "$DROID_MODE" -eq 0 ]; then
+    return 0
+  fi
+  [ "$DROID_MODE" -eq 0 ] || source=droid-hook
   [ -f "$pointer" ] && [ ! -L "$pointer" ] || return 0
   while IFS='=' read -r key value; do
     case "$key" in
@@ -145,7 +155,7 @@ record_parent_stop_state() {
     verdict=busy
     event=stop-blocked
   fi
-  "$writer" apply "$state" "$id" "$verdict" --gen "$gen" --source claude-hook --event "$event" >/dev/null 2>&1 || true
+  "$writer" apply "$state" "$id" "$verdict" --gen "$gen" --source "$source" --event "$event" >/dev/null 2>&1 || true
 }
 trap record_parent_stop_state EXIT
 

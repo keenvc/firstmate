@@ -192,6 +192,16 @@ fm_tmux_composer_state() {  # <target> -> empty|pending|pending-unproven|unknown
   if [ "$verdict" = unknown ] && fm_tmux_pane_is_cortex "$target"; then
     verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)"$'\ncortex=1' "$pane" '')
   fi
+  # Factory Droid parks its terminal cursor on the blank row under its footer,
+  # never inside its bordered composer (verified live, droid 0.251.0 in tmux),
+  # so the cursor-anchored read can only answer `unknown` on a droid pane and the
+  # cursorless read applies, gated on its anchored foreground process name rather
+  # than on the verdict alone. That proved identity is also what lets the
+  # classifier accept Droid's `>` prompt row as its box's proof and read its
+  # status cell row as furniture (the droid=1 capability).
+  if [ "$verdict" = unknown ] && fm_tmux_pane_is_droid "$target"; then
+    verdict=$(fm_composer_classify_screen "$(fm_tmux_composer_caps)"$'\ndroid=1' "$pane" '')
+  fi
   # Command Code parks its terminal cursor below its footer too, drawing its
   # own reverse-video cursor cell in the composer (verified live, Command Code
   # 1.74.1), so it takes the same cursorless reclassification, gated on its own
@@ -217,6 +227,25 @@ fm_tmux_pane_is_cortex() {  # <target>
     [ -n "$comm" ] || continue
     [ "$pgid" = "$tpgid" ] || continue
     [ "${comm##*/}" = cortex ] && return 0
+  done <<EOF
+$(LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null)
+EOF
+  return 1
+}
+
+# fm_tmux_pane_is_droid: true when the pane's FOREGROUND process group contains
+# a process named exactly `droid` (Factory Droid CLI is a compiled single binary,
+# so its comm is that anchored word; verified live on 0.251.0). The foreground
+# scoping (pgid = tpgid) matches fm_tmux_pane_is_cursor, so a pane whose agent
+# exited to a shell gets no reclassification.
+fm_tmux_pane_is_droid() {  # <target>
+  local target=$1 tty pgid tpgid comm
+  tty=$(tmux display-message -p -t "$target" '#{pane_tty}' 2>/dev/null) || return 1
+  case "$tty" in /dev/*) ;; *) return 1 ;; esac
+  while read -r _ pgid tpgid comm; do
+    [ -n "$comm" ] || continue
+    [ "$pgid" = "$tpgid" ] || continue
+    [ "${comm##*/}" = droid ] && return 0
   done <<EOF
 $(LC_ALL=C ps -t "${tty#/dev/}" -o pid=,pgid=,tpgid=,comm= 2>/dev/null)
 EOF

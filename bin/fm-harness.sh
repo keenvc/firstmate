@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|polytoken|cortex|kiro|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|polytoken|cortex|kiro|droid|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate [id]  print the harness the PRIMARY uses to launch
@@ -131,6 +131,15 @@ harness_marker() {
     echo omp
     return
   fi
+  # droid (Factory Droid CLI) publishes FACTORY_SESSION_ID, a per-session UUID,
+  # to every tool/hook subprocess it spawns (verified live on droid 0.251.0: a
+  # shell tool reported FACTORY_SESSION_ID alongside DROID_PROTECTED_PID). It is
+  # droid's own identity value and is unset in the launching environment, so it
+  # is tested BEFORE claude for the ordering reason documented at cursor and
+  # gemini above: a droid worker under a claude primary inherits CLAUDECODE=1,
+  # and bin/fm-spawn.sh additionally clears the foreign markers at the launch
+  # boundary. The anchored `droid` ancestry arm below is the structural proof.
+  [ -n "${FACTORY_SESSION_ID:-}" ] && { echo droid; return; }
   [ "${CLAUDECODE:-}" = "1" ] && { echo claude; return; }
   if [ "${PI_CODING_AGENT:-}" = "true" ]; then
     if [ "${FM_PI_HARNESS:-}" = pi-signed ]; then echo pi-signed; else echo pi; fi
@@ -255,6 +264,11 @@ harness_process_verdict() {  # <pid>
     # markers at its launch boundary as defense in depth.
     polytoken) echo "comm polytoken"; return ;;
     devin) echo "comm devin"; return ;;
+    # droid (Factory Droid CLI) is a compiled single binary whose process name is
+    # exactly `droid` (verified live on 0.251.0: tmux #{pane_current_command} and
+    # `ps -o comm=` both report droid). Anchored, never *droid*, so unrelated
+    # commands containing that fragment cannot be misread as this harness.
+    droid) echo "comm droid"; return ;;
     # Cortex Code is a Bun-compiled single binary whose process name is exactly
     # `cortex` (verified, cortex 1.1.104: /proc comm=cortex, exe=cortex). It
     # publishes only CORTEX_* variables to its own hooks, never an identity
@@ -300,7 +314,15 @@ harness_process_verdict() {  # <pid>
 # inside another harness resolves to its own harness.
 harness_ancestry() {  # [<pid>]
   local pid=${1:-$$} verdict
-  for _ in 1 2 3 4 5 6 7 8; do
+  # Twelve, not eight: a harness that runs its session-start or turn-end hook
+  # through wrapper processes spends several levels before the harness itself -
+  # droid's SessionStart reaches bin/fm-session-start.sh through a hook shell, a
+  # registered transport script, and a bounded timeout wrapper. At eight, droid
+  # resolved `unknown` from its own hook while the same detection answered
+  # `droid` from a plain tool subprocess (measured 2026-10-29). The walk is still
+  # bounded and still returns the NEAREST match, so extra reach can only find the
+  # harness that was already there.
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
     verdict=$(harness_process_verdict "$pid")
     [ -z "$verdict" ] || { echo "$verdict"; return; }
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
@@ -436,7 +458,7 @@ supervision_primary_pin() {
   local pin=${FM_SUPERVISION_PRIMARY_HARNESS:-}
   [ "${FM_SUPERVISION_ACTOR:-}" = branch ] && [ -n "$pin" ] || return 0
   case "$pin" in
-    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|polytoken|cortex)
+    claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|polytoken|cortex|droid)
       printf '%s\n' "$pin"
       ;;
     *)

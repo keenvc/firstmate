@@ -237,7 +237,7 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|cortex|kiro)
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|cortex|kiro|droid)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -553,6 +553,10 @@
 #     __CORTEXBIN__ resolved Cortex Code executable
 #     __CORTEXPLUGIN__ private per-task Cortex plugin directory with lifecycle hooks
 #     __AGYBIN__    resolved, agy-verified executable for an agy launch
+#     __DROIDBIN__  resolved droid executable for a droid launch
+#     __DROIDSETTINGS__ firstmate-owned per-task droid runtime settings file
+#                   (model, reasoning effort, autonomy, busy-state and turn-end
+#                   hooks) passed through --settings for that one process
 #     __OPENCODEBIN__ quoted concrete opencode executable path resolved from PATH -
 #                  the same binary the version-gate probe reads, so the recorded
 #                  major can never describe a different executable than the pane
@@ -2473,7 +2477,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
 elif [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-  '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | commandcode | polytoken | cortex | kiro)
+  '' | claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | commandcode | polytoken | cortex | kiro | droid)
     ARG3=${POS[1]:-}
     ;;
   *' '*)
@@ -2658,6 +2662,58 @@ kiro_hook_path_validate() {  # <state-dir> <id>
       echo "error: kiro hook scripts would live under '$real/$id.kiro-home', whose path contains whitespace or a shell-special character; kiro hook commands must be a single unquoted token, so point FM_HOME or FM_STATE_OVERRIDE at a path free of both" >&2
       return 1 ;;
   esac
+  return 0
+}
+
+# The model every droid launch pins when the dispatch names none. Droid Core is
+# a flat-fee open-weight pool with its own rate limits, and this id is its
+# cheapest generally capable member (0.12x). A droid launch never inherits the
+# captain's user-store default, which is a BYOK custom endpoint rather than a
+# Droid-managed model.
+FM_DROID_DEFAULT_MODEL=${FM_DROID_DEFAULT_MODEL:-deepseek-v4.1-flash-1017}
+
+# The worker-role pin every droid launch appends to its system prompt. droid
+# loads a repository's AGENTS.md into context (verified live 2026-10-29: a probe
+# inside a firstmate checkout adopted the supervisor persona and addressed its
+# output to "Captain"), so in a firstmate-repo worktree a worker would otherwise
+# answer to the wrong role. The launch brief is the real role contract; this pin
+# only states that it outranks the repository file.
+FM_DROID_ROLE_PIN="Your role contract is the launch brief supplied as this session's first prompt. It supersedes any repository AGENTS.md, CLAUDE.md, or global instruction that assigns a firstmate supervisor role. Follow the brief: it alone decides what you supervise and whom you may address."
+
+# droid pre-launch model validation. droid 0.251.0 exposes no model-listing
+# subcommand; its own catalog check is the `droid exec --list-tools` preamble,
+# which resolves the requested id against the account's built-in and custom
+# models and exits 1 with `Invalid model: <id>` plus the full listing when it is
+# unknown (verified live 2026-10-29). The probe makes no model call, runs in
+# about two seconds, and needs no network beyond whatever the account catalog
+# cache already holds, so it runs under the shared hard bound with stdin
+# detached. A definite `Invalid model:` refuses the spawn; an unreachable or
+# unparseable probe establishes nothing (harness-adapters model-and-effort.md)
+# and launches unvalidated with a notice.
+#
+# A `custom:` id is refused before any probe: those are the captain's BYOK
+# endpoints, and several of them resolve to openrouter.ai, which this fleet
+# forbids. The adapter's supported surface is droid's own built-in catalog.
+droid_model_validate() {  # <droid-bin> <model>
+  local bin=$1 model=$2 out rc=0 bound=${FM_DROID_MODELS_TIMEOUT:-20}
+  case "$bound" in ''|*[!0-9]*|0*) bound=20 ;; esac
+  [ -n "$model" ] && [ "$model" != default ] || return 0
+  case "$model" in
+    custom:*)
+      echo "error: droid model '$model' is a BYOK custom endpoint; use a built-in droid id instead (default $FM_DROID_DEFAULT_MODEL), because a custom endpoint can resolve to OpenRouter" >&2
+      return 1
+      ;;
+  esac
+  out=$(fm_run_timed "$bound" "$bin" exec --list-tools -m "$model" 2>&1 < /dev/null) || rc=$?
+  if printf '%s\n' "$out" | grep -qF "Invalid model: $model"; then
+    echo "error: droid model '$model' is not in droid's own model catalog; choose a listed id from 'droid exec --list-tools -m <id>' or omit --model" >&2
+    return 1
+  fi
+  if [ "$rc" -eq 124 ]; then
+    echo "notice: droid's model catalog did not answer within ${bound}s; launching with model '$model' unvalidated" >&2
+  elif [ "$rc" -ne 0 ]; then
+    echo "notice: droid's model catalog is unreachable (exit $rc); launching with model '$model' unvalidated" >&2
+  fi
   return 0
 }
 
@@ -2948,6 +3004,25 @@ launch_template() {
   # because Cortex loads Claude-compatible hooks, and Herdr's claude integration
   # hook claims a pane as a claude session whenever that variable is set.
   cortex) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI __CORTEXBIN__ --dangerously-allow-all-tool-calls --plugin-dir __CORTEXPLUGIN__ __MODELFLAG____EFFORTFLAG__-- "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # droid (Factory Droid CLI) receives the typed launch envelope as its
+  # positional prompt, which the TUI submits on start (verified live on
+  # 0.251.0). --auto high is the unattended posture the brief requires and
+  # is droid's documented equivalent of auto-high autonomy: it pre-authorizes
+  # work at or below that risk level without a permission prompt. The launch
+  # also passes the firstmate-owned runtime settings file through --settings,
+  # which carries the model, the reasoning effort, the same high autonomy as
+  # the session default, and the busy-state and turn-end hooks; that file is
+  # per process, so the captain's own ~/.factory/settings.json is never
+  # rewritten for worker wiring. Every droid launch clears the foreign harness
+  # markers, because droid loads Claude-compatible hooks and inherits whatever
+  # the launching pane exported. --settings files MERGE with the user and
+  # project layers (verified live: hooks from --settings and from a project
+  # .factory/hooks.json both fired), so Herdr's own droid integration hook in
+  # the user layer keeps reporting pane state.
+  # --append-system-prompt carries the worker-role pin (FM_DROID_ROLE_PIN):
+  # droid loads the repository's AGENTS.md into context, so a firstmate-repo
+  # worktree would otherwise hand the worker the supervisor persona.
+  droid) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI __DROIDBIN__ --settings __DROIDSETTINGS__ --auto high --append-system-prompt __DROIDROLEPIN__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   # Kimi Code rejects a positional prompt, so it launches bare and receives
   # only an absolute brief pointer after the TUI readiness gate below.
   # Its turn-end signal is a globally configured Stop hook plus a guarded
@@ -3198,6 +3273,12 @@ kiro)
     exit 1
   }
   ;;
+droid)
+  DROID_BIN=$(resolve_pi_executable droid) || {
+    echo "error: droid executable not found on PATH; install Factory Droid CLI or select a different verified harness" >&2
+    exit 1
+  }
+  ;;
 polytoken)
   POLYTOKEN_BIN=$(fm_polytoken_binary) || {
     echo "error: polytoken executable not found; install Polytoken CLI or select a different verified harness" >&2
@@ -3250,6 +3331,13 @@ if [ "$HARNESS" = omp ]; then
 fi
 if [ "$HARNESS" = agy ]; then
   agy_model_validate "$AGY_BIN" "$MODEL" || exit 1
+fi
+if [ "$HARNESS" = droid ]; then
+  # A droid launch always pins a concrete model: firstmate's supported surface
+  # is droid's own built-in catalog, and an omitted model would otherwise fall
+  # through to the captain's user-store default custom endpoint.
+  case "$MODEL" in ''|default) MODEL=$FM_DROID_DEFAULT_MODEL ;; esac
+  droid_model_validate "$DROID_BIN" "$MODEL" || exit 1
 fi
 # polytoken's model validation composes firstmate's model and effort axes into
 # the launch model reference (bin/fm-polytoken-lib.sh owns the reasoning): the
@@ -3491,6 +3579,11 @@ model_flag_for_harness() {
   claude | codex | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin | commandcode | cortex | kiro)
     printf -- '--model %s ' "$(shell_quote "$model")"
     ;;
+  # droid's interactive TUI takes no --model/--reasoning-effort flags at all
+  # (`-m` and `-r` exist only on `droid exec`, and top-level `-r` is --resume),
+  # so both axes ride the firstmate-owned runtime settings file the template
+  # already passes to --settings. The launch carries no model flag.
+  droid) ;;
   # polytoken encodes reasoning effort inside the model reference, so the
   # flag carries the composed reference fm_polytoken_model_ref validated
   # above, including the model-scoped reasoning level, never an unpinned
@@ -3555,6 +3648,13 @@ effort_flag_for_harness() {
     case "$effort" in
     low | medium | high | xhigh | max) printf -- '--effort %s ' "$(shell_quote "$effort")" ;;
     esac
+    ;;
+  droid)
+    # No launch flag exists: the effort is written as `reasoningEffort` into the
+    # same firstmate-owned runtime settings file that carries the model, so
+    # nothing is added to argv. Droid's own vocabulary is
+    # none|dynamic|off|minimal|low|medium|high|xhigh|max per model, and an
+    # unsupported level is clamped by droid, so every shared level maps across.
     ;;
   commandcode)
     # Command Code's --effort set is model-scoped and an unknown value exits
@@ -5628,6 +5728,58 @@ agy_spawn_fail() {  # <detail>
   rovo_endpoint_cleanup
 }
 
+# droid carries its brief on the launch command, so it needs no delivery gate,
+# but a directory droid has not been told to trust parks the TUI on
+# "Trust this folder?" before the brief runs. The trust is pre-registered before
+# launch (bin/fm-droid-trust.sh, verified to remove the dialog), and this gate is
+# the backstop in the agy shape: answer the dialog once with the preselected
+# trust row when it renders anyway, then require positive proof that the brief is
+# being processed - the semantic busy record the UserPromptSubmit hook writes, or
+# the pinned `(Press ESC to stop)` status row through fm_busy_classify - before
+# the spawn reports success.
+DROID_TRUST_DIALOG='Trust this folder?'
+DROID_TRUST_ANSWERED=0
+
+droid_capture() {
+  fm_backend_capture "$BACKEND" "$T" 120 "$W" 2>/dev/null || true
+}
+
+droid_pane_shows_trust_dialog() {  # <plain-pane-capture>
+  printf '%s\n' "$1" | grep -Fq "$DROID_TRUST_DIALOG" \
+    && printf '%s\n' "$1" | grep -Fq 'Enter to confirm'
+}
+
+droid_pane_is_working() {  # <plain-pane-capture>
+  case "$(fm_busy_classify "$BACKEND" "$T" droid "$ID" "$STATE" "$1")" in
+    busy*) return 0 ;;
+  esac
+  return 1
+}
+
+droid_wait_for_working() {
+  local pane i=0 max=${FM_DROID_READY_POLLS:-60} interval=${FM_DROID_POLL_INTERVAL:-0.5}
+  while [ "$i" -lt "$max" ]; do
+    pane=$(droid_capture)
+    if droid_pane_shows_trust_dialog "$pane"; then
+      if [ "$DROID_TRUST_ANSWERED" -eq 0 ]; then
+        spawn_send_key "$T" Enter
+        DROID_TRUST_ANSWERED=1
+      fi
+    elif [ "$DROID_TRUST_PREREGISTERED" -eq 1 ] || [ "$DROID_TRUST_ANSWERED" -eq 1 ]; then
+      droid_pane_is_working "$pane" && return 0
+    fi
+    i=$((i + 1))
+    [ "$i" -ge "$max" ] || sleep "$interval"
+  done
+  return 1
+}
+
+droid_spawn_fail() {  # <detail>
+  printf '%s\n' "$(status_stamp_line "failed: $1")" >>"$STATE/$ID.status"
+  echo "error: $1; inspect window $T" >&2
+  rovo_endpoint_cleanup
+}
+
 # polytoken's launch-then-confirm gate, in the same shape as agy's: the brief
 # rides the launch command (--prompt submits it after the TUI attaches), so
 # readiness is positive proof the brief is being processed rather than proof a
@@ -5900,6 +6052,7 @@ spawn_assert_agent_worktree
 # answers the dialog itself and, on a path that was not pre-registered, refuses
 # to count a busy turn as ready until it has done so.
 AGY_TRUST_PREREGISTERED=0
+DROID_TRUST_PREREGISTERED=0
 case "$HARNESS" in
 claude*)
   if [ "$KIND" = secondmate ]; then
@@ -5922,6 +6075,22 @@ agy)
     AGY_TRUST_PREREGISTERED=1
   else
     echo "warning: could not pre-register agy workspace trust for $WT; the launch will answer the folder-trust dialog in window $T instead" >&2
+  fi
+  ;;
+droid)
+  # droid's folder-trust dialog preselects the trust row, so a failed
+  # registration is not fatal: the post-launch gate answers the dialog itself
+  # and, on a path that was not pre-registered, refuses to count a busy turn as
+  # ready until it has done so.
+  if [ "$KIND" = secondmate ]; then
+    droid_trust_args=(--secondmate-home "$PROJ_ABS" "$ID")
+  else
+    droid_trust_args=("$WT" "$PROJ_ABS")
+  fi
+  if "$FM_ROOT/bin/fm-droid-trust.sh" "${droid_trust_args[@]}" >/dev/null; then
+    DROID_TRUST_PREREGISTERED=1
+  else
+    echo "warning: could not pre-register droid folder trust for $WT; the launch will answer the 'Trust this folder?' dialog in window $T instead" >&2
   fi
   ;;
 esac
@@ -6180,7 +6349,7 @@ BUSY_GEN=
     }
     [ "$RELAUNCH" -ne 1 ] || RELAUNCH_REPLACEMENT_BUSY_GEN=$BUSY_GEN
     ;;
-  gemini | devin | commandcode | polytoken | cortex | kiro)
+  gemini | devin | commandcode | polytoken | cortex | kiro | droid)
     if [ "$RAW_LAUNCH" -eq 0 ]; then
       BUSY_GEN=$("$FM_ROOT/bin/fm-busy-event.sh" arm "$STATE_REAL" "$ID") || {
         echo "error: failed to arm the busy-state contract for $ID" >&2
@@ -6276,6 +6445,97 @@ BUSY_GEN=
   cortex)
     if [ "$RAW_LAUNCH" -eq 0 ]; then
       "$SCRIPT_DIR/fm-cortex-plugin.sh" "$STATE_REAL" "$ID" "$BUSY_GEN" || exit 1
+    fi
+    ;;
+  droid)
+    if [ "$RAW_LAUNCH" -eq 0 ]; then
+      # Semantic busy-state and turn-end wiring (bin/fm-busy-lib.sh). droid
+      # 0.251.0 fires SessionStart, UserPromptSubmit, Stop, Notification, and
+      # SessionEnd for the lifecycle firstmate needs (verified live): a
+      # submitted prompt opens a turn, Stop closes it, SessionEnd closes on
+      # process shutdown, and a manual Escape interrupt emits NO Stop but does
+      # emit a Notification carrying notification_type=idle_prompt, so that
+      # notification is the interrupt's own close event rather than a
+      # control-plane guess. A Notification arriving for any other reason
+      # (permission_prompt, auth_success, elicitation_dialog) leaves the record
+      # alone.
+      #
+      # The wiring lives in a FIRSTMATE-OWNED per-task settings file under
+      # state/, reached through --settings, never in the captain's user store
+      # (~/.factory/settings.json, shared by every droid session on the
+      # machine) and never in a project's .factory/hooks.json. droid MERGES the
+      # hooks of every settings layer, so the user layer's own hooks keep
+      # running alongside these.
+      #
+      # A crewmate/scout Stop closes the record and keeps the watcher's
+      # turn-ended touch. A secondmate is a firstmate primary in its own home:
+      # its Stop is owned by its home's tracked turn-end guard
+      # (bin/fm-turnend-guard.sh --droid), which points back here through
+      # .fm-busy-stop so a blocked Stop records busy and an allowed one records
+      # idle, exactly the Claude secondmate shape (docs/turnend-guard.md). Every
+      # hook tolerates a refused event (|| true) so a stale-gen writer can never
+      # break droid's own lifecycle, and each prints droid's
+      # {"suppressOutput":true} so the hook line stays out of the transcript.
+      DROID_SETTINGS_PATH="$STATE_REAL/$ID.droid-settings.json"
+      busy_cmd_prefix="$(shell_quote "$FM_ROOT/bin/fm-busy-event.sh") apply $(shell_quote "$STATE_REAL") $(shell_quote "$ID")"
+      busy_suffix="--gen $(shell_quote "$BUSY_GEN") --source droid-hook"
+      d_submit=$(json_escape "$busy_cmd_prefix busy $busy_suffix --event user-prompt-submit >/dev/null 2>&1 || true; printf '{\"suppressOutput\":true}'")
+      d_notify_cmd="d_payload=\$(cat 2>/dev/null || true); case \"\$d_payload\" in *'\"notification_type\":\"idle_prompt\"'*) $busy_cmd_prefix idle $busy_suffix --event notification-idle >/dev/null 2>&1 || true ;; esac; printf '{\"suppressOutput\":true}'"
+      d_notify=$(json_escape "$d_notify_cmd")
+      d_sessionend=$(json_escape "$busy_cmd_prefix idle $busy_suffix --event session-end >/dev/null 2>&1 || true; printf '{\"suppressOutput\":true}'")
+      d_sessionstart=
+      if [ "$KIND" = secondmate ]; then
+        # The mate is a firstmate PRIMARY in its own home, so its session open
+        # must take the helm through the run tier: droid appends a SessionStart
+        # hook's hookSpecificOutput.additionalContext to the new session's
+        # context (verified live, 0.251.0), which is what lets this home carry
+        # its own session-start digest without model discretion
+        # (docs/sessionstart-nudge.md).
+        d_sessionstart=$(json_escape "$(shell_quote "$WT/bin/fm-sessionstart-droid.sh")")
+      fi
+      if [ "$KIND" = secondmate ] && grep -qF '.fm-busy-stop' "$WT/bin/fm-turnend-guard.sh" 2>/dev/null; then
+        {
+          printf 'writer=%s\n' "$FM_ROOT/bin/fm-busy-event.sh"
+          printf 'state=%s\n' "$STATE_REAL"
+          printf 'id=%s\n' "$ID"
+          printf 'gen=%s\n' "$BUSY_GEN"
+        } >"$WT/.fm-busy-stop"
+        exclude_path '.fm-busy-stop'
+        d_stop=$(json_escape "$(shell_quote "$WT/bin/fm-turnend-guard.sh") --droid")
+      else
+        stop_turnend=
+        if [ "$busy_notify_turnend" = true ]; then
+          stop_turnend="touch $(shell_quote "$TURNEND"); "
+        fi
+        d_stop=$(json_escape "${stop_turnend}$busy_cmd_prefix idle $busy_suffix --event stop >/dev/null 2>&1 || true; printf '{\"suppressOutput\":true}'")
+      fi
+      # MODEL is always a concrete built-in id here, resolved and validated
+      # above, so the runtime settings file always pins a Droid-managed model.
+      d_model=$MODEL
+      [ "$d_model" != default ] || d_model=$FM_DROID_DEFAULT_MODEL
+      d_effort=$EFFORT
+      [ "$d_effort" != default ] || d_effort=
+      case "$d_effort" in
+      low | medium | high | xhigh | max) ;;
+      *) d_effort= ;;
+      esac
+      {
+        printf '{'
+        printf '\"sessionDefaultSettings\":{\"autonomyLevel\":\"high\",\"interactionMode\":\"auto\"}'
+        [ -z "$d_model" ] || printf ',\"model\":\"%s\"' "$(json_escape "$d_model")"
+        [ -z "$d_effort" ] || printf ',\"reasoningEffort\":\"%s\"' "$(json_escape "$d_effort")"
+        printf ',\"hooks\":{'
+        printf '\"UserPromptSubmit\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"%s\",\"timeout\":10}]}]' "$d_submit"
+        printf ',\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"%s\",\"timeout\":600}]}]' "$d_stop"
+        printf ',\"Notification\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"%s\",\"timeout\":10}]}]' "$d_notify"
+        printf ',\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"%s\",\"timeout\":10}]}]' "$d_sessionend"
+        [ -z "$d_sessionstart" ] || printf ',\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"%s\",\"timeout\":180}]}]' "$d_sessionstart"
+        printf '}}'
+        printf '\n'
+      } >"$DROID_SETTINGS_PATH" || {
+        echo "error: could not write the droid runtime settings file $DROID_SETTINGS_PATH" >&2
+        exit 1
+      }
     fi
     ;;
   gemini)
@@ -7253,6 +7513,11 @@ cortex)
   LAUNCH=${LAUNCH//__CORTEXPLUGIN__/"$(shell_quote "$STATE_REAL/$ID.cortex-plugin")"}
   ;;
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
+droid)
+  LAUNCH=${LAUNCH//__DROIDBIN__/"$(shell_quote "$DROID_BIN")"}
+  LAUNCH=${LAUNCH//__DROIDSETTINGS__/"$(shell_quote "${DROID_SETTINGS_PATH:-$STATE_REAL/$ID.droid-settings.json}")"}
+  LAUNCH=${LAUNCH//__DROIDROLEPIN__/"$(shell_quote "$FM_DROID_ROLE_PIN")"}
+  ;;
 opencode)
   # The resolved absolute path probed for the version gate above, so the pane
   # runs exactly the binary whose major was recorded. An unresolved executable
@@ -7306,7 +7571,7 @@ case "$LAUNCH" in
   ;;
 esac
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin | commandcode | cortex | kiro)
+claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin | commandcode | cortex | kiro | droid)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac
@@ -7756,6 +8021,18 @@ if [ "$HARNESS" = agy ]; then
       agy_spawn_fail "agy did not start processing its brief in the pre-trusted worktree in window $T"
     else
       agy_spawn_fail "agy never showed its folder-trust dialog on an unregistered worktree in window $T, so the brief could not be confirmed to run there"
+    fi
+    exit 1
+  fi
+fi
+if [ "$HARNESS" = droid ]; then
+  if ! droid_wait_for_working; then
+    if [ "$DROID_TRUST_ANSWERED" -eq 1 ]; then
+      droid_spawn_fail "droid did not start processing its brief after the folder-trust dialog was answered in window $T"
+    elif [ "$DROID_TRUST_PREREGISTERED" -eq 1 ]; then
+      droid_spawn_fail "droid did not start processing its brief in the pre-trusted worktree in window $T"
+    else
+      droid_spawn_fail "droid never showed its folder-trust dialog on an unregistered worktree in window $T, so the brief could not be confirmed to run there"
     fi
     exit 1
   fi

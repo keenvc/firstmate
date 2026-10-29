@@ -3292,10 +3292,15 @@ fm_backend_herdr_composer_state() {  # <target> -> empty|pending|pending-unprove
   # cortex=ask: a titled rounded composer box is the one shape a Cortex agent
   # identity changes, so the classifier answers need-identity for it and the
   # lazy probe below runs; no other verdict pays for it.
+  # droid=ask: the same lazy shape for Factory Droid, whose bordered composer
+  # closes over a `>` prompt row - a shell glyph no harness may treat as a
+  # container proof without a proved identity. Herdr's native agent probe answers
+  # `droid` from its own droid integration, so the shell-glyph box becomes
+  # provable there without any tmux foreground probe.
   if cap=$(fm_backend_herdr_visible_capture_ansi "$target" 2>/dev/null); then
-    caps=$(printf 'styled=1\ncursor=0\nidentity=1\ncortex=ask')
+    caps=$(printf 'styled=1\ncursor=0\nidentity=1\ncortex=ask\ndroid=ask')
   elif cap=$(fm_backend_herdr_visible_capture "$target"); then
-    caps=$(printf 'styled=0\ncursor=0\nidentity=1\ncortex=ask')
+    caps=$(printf 'styled=0\ncursor=0\nidentity=1\ncortex=ask\ndroid=ask')
   else
     printf 'unknown'
     return 0

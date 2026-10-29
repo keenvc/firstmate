@@ -47,6 +47,9 @@
 #   kiro-hook        Kiro V2 agent-config hooks (userPromptSubmit opens; stop
 #                    closes) - kiro's ONLY state source; its per-turn stop hook
 #                    also keeps the turn-ended notification touch
+#   droid-hook       Factory Droid per-task runtime-settings hooks
+#                    (UserPromptSubmit opens; Stop, SessionEnd, and the
+#                    idle_prompt Notification an Escape interrupt emits close)
 #   codex-hook, codex-appserver  reserved: Codex, gated by
 #                    fm_busy_codex_semantic_source
 #   kimi-wire, kimi-hook  reserved: standalone Kimi, gated by fm_busy_kimi_verified
@@ -335,6 +338,7 @@ fm_busy_sources_for_harness() {  # <harness>
     gemini*) adapter=gemini-hook ;;
     devin) adapter=devin-hook ;;
     cortex) adapter=cortex-hook ;;
+    droid) adapter=droid-hook ;;
     commandcode) adapter=commandcode-mod ;;
     polytoken) adapter=polytoken-hook ;;
     kiro) adapter=kiro-hook ;;
@@ -1098,10 +1102,26 @@ fm_busy_gemini_launch_prompt_tail() {
   printf '%s' "$buf" | grep -qiE "${FM_BUSY_GEMINI_APIKEY_PROMPT_REGEX:-Enter Gemini API Key}"
 }
 
+# fm_busy_droid_launch_prompt_tail: Factory Droid's folder-trust dialog. Live
+# capture on droid 0.251.0 (2026-10-29) in a fresh untrusted directory: a
+# bordered box whose heading reads "Trust this folder?", whose selected row is
+# "1. Trust this folder", and whose footer reads "Enter to confirm · Esc to
+# exit". bin/fm-droid-trust.sh pre-registers the worktree before launch, so this
+# is the backstop for when that registration did not take effect. The heading is
+# paired with the footer, both required together, for the same reason as
+# Claude's pairing above: the heading alone is plausible prose a firstmate-repo
+# worker could render.
+fm_busy_droid_launch_prompt_tail() {
+  local buf
+  buf=$(cat)
+  printf '%s' "$buf" | grep -qiE "${FM_BUSY_DROID_TRUST_PROMPT_REGEX:-Trust this folder\\?}" \
+    && printf '%s' "$buf" | grep -qiE 'Enter to confirm'
+}
+
 # fm_busy_launch_prompt_parked: dispatch to the signature above for <harness>,
 # or fail when this harness has none. Consumes the tail on stdin. Scoped to
 # exactly the harnesses fm-spawn.sh arms with the fm-spawn busy source
-# (claude*, opencode*, pi, pi-signed, omp, gemini) since only those can ever
+# (claude*, opencode*, pi, pi-signed, omp, gemini, droid) since only those can ever
 # read a pinned "busy fm-spawn" record; codex and standalone Kimi already
 # classify unknown before a record is ever consulted, and opencode ships no
 # trust dialog at all.
@@ -1110,6 +1130,7 @@ fm_busy_launch_prompt_parked() {  # <harness>
     claude*) fm_busy_claude_launch_prompt_tail ;;
     pi | pi-signed | omp) fm_busy_pi_launch_prompt_tail ;;
     gemini) fm_busy_gemini_launch_prompt_tail ;;
+    droid) fm_busy_droid_launch_prompt_tail ;;
     *) return 1 ;;
   esac
 }

@@ -264,6 +264,7 @@ Each enabled primary harness adapts its own turn-end mechanism to the shared gua
 | Cursor | `stop` hook in `.cursor/hooks.json` | Cannot block, so it parks and returns at most one follow-up |
 | Grok | `Stop` hook in `.grok/hooks/fm-primary-turnend-guard.json` | Native blocking, or one legacy `grok --resume` fallback |
 | Antigravity | `Stop` hook in `.agents/hooks.json` | Synchronous Stop-hook park running `bin/fm-watch-arm.sh` (or the supervision host) with bounded repair nag via `bin/fm-turnend-guard.sh --agy` |
+| droid | `Stop` hook in the firstmate-owned per-task `state/<id>.droid-settings.json` | Blocks with exit status 2, bounded by droid's own `stop_hook_active` |
 
 The registrations in detail:
 
@@ -296,6 +297,10 @@ The registrations in detail:
   The same marker guard carries every tracked `.claude/settings.json` entry whose event Grok already covers through its own `.grok/hooks/` registration, which is both `Stop` entries, the `SessionStart` entry, and the two `PreToolUse` Bash entries.
   `bin/fm-subagent-pretool-check.sh` is the one deliberate unguarded exception because no Grok registration covers the subagent-spawn event, recorded in [`subagent-guard.md`](subagent-guard.md) "Known residual gap".
   `tests/fm-turnend-guard.test.sh` pins that inventory so neither the guarded set nor the exception can change silently.
+- droid registers `bin/fm-turnend-guard.sh --droid` as the `Stop` hook of a secondmate launch, inside the firstmate-owned runtime settings file `bin/fm-spawn.sh` writes and passes through `--settings`.
+  Exit status 2 feeds stderr back to the model as a continuation, and the payload's snake_case `stop_hook_active` bounds that to one block per turn, so the default loop guard applies unchanged.
+  droid runs one Stop hook chain per event, so the guard is the only Stop writer of the parent home's busy record for that generation: `bin/fm-spawn.sh` writes the `.fm-busy-stop` pointer, and the guard records busy when it blocks and idle when it allows.
+  A crewmate or scout droid launch has no guard (a task worktree is not a primary) and keeps the ordinary `Stop` idle hook.
 - pi-code, Pi's Claude-hook compatibility extension, also loads `<project>/.claude/settings.json` and has no `asyncRewake`, so it awaits every Stop hook it delivers.
   `bin/fm-claude-stop-autoarm.sh` therefore stands down on a pi-code-delivered payload.
   Otherwise its foreground arm would run synchronously and hold Pi's turn open for the declared multi-hour timeout, exactly the wedge Cursor and grok 1.0.0 would produce (issue #3343).

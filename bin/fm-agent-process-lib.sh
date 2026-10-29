@@ -63,6 +63,11 @@ fm_agent_process_classify_name() {  # <path> [argv0] -> agent|shell|other
     # #{pane_current_command} both read kiro-cli), and a glob would claim
     # unrelated commands containing that fragment.
     kiro-cli) printf 'agent' ;;
+    # droid (Factory Droid CLI) is anchored for the same reason: its live process
+    # name is the bare word `droid` (verified live on 0.251.0, both
+    # tmux #{pane_current_command} and ps comm), and a glob would claim unrelated
+    # commands containing that fragment.
+    droid) printf 'agent' ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'shell' ;;
     *)
       if fm_harness_path_name "$path" >/dev/null || fm_harness_path_name "$argv0" >/dev/null; then

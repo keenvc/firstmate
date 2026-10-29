@@ -26,7 +26,7 @@ The tier is a property of the harness surface, not of the home.
 
 | Tier | What the adapter does | Used by |
 | --- | --- | --- |
-| Run | Executes `bin/fm-session-start.sh` through the native session-open adapter and gates its ordered digest into model context before the first turn. | Claude, `codex exec`, Pi / pi-signed, omp, Cursor, Antigravity (agy) |
+| Run | Executes `bin/fm-session-start.sh` through the native session-open adapter and gates its ordered digest into model context before the first turn. | Claude, `codex exec`, Pi / pi-signed, omp, Cursor, Antigravity (agy), droid (secondmate) |
 | Nudge | Asks the agent to run the digest through the native adapter or the tracked session-start instruction. | Grok, OpenCode, and run-tier sources routed to the nudge |
 
 Codex's interactive TUI has no tracked session-open, compaction, or re-emit channel and is not covered by either tier.
@@ -44,6 +44,7 @@ Codex's interactive TUI has no tracked session-open, compaction, or re-emit chan
 | Cursor | Run | [Cursor](#cursor) |
 | omp | Run | [omp](#omp) |
 | Antigravity (agy) | Run | [Antigravity (agy)](#antigravity-agy) |
+| droid | Run | [droid](#droid) |
 | Cursor compaction | Uncovered | [Cursor compaction](#cursor-compaction) |
 
 ### Why the run tier exists
@@ -337,6 +338,15 @@ So this path is intentionally fail-open and cannot use the run tier.
 Grok's guaranteed-loading alternative is a global token-guarded hook like the pattern used by `bin/fm-spawn.sh`.
 That alternative expands trust and writes outside this repository.
 So Firstmate never installs it or grants folder trust automatically.
+
+### droid
+
+droid is a run-tier harness for session open, verified on 0.251.0.
+`bin/fm-spawn.sh` registers `bin/fm-sessionstart-droid.sh` as the `SessionStart` hook of a secondmate launch, inside the firstmate-owned per-task runtime settings file it passes through `--settings`.
+droid appends a `SessionStart` hook's `hookSpecificOutput.additionalContext` to the new session's context (verified live: a hook-supplied fact was answered on the very next prompt), so the digest lands before the first turn and the helm is taken without model discretion.
+The payload carries its own `source` field, which `bin/fm-sessionstart-run.sh` already reads, so the adapter supplies no override.
+A crewmate or scout droid launch registers no session-start hook: a task worktree is not a primary and takes its helm from the launch brief.
+The hook file is per task, so nothing global is installed and the captain's own `~/.factory/settings.json` keeps its own hooks; droid merges each settings layer's hooks rather than replacing them.
 
 ### Cursor
 
