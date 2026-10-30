@@ -3572,6 +3572,66 @@ test_secondmate_liveness_tick_relaunch_failure_reports_once() {
   pass "watch liveness: a failed auto-relaunch wakes once with its cause and is ledgered"
 }
 
+test_secondmate_liveness_tick_parks_once_on_live_agent_holding_the_tab() {
+  local dir state pid ledger script root shell_pid
+  dir=$(make_secondmate_liveness_case liveness-occupied)
+  state="$dir/state"
+  ledger="$state/.secondmate-relaunch-sm1"
+  sleep 120 > /dev/null 2>&1 &
+  shell_pid=$!
+  cat > "$dir/fakebin/herdr" <<SH
+#!/usr/bin/env bash
+case "\${1:-} \${2:-}" in
+  "pane get") printf '{"result":{"pane":{"pane_id":"w1:p2"}}}\\n' ;;
+  "agent get") printf '{"result":{"agent":{"agent_status":"idle"}}}\\n' ;;
+  "pane process-info") printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":$shell_pid,"foreground_processes":[{"pid":$shell_pid,"name":"claude","argv":["claude"]}]}}}\\n' ;;
+  "pane close") printf 'closed\\n' >> "$dir/herdr-closes" ;;
+esac
+exit 0
+SH
+  chmod +x "$dir/fakebin/herdr"
+  root="$dir/root"
+  mkdir -p "$root/bin"
+  for script in "$ROOT"/bin/*; do
+    ln -s "$script" "$root/bin/"
+  done
+  rm -f "$root/bin/fm-spawn.sh"
+  cat > "$root/bin/fm-spawn.sh" <<SH
+#!/usr/bin/env bash
+printf 'spawn\\n' >> "$dir/spawns"
+echo "error: herdr tab 'fm-sm1' already exists in workspace w1 (session sess)" >&2
+echo "FM_HERDR_TAB_TAKEN sess:w1:p2" >&2
+exit 1
+SH
+  chmod +x "$root/bin/fm-spawn.sh"
+
+  run_liveness_leg "$dir" occupied FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_ROOT_OVERRIDE="$root"; pid=$LIVENESS_PID
+  wait_for_exit "$pid" 300 || fail "the watcher did not exit on its occupied-tab wake"
+  grep -F 'check: secondmate sm1 auto-relaunch paused: tab fm-sm1 is held by a live agent in pane sess:w1:p2' \
+    "$dir/watch-occupied.out" >/dev/null \
+    || fail "the occupied tab did not wake with its exact pane: $(cat "$dir/watch-occupied.out" "$dir/watch-occupied.err")"
+  if grep -F 'auto-relaunch failed' "$dir/watch-occupied.out" >/dev/null; then
+    fail "an occupied tab was reported as a failed launch: $(cat "$dir/watch-occupied.out")"
+  fi
+  [ ! -e "$dir/herdr-closes" ] || fail "a live occupant was closed"
+  [ -e "$state/.secondmate-relaunch-bound-sm1" ] || fail "the occupied tab did not park auto-relaunch"
+
+  # Another attempt cannot help until someone resolves the two panes, so the
+  # parked mate must neither spawn again nor wake again on later ticks.
+  drain_liveness_wakes "$dir"
+  rm -f "$state/.secondmate-liveness-tick"
+  run_liveness_leg "$dir" occupied-parked FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_ROOT_OVERRIDE="$root"; pid=$LIVENESS_PID
+  sleep 4
+  is_live_non_zombie "$pid" \
+    || fail "the watcher woke again for a parked occupied tab: $(cat "$dir/watch-occupied-parked.out" "$dir/watch-occupied-parked.err")"
+  kill_liveness_leg "$pid"
+  [ "$(wc -l < "$dir/spawns" | tr -d ' ')" -eq 1 ] || fail "a parked occupied tab spawned again: $(cat "$dir/spawns")"
+  [ "$(awk -F '\t' '$2 == "attempt"' "$ledger" | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "a parked occupied tab recorded another attempt: $(cat "$ledger")"
+  kill "$shell_pid" 2>/dev/null || true
+  pass "watch liveness: a live agent holding the tab wakes once with the exact pane and parks auto-relaunch"
+}
+
 test_secondmate_liveness_tick_fails_closed_on_ledger_errors() {
   local dir state pid ledger mode rc
   if [ "$(id -u)" -eq 0 ]; then
@@ -3797,6 +3857,7 @@ test_wake_queue_prune_task
 test_drain_rotates_orphaned_scratch
 test_secondmate_liveness_tick_relaunches_dead_endpoint_once
 test_secondmate_liveness_tick_relaunches_missing_endpoint
+test_secondmate_liveness_tick_parks_once_on_live_agent_holding_the_tab
 test_secondmate_liveness_tick_relaunches_every_dead_mate_before_waking
 test_secondmate_liveness_tick_leaves_alive_and_inconclusive_untouched
 test_secondmate_liveness_tick_cadence_gates_the_probe

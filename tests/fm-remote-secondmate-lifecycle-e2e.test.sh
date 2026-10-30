@@ -1534,6 +1534,7 @@ FM_HOME="$PARENT" bash -c '
 printf 'confirmed:%s\n' "$retired_wake_corr" > "$PARENT/state/.backlog-handoff-ios.wake-pending"
 printf '%s\tattempt\n' "$(date +%s)" > "$PARENT/state/.secondmate-relaunch-ios"
 printf '%s\tdead\n' "$(date +%s)" > "$PARENT/state/.secondmate-relaunch-bound-ios"
+printf 'evidence\n' > "$PARENT/state/ios.last-death.txt"
 liveness_lock="$PARENT/state/.secondmate-liveness-ios.lock"
 # The link is published before the claim finishes; signal only after acquire.
 # shellcheck disable=SC2016 # Positional parameters expand in the child shell.
@@ -1643,6 +1644,7 @@ assert_absent "$PARENT/state/ios.meta" "remote retirement did not remove parent 
 assert_absent "$PARENT/state/.backlog-handoff-ios.wake-pending" \
   "remote retirement left receiver wake state that could poison a replacement route"
 assert_absent "$retired_wake_rec" "remote retirement left the retired receiver wake correlation"
+assert_absent "$PARENT/state/ios.last-death.txt" "remote teardown left the retired secondmate's death evidence"
 assert_absent "$PARENT/state/.secondmate-relaunch-ios" \
   "remote retirement left the relaunch ledger a same-id replacement would inherit"
 assert_absent "$PARENT/state/.secondmate-relaunch-bound-ios" \

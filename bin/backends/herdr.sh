@@ -2428,7 +2428,9 @@ fm_backend_herdr_pane_agent_session_ref() {  # <session> <pane_id>
 # read never licenses closing anything, and a stale registration - agent-free
 # for RECOVERY, which reuses the pane - still never licenses closing it, because
 # the shell it holds may be a nested worktree shell. Restored-layout recovery
-# depends on this fail-safe-toward-refusal behavior.
+# depends on this fail-safe-toward-refusal behavior. Secondmate liveness recovery
+# owns its own close of such a pane: a mate's endpoint runs in its home, not a
+# worktree (bin/fm-secondmate-liveness-lib.sh).
 fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
   case "$(fm_backend_herdr_pane_agent_state "$1" "$2")" in
     dead|no-agent) return 0 ;;
@@ -2576,7 +2578,9 @@ fm_backend_herdr_agent_alive() {  # <target>
 # fm_backend_herdr_workspace_prune_seeded_default_tab for the incident and
 # the safety argument). An ADOPTED workspace's caller always passes an empty
 # 4th arg, so this function never even queries for a prune candidate in that
-# case. Echoes "<tab_id> <pane_id>" on success.
+# case. Echoes "<tab_id> <pane_id>" on success. A refused duplicate also prints
+# `FM_HERDR_TAB_TAKEN <session>:<pane>` on stderr, naming the exact occupant in
+# the workspace this spawn resolved for bin/fm-secondmate-liveness-lib.sh.
 fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id>
   local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-} session wsid list dup_tabs dup dup_pane dup_tab_ids out tab_id pane_id remaining_dup_tabs
   session=${container%%:*}
@@ -2593,6 +2597,7 @@ fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_ta
       dup_pane=$(fm_backend_herdr_pane_for_tab "$session" "$wsid" "$dup")
       if [ -z "$dup_pane" ] || ! fm_backend_herdr_tab_is_husk "$session" "$dup_pane"; then
         echo "error: herdr tab '$label' already exists in workspace $wsid (session $session)" >&2
+        [ -z "$dup_pane" ] || echo "FM_HERDR_TAB_TAKEN $session:$dup_pane" >&2
         return 1
       fi
       dup_tab_ids="${dup_tab_ids}${dup}"$'\n'

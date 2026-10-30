@@ -332,6 +332,10 @@ case "${1:-}" in
     [ "${1:-}" = new-window ] && rm -f "${FM_TMUX_CALL_LOG}.killed"
     exit 0
     ;;
+  capture-pane)
+    [ -z "${FM_TEST_CAPTURE_HANG:-}" ] || exec sleep 60
+    [ -z "${FM_TEST_CAPTURE:-}" ] || [ -e "${FM_TMUX_CALL_LOG}.killed" ] || cat "$FM_TEST_CAPTURE"
+    exit 0 ;;
   has-session) exit 0 ;;
 esac
 exit 0
@@ -840,6 +844,303 @@ test_remote_poll_probe_unreachable_preserves_route() {
   pass "poll probe: unreachable or inconclusive remote reads preserve the route"
 }
 
+# --- copied home ------------------------------------------------------------
+
+# copy_world_home <w>: the original home has recorded its identity, then is copied
+# the way a test harness would copy it; its records still name the original's
+# endpoint. Prints the copy's path.
+copy_world_home() {
+  local w=$1
+  printf '%s\n' "$(cd "$w/home/state" && pwd -P)" > "$w/home/state/.home-id"
+  cp -R "$w/home" "$w/home-copy"
+  printf '%s\n' "$w/home-copy"
+}
+
+test_sweep_in_copied_home_skips_every_mate_without_touching_it() {
+  local w fb tmuxfb log out copy
+  w=$(new_world sweep-copied-home)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+  copy=$(copy_world_home "$w")
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$copy" zsh "$log")
+
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: skipped: " \
+    "the sweep should report the mate skipped in a copied home"
+  assert_contains "$out" "is a copy of" "the skip should name the copy as its reason"
+  [ ! -s "$log" ] || fail "a copied home touched a live endpoint: $(cat "$log")"
+  [ ! -e "$copy/state/.secondmate-relaunch-sm1" ] \
+    || fail "a copied home recorded a relaunch attempt: $(cat "$copy/state/.secondmate-relaunch-sm1")"
+  [ ! -e "$copy/state/sm1.last-death.txt" ] || fail "a copied home saved death evidence for a pane it does not own"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$copy" zsh "$log" FM_BOOTSTRAP_DETECT_ONLY=1)
+  assert_not_contains "$out" "SECONDMATE_LIVENESS:" "the read-only path should stay as it was in a copied home"
+  [ ! -s "$log" ] || fail "the read-only path touched a live endpoint: $(cat "$log")"
+
+  out=$(run_bootstrap "$tmuxfb:$fb" "$w/home" zsh "$log")
+  assert_not_contains "$out" "is a copy of" "the original home must not read as its own copy"
+  assert_contains "$(cat "$log")" "new-window" "the original home should still recover its own mate"
+  pass "sweep: a copied home reports every mate skipped and acts on nothing, while the original still recovers"
+}
+
+test_relaunch_in_copied_home_refuses_a_stale_relaunchable_verdict() {
+  local w fb tmuxfb log out copy
+  w=$(new_world relaunch-copied-home)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+  copy=$(copy_world_home "$w")
+
+  out=$(PATH="$tmuxfb:$fb:$BASE_PATH" FM_HOME="$copy" FM_BACKEND=tmux FM_ROOT="$ROOT" \
+    FM_TEST_PANE_CMD=zsh FM_TMUX_CALL_LOG="$log" STATE="$copy/state" bash -c '
+      . "$1/bin/fm-secondmate-liveness-lib.sh"
+      FM_SM_LIVE_STATUS=relaunchable FM_SM_LIVE_KILL=1 FM_SM_LIVE_RESUME=0
+      FM_SM_LIVE_STATE=dead FM_SM_LIVE_CAUSE=test FM_SM_LIVE_REASON=
+      rc=0
+      fm_secondmate_liveness_relaunch "$2" sm1 || rc=$?
+      printf "rc=%s status=%s reason=%s\n" "$rc" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_REASON"
+    ' _ "$ROOT" "$copy/state/sm1.meta")
+
+  assert_contains "$out" "rc=1 status=skipped" "a copied home must refuse the relaunch itself"
+  assert_contains "$out" "is a copy of" "the refusal should say why"
+  [ ! -s "$log" ] || fail "the refused relaunch touched an endpoint: $(cat "$log")"
+  pass "relaunch: a copied home refuses even when handed a relaunchable verdict"
+}
+
+# --- evidence kept before a relaunch ----------------------------------------
+
+# run_probe_and_relaunch <w> <fakebin> <pane-cmd> <log> [NAME=VALUE...]
+run_probe_and_relaunch() {
+  local w=$1 fb=$2 cmd=$3 log=$4
+  shift 4
+  # shellcheck disable=SC2016 # expanded by the child shell.
+  env PATH="$fb:$BASE_PATH" HOME="$w/user-home" TMUX='' FM_HOME="$w/home" FM_BACKEND=tmux FM_ROOT="$ROOT" \
+    FM_TEST_PANE_CMD="$cmd" FM_TMUX_CALL_LOG="$log" STATE="$w/home/state" "$@" bash -c '
+      . "$1/bin/fm-secondmate-liveness-lib.sh"
+      fm_secondmate_liveness_probe "$2" sm1 poll
+      rc=0
+      fm_secondmate_liveness_relaunch "$2" sm1 || rc=$?
+      printf "rc=%s status=%s\n" "$rc" "$FM_SM_LIVE_STATUS"
+    ' _ "$ROOT" "$w/home/state/sm1.meta" 2>&1
+}
+
+test_relaunch_saves_pane_and_session_end_before_the_kill() {
+  local w fb tmuxfb log out home key evidence capture
+  w=$(new_world evidence-dead)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+  home=$(cd "$w/sm1" && pwd -P)
+  mkdir -p "$w/user-home/.claude"
+  {
+    key=$(printf '%s' "$home" | sed 's/[^A-Za-z0-9-]/-/g')
+    printf '{"ts":"T0","session_id":"s0","cwd":"%s","reason":"clear"}\n' "$home"
+    printf '{"ts":"T1","session_id":"s1","cwd":"%s/state","transcript":"/x/projects/%s/s1.jsonl","reason":"other"}\n' "$home" "$key"
+    printf 'not json\n'
+    printf '{"ts":"T2","session_id":"s2","cwd":"/elsewhere","reason":"clear"}\n'
+    printf '{"ts":"T3","session_id":"s3","cwd":"%s","transcript":"/x/projects/-a-worker/s3.jsonl","reason":"clear"}\n' "$home"
+  } > "$w/user-home/.claude/session-log.jsonl"
+  capture="$w/capture.txt"
+  seq 1 250 | sed 's/^/first-death-line-/' > "$capture"
+  evidence="$w/home/state/sm1.last-death.txt"
+
+  out=$(run_probe_and_relaunch "$w" "$tmuxfb:$fb" zsh "$log" FM_TEST_CAPTURE="$capture")
+
+  assert_contains "$out" "rc=0" "the relaunch should succeed: $out"
+  assert_contains "$(cat "$log")" "kill-window" "the fixture must really have closed the pane"
+  assert_grep 'first-death-line-250' "$evidence" "the pane tail must be saved before the kill"
+  assert_grep 'last_session_end=T1 reason=other session=s1' "$evidence" \
+    "the mate's own last session end must be saved, not another session's"
+  assert_grep 'state=dead' "$evidence" "the evidence should record the verdict"
+  if grep -q 'first-death-line-50$' "$evidence"; then
+    fail "the saved pane tail is not bounded to 200 lines"
+  fi
+  [ ! -e "$evidence.1" ] || fail "a first death has no previous evidence to rotate"
+
+  seq 1 3 | sed 's/^/second-death-line-/' > "$capture"
+  out=$(run_probe_and_relaunch "$w" "$tmuxfb:$fb" zsh "$log" FM_TEST_CAPTURE="$capture")
+  assert_grep 'second-death-line-3' "$evidence" "the newest death should be the current evidence"
+  assert_grep 'first-death-line-250' "$evidence.1" "the previous death should rotate to .1"
+  [ "$(find "$w/home/state" -name 'sm1.last-death.txt*' | wc -l | tr -d ' ')" -eq 2 ] \
+    || fail "evidence must keep exactly one previous copy and no temporary files"
+  pass "relaunch: the pane tail and session end are saved before the kill, keeping one previous copy"
+}
+
+test_relaunch_evidence_never_blocks_recovery() {
+  local w fb tmuxfb log out started elapsed
+  w=$(new_world evidence-missing)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+
+  # A gone pane has nothing to read and no session log exists: both stay unknown.
+  out=$(run_probe_and_relaunch "$w" "$tmuxfb:$fb" missing "$log" FM_TEST_CAPTURE_HANG=1)
+  assert_contains "$out" "rc=0" "a gone pane must still recover: $out"
+  assert_grep 'state=missing' "$w/home/state/sm1.last-death.txt" "a gone pane should still leave a record"
+  assert_grep 'last_session_end=unknown' "$w/home/state/sm1.last-death.txt" "an absent log should read unknown"
+
+  w=$(new_world evidence-hang)
+  add_sm_home "$w" sm1 firstmate:fm-sm1
+  fb=$(make_toolchain "$w"); tmuxfb=$(make_liveness_tmux "$w")
+  log="$w/calls.log"; : > "$log"
+  started=$(date +%s)
+  out=$(run_probe_and_relaunch "$w" "$tmuxfb:$fb" zsh "$log" FM_TEST_CAPTURE_HANG=1)
+  elapsed=$(($(date +%s) - started))
+  assert_contains "$out" "rc=0" "a hung capture must not stop recovery: $out"
+  assert_contains "$(cat "$log")" "new-window" "a hung capture must still reach the relaunch"
+  [ "$elapsed" -lt 45 ] || fail "a hung capture held recovery for ${elapsed}s"
+  pass "relaunch: a gone pane, an absent log, and a hung capture never stop recovery"
+}
+
+# --- the mate's tab name is held by a pane its record does not name ---------
+
+# make_taken_tab_world <name> <foreground>: a Herdr mate whose recorded pane w1:p1
+# is gone while tab fm-sm1 is held by pane w1:p2. The real tab-create code runs
+# from a stub fm-spawn so its refusal reaches the recovery path unchanged.
+# <foreground> is what w1:p2 runs: a process name, or `unreadable` for a pane
+# whose agent state cannot be read.
+TAKEN_TAB_SHELLS=()
+make_taken_tab_world() {
+  local name=$1 foreground=$2 w fb
+  w=$(new_world "$name")
+  add_sm_home "$w" sm1 sess:w1:p1
+  printf 'backend=herdr\n' >> "$w/home/state/sm1.meta"
+  fb=$(make_toolchain "$w")
+  sleep 300 > /dev/null 2>&1 &
+  TAKEN_TAB_SHELLS+=("$!")
+  printf '%s\n' "$foreground" > "$w/foreground"
+  printf '%s\n' "$!" > "$w/shell-pid"
+  cat > "$fb/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+d=${FM_TEST_HERDR_DIR:?}
+printf '%s\n' "$*" >> "$d/herdr.log"
+foreground=$(cat "$d/foreground")
+case "${1:-} ${2:-}" in
+  "status --json")
+    printf '{"client":{"version":"0.9.1","protocol":99},"server":{"running":true}}\n' ;;
+  "session list")
+    printf '{"sessions":[{"name":"sess","running":true,"socket_path":"%s/herdr.sock"}]}\n' "$d" ;;
+  "workspace list") printf '{"result":{"workspaces":[]}}\n' ;;
+  "tab list")
+    if [ -e "$d/p2-closed" ]; then
+      printf '{"result":{"tabs":[]}}\n'
+    else
+      printf '{"result":{"tabs":[{"tab_id":"w1:t2","label":"fm-sm1","workspace_id":"w1"}]}}\n'
+    fi ;;
+  "pane list") printf '{"result":{"panes":[{"pane_id":"w1:p2","tab_id":"w1:t2"}]}}\n' ;;
+  "tab create")
+    printf '{"result":{"tab":{"tab_id":"w1:t9"},"root_pane":{"pane_id":"w1:p9"}}}\n' ;;
+  "pane get")
+    if [ "${3:-}" = w1:p2 ] && [ ! -e "$d/p2-closed" ]; then
+      printf '{"result":{"pane":{"pane_id":"w1:p2","tab_id":"w1:t2","workspace_id":"w1"}}}\n'
+    else
+      printf '{"error":{"code":"pane_not_found"}}\n'
+    fi ;;
+  "agent get")
+    if [ "$foreground" = unreadable ]; then
+      printf '{"error":{"code":"server_error"}}\n'
+    else
+      printf '{"result":{"agent":{"agent_status":"idle"}}}\n'
+    fi ;;
+  "pane process-info")
+    printf '{"result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p2","shell_pid":%s,"foreground_processes":[{"pid":%s,"name":"%s","argv":["%s"]}]}}}\n' \
+      "$(cat "$d/shell-pid")" "$(cat "$d/shell-pid")" "$foreground" "$foreground" ;;
+  "pane close") : > "$d/p2-closed" ;;
+esac
+exit 0
+SH
+  chmod +x "$fb/herdr"
+  mkdir -p "$w/root/bin"
+  for script in "$ROOT"/bin/*; do
+    ln -s "$script" "$w/root/bin/"
+  done
+  rm -f "$w/root/bin/fm-spawn.sh"
+  cat > "$w/root/bin/fm-spawn.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf 'spawn\n' >> "$FM_TEST_HERDR_DIR/spawns"
+. "$FM_TEST_REAL_ROOT/bin/fm-backend.sh"
+fm_backend_source herdr
+fm_backend_herdr_create_task sess:w1 "fm-$1" "$PWD" ""
+SH
+  chmod +x "$w/root/bin/fm-spawn.sh"
+  TAKEN_TAB_FAKEBIN=$fb
+  printf '%s\n' "$w"
+}
+
+run_taken_tab_relaunch() {  # <w> <fakebin>
+  local w=$1 fakebin=$2
+  PATH="$fakebin:$BASE_PATH" HOME="$w/user-home" FM_HOME="$w/home" FM_ROOT="$w/root" \
+    FM_TEST_REAL_ROOT="$ROOT" FM_TEST_HERDR_DIR="$w" STATE="$w/home/state" bash -c '
+      . "$1/bin/fm-secondmate-liveness-lib.sh"
+      fm_secondmate_liveness_probe "$2" sm1 poll
+      rc=0
+      fm_secondmate_liveness_relaunch "$2" sm1 || rc=$?
+      printf "rc=%s status=%s state=%s\nreason=%s\nout=%s\n" \
+        "$rc" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_REASON" "$FM_SM_LIVE_OUT"
+    ' _ "$ROOT" "$w/home/state/sm1.meta" 2>&1
+}
+
+test_taken_tab_with_no_running_agent_is_closed_and_retried_once() {
+  local w fb out ledger
+  make_taken_tab_world taken-tab-stale zsh > "$TMP_ROOT/.taken-world"
+  w=$(cat "$TMP_ROOT/.taken-world"); fb=$TAKEN_TAB_FAKEBIN
+  ledger="$w/home/state/.secondmate-relaunch-sm1"
+
+  out=$(run_taken_tab_relaunch "$w" "$fb")
+
+  assert_contains "$out" "rc=0 status=relaunchable state=missing" "the retry should recover the mate: $out"
+  [ "$(wc -l < "$w/spawns" | tr -d ' ')" -eq 2 ] || fail "expected the refused spawn and exactly one retry: $(cat "$w/spawns")"
+  assert_grep 'pane close w1:p2' "$w/herdr.log" "the agent-less occupant must be closed"
+  assert_grep 'tab create' "$w/herdr.log" "the retry must create the mate's tab"
+  [ "$(awk -F '\t' '$2 == "attempt"' "$ledger" | wc -l | tr -d ' ')" -eq 1 ] \
+    || fail "one recovery must count as one attempt: $(cat "$ledger")"
+  assert_grep 'relaunched' "$ledger" "the recovered outcome must be ledgered"
+  pass "taken tab: an occupant with no running agent is closed and the spawn retried once"
+}
+
+test_taken_tab_with_live_agent_is_left_alone_and_reported_distinctly() {
+  local w fb out ledger
+  make_taken_tab_world taken-tab-live claude > "$TMP_ROOT/.taken-world"
+  w=$(cat "$TMP_ROOT/.taken-world"); fb=$TAKEN_TAB_FAKEBIN
+  ledger="$w/home/state/.secondmate-relaunch-sm1"
+
+  out=$(run_taken_tab_relaunch "$w" "$fb")
+
+  assert_contains "$out" "rc=1 status=occupied" "a live occupant must be its own verdict: $out"
+  assert_contains "$out" "held by a live agent in pane sess:w1:p2" "the report must name the exact pane"
+  assert_contains "$out" "record points at sess:w1:p1" "the report must say the record points elsewhere"
+  assert_not_contains "$(cat "$w/herdr.log")" 'pane close' "a live occupant must never be closed"
+  assert_not_contains "$(cat "$w/herdr.log")" 'tab create' "nothing may be launched beside a live occupant"
+  [ "$(wc -l < "$w/spawns" | tr -d ' ')" -eq 1 ] || fail "a live occupant must not be retried: $(cat "$w/spawns")"
+  assert_grep 'occupied' "$ledger" "the distinct outcome must be ledgered"
+  assert_not_contains "$(cat "$ledger")" 'failed' "a live occupant is not a failed launch"
+
+  out=$(PATH="$fb:$BASE_PATH" HOME="$w/user-home" TMUX='' FM_BACKEND=herdr FM_HOME="$w/home" FM_ROOT_OVERRIDE="$w/root" \
+    FM_TEST_REAL_ROOT="$ROOT" FM_TEST_HERDR_DIR="$w" "$ROOT/bin/fm-bootstrap.sh" 2>&1)
+  assert_contains "$out" "SECONDMATE_LIVENESS: secondmate sm1: not relaunched: tab fm-sm1 is held by a live agent in pane sess:w1:p2" \
+    "the sweep must report the occupant distinctly from a failed respawn"
+  assert_not_contains "$out" "respawn failed" "the sweep must not call a live occupant a failed respawn"
+  pass "taken tab: a live occupant is untouched, named exactly, and not reported as a failed launch"
+}
+
+test_taken_tab_with_unreadable_occupant_stays_a_failed_launch() {
+  local w fb out
+  make_taken_tab_world taken-tab-unreadable unreadable > "$TMP_ROOT/.taken-world"
+  w=$(cat "$TMP_ROOT/.taken-world"); fb=$TAKEN_TAB_FAKEBIN
+
+  out=$(run_taken_tab_relaunch "$w" "$fb")
+
+  assert_contains "$out" "rc=1 status=relaunchable" "an unreadable occupant is an ordinary failure: $out"
+  assert_contains "$out" "out=error: herdr tab 'fm-sm1' already exists" "the failure should keep the spawn's own error first"
+  assert_not_contains "$(cat "$w/herdr.log")" 'pane close' "an unreadable occupant must never be closed"
+  [ "$(wc -l < "$w/spawns" | tr -d ' ')" -eq 1 ] || fail "an unreadable occupant must not be retried: $(cat "$w/spawns")"
+  assert_grep 'failed' "$w/home/state/.secondmate-relaunch-sm1" "the outcome must be ledgered as failed"
+  pass "taken tab: an unreadable occupant is left alone and stays an ordinary failed launch"
+}
+
 test_tmux_agent_state_classifies
 test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
@@ -863,5 +1164,16 @@ test_relaunch_waits_for_other_mates_relaunch_lock
 test_sweep_refuses_relaunch_on_ledger_errors
 test_remote_poll_probe_maps_states
 test_remote_poll_probe_unreachable_preserves_route
+test_sweep_in_copied_home_skips_every_mate_without_touching_it
+test_relaunch_in_copied_home_refuses_a_stale_relaunchable_verdict
+test_relaunch_saves_pane_and_session_end_before_the_kill
+test_relaunch_evidence_never_blocks_recovery
+test_taken_tab_with_no_running_agent_is_closed_and_retried_once
+test_taken_tab_with_live_agent_is_left_alone_and_reported_distinctly
+test_taken_tab_with_unreadable_occupant_stays_a_failed_launch
+
+for shell_pid in "${TAKEN_TAB_SHELLS[@]}"; do
+  kill "$shell_pid" 2>/dev/null || true
+done
 
 echo "# all fm-secondmate-liveness tests passed"

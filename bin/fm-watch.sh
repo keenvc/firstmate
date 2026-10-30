@@ -190,6 +190,10 @@
 #   check: secondmate <id> auto-relaunch paused after <n> attempts in <s>s; ...
 #                          a mate that kept dying exceeded its bounded relaunch
 #                          budget and is parked until a probe reads it live
+#   check: secondmate <id> auto-relaunch paused: <detail>
+#                          a live agent in another pane holds the mate's tab
+#                          name, so another attempt could not help; parked at
+#                          once under the same marker, with the exact pane named
 #                          again (FM_SECONDMATE_LIVENESS_MAX_ATTEMPTS and
 #                          FM_SECONDMATE_LIVENESS_WINDOW_SECS)
 # For normal supervision, resume the session-start primary-harness protocol
@@ -1197,6 +1201,13 @@ secondmate_liveness_tick() {
           notify_key="secondmate-relaunch-$id-$now"
         elif [ "$FM_SM_LIVE_STATUS" = skipped ]; then
           err=$FM_SM_LIVE_REASON
+        elif [ "$FM_SM_LIVE_STATUS" = occupied ]; then
+          if printf '%s\t%s\n' "$now" occupied > "$bound_marker"; then
+            reason="check: secondmate $id auto-relaunch paused: $FM_SM_LIVE_REASON"
+            notify_key="secondmate-relaunch-occupied-$id"
+          else
+            err="relaunch park marker could not be written: $FM_SM_LIVE_REASON"
+          fi
         else
           reason="check: secondmate $id auto-relaunch failed after $FM_SM_LIVE_CAUSE: $(fm_sm_live_first_line "$FM_SM_LIVE_OUT")"
           notify_key="secondmate-relaunch-failed-$id-$now"

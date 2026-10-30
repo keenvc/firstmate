@@ -36,6 +36,9 @@
 # the sidecar, as for a line 1 in the ancestry, and a later acquisition
 # re-anchors.
 #
+# A confirmed acquisition also records this state directory's identity when none
+# is recorded yet (bin/fm-home-identity-lib.sh owns the copied-home guard).
+#
 # Usage: fm-lock.sh           acquire; exit 1 unless ownership is verified
 #        fm-lock.sh status    print holder and liveness; always exits 0.
 #                             A held lock is not proof the holder is consuming
@@ -59,6 +62,8 @@ mkdir -p "$STATE" 2>/dev/null || {
 # Stop auto-arm applies the exact same identity contract.
 # shellcheck source=bin/fm-session-lock-lib.sh
 . "$SCRIPT_DIR/fm-session-lock-lib.sh"
+# shellcheck source=bin/fm-home-identity-lib.sh
+. "$SCRIPT_DIR/fm-home-identity-lib.sh"
 
 if [ "${1:-}" = "status" ]; then
   fm_session_lock_inspect "$STATE"
@@ -198,6 +203,11 @@ publish_lock_session_or_die() {
   exit 1
 }
 
+record_home_identity() {
+  fm_home_identity_ensure "$STATE" \
+    || echo "warning: could not record this home's identity in $STATE/.home-id, so a later copy of it cannot be detected" >&2
+}
+
 # This session already holds the lock, recorded as pid $1. Line 1 stays exactly
 # as recorded while that pid is alive and in this session's ancestry; only the
 # sidecar is refreshed, under the claim lock, so a /clear re-key inside the same
@@ -229,6 +239,7 @@ confirm_own_lock() {  # <recorded-pid>
     publish_lock_session_or_die
     commit_lock_session
     release_claim_lock
+    record_home_identity
     echo "lock acquired: harness pid $recorded"
     exit 0
   fi
@@ -351,4 +362,5 @@ fi
 commit_lock_session
 release_lease_lock
 release_claim_lock
+record_home_identity
 echo "lock acquired: harness pid $me"

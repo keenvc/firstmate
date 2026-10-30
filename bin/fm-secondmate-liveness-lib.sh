@@ -51,6 +51,21 @@
 # The attempt ledger (.secondmate-relaunch-<id>, one line per attempt plus one
 # per outcome) is both the durable relaunch record and the input to the
 # watcher's relaunch bound; teardown removes it.
+#
+# A copied home never probes or relaunches: bin/fm-home-identity-lib.sh owns that
+# proof and the sweep reports each mate skipped with its reason.
+#
+# Herdr records a mate by pane id, not by its tab name, so a relaunch can find
+# fm-<id> held by a pane the record does not name; the spawn refuses and names
+# that pane. With no running agent there, recovery closes it and retries once. A
+# live agent there is left alone and the verdict becomes FM_SM_LIVE_STATUS=occupied,
+# distinct from a failed launch. Other backends key the endpoint by that name or
+# refuse the duplicate as an ordinary spawn failure.
+#
+# Each attempt first saves state/<id>.last-death.txt (the previous one rotates to
+# .1) so the evidence survives closing the pane: the last 200 pane lines and, for a
+# Claude mate, the session's last recorded end reason. Saving is bounded and
+# best effort, and never blocks recovery. Teardown removes both files.
 
 set -u
 
@@ -62,6 +77,8 @@ FM_SM_LIVE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$FM_SM_LIVE_LIB_DIR/fm-remote-readiness-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$FM_SM_LIVE_LIB_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-home-identity-lib.sh
+. "$FM_SM_LIVE_LIB_DIR/fm-home-identity-lib.sh"
 
 # Per-task probe+kill+relaunch serialization. A busy lock means another
 # supervisor (the other sweep, or a racing tick) is mid-episode on this mate;
@@ -94,7 +111,7 @@ fm_sm_live_first_line() {
 # `attempt` rows inside its window and after the last `rearmed` row; the whole
 # file is the durable per-mate relaunch record the captain can count to see
 # frequency. Fails when the row cannot be appended.
-fm_secondmate_liveness_ledger_add() {  # <id> <attempt|relaunched|failed|rearmed>
+fm_secondmate_liveness_ledger_add() {  # <id> <attempt|relaunched|failed|occupied|rearmed>
   printf '%s\t%s\n' "$(date +%s)" "$2" >> "$STATE/.secondmate-relaunch-$1" 2>/dev/null
 }
 
@@ -144,6 +161,10 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || { FM_SM_LIVE_STATUS=silent; return 0; }
+  if ! fm_home_identity_check "$STATE"; then
+    FM_SM_LIVE_REASON=$FM_HOME_IDENTITY_REASON
+    return 0
+  fi
   harness=$(fm_meta_get "$meta" harness)
   remote_host=$(fm_meta_get "$meta" remote_host)
   if [ -n "$remote_host" ]; then
@@ -268,11 +289,99 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   return 0
 }
 
+# The mate's last recorded session end, or `unknown`. The log is an optional local
+# hook's output, read bounded. A session is the mate's when its transcript sits
+# under the mate's home project directory, which stays put when the session's cwd
+# drifts and excludes a worker that merely entered the home; a row with no
+# transcript falls back to its cwd.
+fm_sm_live_last_session_end() {  # <meta>
+  local meta=$1 log="${HOME:-}/.claude/session-log.jsonl" home key found=''
+  if [ "$(fm_meta_get "$meta" harness)" = claude ] && [ -r "$log" ]; then
+    home=$(fm_meta_get "$meta" home)
+    if [ -n "$home" ] && home=$(CDPATH='' cd -- "$home" 2>/dev/null && pwd -P); then
+      key=$(printf '%s' "$home" | sed 's/[^A-Za-z0-9-]/-/g')
+      found=$(tail -n 2000 "$log" 2>/dev/null | jq -Rr --arg cwd "$home" --arg dir "/projects/$key/" '
+        fromjson?
+        | select(if (.transcript | type) == "string" then (.transcript | contains($dir)) else .cwd == $cwd end)
+        | "\(.ts) reason=\(.reason) session=\(.session_id)"' 2>/dev/null \
+        | tail -n 1)
+    fi
+  fi
+  printf '%s\n' "${found:-unknown}"
+}
+
+# Writes a fresh file first, so a failure leaves the previous evidence in place.
+# Every step is best effort: this returns 0 whatever happens.
+fm_sm_live_save_last_death() {  # <meta> <id>
+  local meta=$1 id=$2 out tmp backend target
+  out="$STATE/$id.last-death.txt"
+  tmp=$(mktemp "$out.XXXXXX" 2>/dev/null) || return 0
+  {
+    printf 'at=%s state=%s cause=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$FM_SM_LIVE_STATE" "$FM_SM_LIVE_CAUSE"
+    printf 'last_session_end=%s\n' "$(fm_sm_live_last_session_end "$meta")"
+    printf -- '--- last 200 pane lines ---\n'
+    if [ -z "$(fm_meta_get "$meta" remote_host)" ] && [ "$FM_SM_LIVE_STATE" != missing ]; then
+      backend=$(fm_backend_of_meta "$meta")
+      target=$(fm_backend_target_of_meta "$meta")
+      [ -n "$target" ] || target=$(fm_meta_get "$meta" window)
+      # shellcheck disable=SC2016 # expanded by the bounded child shell.
+      FM_HOME=${FM_HOME:-} STATE=$STATE fm_run_timed 10 bash -c \
+        '. "$1/fm-backend.sh" && fm_backend_capture "$2" "$3" 200' _ \
+        "$FM_SM_LIVE_LIB_DIR" "$backend" "$target" 2>/dev/null | tail -n 200 | tail -c 262144
+    fi
+  } > "$tmp" 2>/dev/null
+  if [ -e "$out" ]; then
+    mv -f "$out" "$out.1" 2>/dev/null || true
+  fi
+  mv -f "$tmp" "$out" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  return 0
+}
+
+fm_sm_live_spawn() {  # <id> <timeout-secs or empty>
+  local rc=0
+  if [ -n "$2" ]; then
+    FM_SM_LIVE_OUT=$(FM_SPAWN_NO_GUARD=1 fm_run_timed "$2" "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate 2>&1) || rc=$?
+  else
+    FM_SM_LIVE_OUT=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$1" --secondmate 2>&1) || rc=$?
+  fi
+  return "$rc"
+}
+
+# Called after a failed spawn. Returns 0 only when the spawn named a pane holding
+# the mate's tab name, that pane had no running agent, and its close is proven, so
+# one retry can succeed. A live agent there sets the occupied verdict; an unreadable
+# pane or an unconfirmed close stays an ordinary spawn failure.
+fm_sm_live_clear_taken_tab() {  # <meta> <id>
+  local meta=$1 id=$2 taken recorded
+  taken=$(printf '%s\n' "$FM_SM_LIVE_OUT" | sed -n 's/^FM_HERDR_TAB_TAKEN //p' | tail -n 1)
+  [ -n "$taken" ] || return 1
+  fm_backend_source herdr && fm_backend_herdr_parse_target "$taken" || return 1
+  case "$(fm_backend_herdr_pane_agent_state "$FM_BACKEND_HERDR_SESSION" "$FM_BACKEND_HERDR_PANE")" in
+    live)
+      recorded=$(fm_backend_target_of_meta "$meta")
+      [ -n "$recorded" ] || recorded=$(fm_meta_get "$meta" window)
+      FM_SM_LIVE_STATUS=occupied
+      FM_SM_LIVE_REASON="tab fm-$id is held by a live agent in pane $taken while this mate's record points at $recorded; nothing was launched or closed - inspect that pane, then repoint or retire one of them"
+      return 1
+      ;;
+    no-agent|stale-agent|dead)
+      fm_backend_kill herdr "$taken" 2>/dev/null || true
+      if ! fm_backend_herdr_endpoint_confirmed_gone "$taken"; then
+        FM_SM_LIVE_OUT="tab fm-$id is held by agent-less pane $taken, whose close could not be confirmed"
+        return 1
+      fi
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # fm_secondmate_liveness_relaunch <meta> <id> [timeout-secs]
 #
 # Acts on a `relaunchable` probe verdict for <id>: takes the per-home relaunch
-# lock, records the attempt, kills a confirmed-dead local endpoint if required
-# (FM_SM_LIVE_KILL), runs the guarded spawn, then records its outcome.
+# lock, records the attempt, saves the evidence, kills a confirmed-dead local
+# endpoint if required (FM_SM_LIVE_KILL), runs the guarded spawn, then records its
+# outcome. A failed spawn takes the taken-tab handling in the header once.
 # On t3code a close that cannot be proven stops there: the thread and its
 # metadata stay as recorded, the verdict becomes skipped, and nothing is
 # spawned, because a second thread beside a live one is the duplicate
@@ -286,10 +395,18 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # the ledger cannot be read, or the attempt row cannot be appended, nothing is
 # killed or spawned and no attempt is recorded: the verdict becomes
 # FM_SM_LIVE_STATUS=skipped with FM_SM_LIVE_REASON set and this returns 1.
+# A copied home takes the same skipped verdict. FM_SM_LIVE_STATUS=occupied, with
+# FM_SM_LIVE_REASON set, reports a live agent holding the tab name.
 # Caller holds the liveness lock and owns reporting.
 fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs]
   local meta=$1 id=$2 timeout=${3:-} relaunch_lock wait_seconds rc=0
   FM_SM_LIVE_OUT='' FM_SM_LIVE_RC=0
+  if ! fm_home_identity_check "$STATE"; then
+    FM_SM_LIVE_STATUS=skipped
+    FM_SM_LIVE_REASON=$FM_HOME_IDENTITY_REASON
+    FM_SM_LIVE_RC=1
+    return 1
+  fi
   if ! fm_secondmate_liveness_recent_attempts "$id" 0 >/dev/null; then
     FM_SM_LIVE_STATUS=skipped
     FM_SM_LIVE_REASON="relaunch ledger $STATE/.secondmate-relaunch-$id is unreadable; endpoint left $FM_SM_LIVE_STATE"
@@ -312,6 +429,7 @@ fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs]
     FM_SM_LIVE_RC=1
     return 1
   fi
+  fm_sm_live_save_last_death "$meta" "$id"
   if [ "$FM_SM_LIVE_KILL" = 1 ]; then
     local backend target window
     backend=$(fm_backend_of_meta "$meta")
@@ -353,14 +471,16 @@ fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs]
     fm_lock_release "$relaunch_lock" || true
     return "$rc"
   fi
-  if [ -n "$timeout" ]; then
-    FM_SM_LIVE_OUT=$(FM_SPAWN_NO_GUARD=1 fm_run_timed "$timeout" "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1) || rc=$?
-  else
-    FM_SM_LIVE_OUT=$(FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$id" --secondmate 2>&1) || rc=$?
+  fm_sm_live_spawn "$id" "$timeout" || rc=$?
+  if [ "$rc" -ne 0 ] && fm_sm_live_clear_taken_tab "$meta" "$id"; then
+    rc=0
+    fm_sm_live_spawn "$id" "$timeout" || rc=$?
   fi
   FM_SM_LIVE_RC=$rc
   if [ "$rc" -eq 0 ]; then
     fm_secondmate_liveness_ledger_add "$id" relaunched || true
+  elif [ "$FM_SM_LIVE_STATUS" = occupied ]; then
+    fm_secondmate_liveness_ledger_add "$id" occupied || true
   else
     fm_secondmate_liveness_ledger_add "$id" failed || true
   fi
