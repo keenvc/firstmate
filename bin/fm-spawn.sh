@@ -3750,10 +3750,13 @@ effort_flag_for_harness() {
     # reasoning axis rides the OPENCODE_CONFIG_CONTENT JSON the launch already
     # writes, keyed per-model as a variant. The variant is emitted only when the
     # resolved model's provider is known to expose that effort (`anthropic/*`:
-    # high|max, `openai/*`: low|medium|high|xhigh); other providers, absent
-    # effort, or out-of-family efforts omit it (record-and-omit, as codex and
-    # grok do). Without a resolved model there is nothing to key to. The
-    # fragment lands inside the launch's single-quoted assignment, so a literal
+    # high|max, `openai/*`: low|medium|high|xhigh). `azure-foundry-r/*` is the
+    # same reasoning axis as `openai/*`: its opencode provider is configured with
+    # npm `@ai-sdk/openai` (the Responses API), so the emitted variant maps to the
+    # Responses reasoning effort exactly as it does for `openai/*`. Other
+    # providers, absent effort, or out-of-family efforts omit it (record-and-omit,
+    # as codex and grok do). Without a resolved model there is nothing to key to.
+    # The fragment lands inside the launch's single-quoted assignment, so a literal
     # quote in the model id must close and reopen that quoting. The config SHAPE
     # is version-sensitive: 1.x carries the effort as agent.build.variant only
     # (the model still arrives via --model, config schema verified on 1.18.32);
@@ -3766,7 +3769,8 @@ effort_flag_for_harness() {
     model_json=$(json_escape "$model")
     model_json=${model_json//\'/\'\\\'\'}
     case "${model%%/*}:$effort" in
-    anthropic:high | anthropic:max | openai:low | openai:medium | openai:high | openai:xhigh)
+    anthropic:high | anthropic:max | openai:low | openai:medium | openai:high | openai:xhigh | \
+      azure-foundry-r:low | azure-foundry-r:medium | azure-foundry-r:high | azure-foundry-r:xhigh)
       variant_fragment=",\"variant\":\"$effort\""
       ;;
     esac

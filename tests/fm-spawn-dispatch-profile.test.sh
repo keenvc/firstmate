@@ -972,6 +972,29 @@ test_opencode_emits_variant_for_openai_family_effort() {
   pass "opencode emits the variant for an effort the openai family exposes"
 }
 
+test_opencode_emits_variant_for_azure_foundry_r_family_effort() {
+  local rec id out status launch
+  id=profile-opencode-foundry-z7c2
+  rec=$(make_spawn_case profile-opencode-foundry opencode "$id")
+  read_case_record "$rec"
+
+  # `azure-foundry-r/*` is configured as npm `@ai-sdk/openai` (the Responses
+  # API), so its reasoning effort rides the same per-model variant axis as
+  # `openai/*`. Before the fix a high effort on this provider was silently
+  # dropped and the review ran at the model's default low effort.
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --model azure-foundry-r/gpt-6-luna --effort high)
+  status=$?
+  expect_code 0 "$status" "opencode spawn with an azure-foundry-r model and effort should succeed"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" opencode azure-foundry-r/gpt-6-luna high
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" \
+    "OPENCODE_CONFIG_CONTENT='{\"permission\":{\"*\":\"allow\"},\"model\":\"azure-foundry-r/gpt-6-luna\",\"agent\":{\"build\":{\"model\":\"azure-foundry-r/gpt-6-luna\",\"variant\":\"high\"}}}' '$FAKEBIN_DIR/opencode' --standalone --prompt" \
+    "opencode launch did not write the azure-foundry-r family effort as the build agent's variant"
+  assert_not_contains "$launch" "--model" "opencode interactive launch must not pass removed --model"
+  assert_not_contains "$launch" "--effort" "opencode launch must not pass unsupported --effort"
+  pass "opencode emits the variant for an effort the azure-foundry-r family exposes"
+}
+
 test_opencode_omits_variant_when_model_family_lacks_effort() {
   local rec id out status launch
   id=profile-opencode-omit-z7d
@@ -2746,6 +2769,7 @@ test_cursor_failed_catalog_probe_does_not_block_spawn
 test_opencode_threads_model_and_effort_variant
 test_opencode_without_effort_keeps_launch_config_unchanged
 test_opencode_emits_variant_for_openai_family_effort
+test_opencode_emits_variant_for_azure_foundry_r_family_effort
 test_opencode_omits_variant_when_model_family_lacks_effort
 test_opencode1_passes_model_flag_and_variant_only_config
 test_opencode1_without_effort_keeps_permission_only_config
