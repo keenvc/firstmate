@@ -386,6 +386,112 @@ test_squash_merged_divergence_reconciles() {
   pass "T5b squash-merged divergence heals and rejoins live convergence"
 }
 
+# seed_file_lines <w> <file>: land a multi-line file on origin and bring the main
+# home up to it before a secondmate is added, so two later edits of that one file
+# stay far enough apart to merge cleanly at content level.
+seed_file_lines() {
+  local w=$1 file=$2
+  seq 1 30 > "$w/seed/$file"
+  git -C "$w/seed" add -A
+  git -C "$w/seed" commit -qm "seed-$file"
+  git -C "$w/seed" push -q origin main
+  git -C "$w/main" pull -q origin main
+}
+
+# The exact drift: the home's commit landed upstream, and upstream then edited the
+# same file. All three sides of that file now differ, so only a content-level merge
+# can see that the home adds nothing.
+test_same_patch_with_later_edit_reconciles() {
+  local w out marker
+  w=$(new_world t5c)
+  seed_file_lines "$w" notes.txt
+  add_sm "$w" sm1
+
+  sed 's/^5$/five/' "$w/sm1/notes.txt" > "$w/sm1/notes.new"
+  mv "$w/sm1/notes.new" "$w/sm1/notes.txt"
+  git -C "$w/sm1" add notes.txt
+  git -C "$w/sm1" commit -qm local-x
+
+  sed -e 's/^5$/five/' "$w/seed/notes.txt" > "$w/seed/notes.new"
+  mv "$w/seed/notes.new" "$w/seed/notes.txt"
+  git -C "$w/seed" add notes.txt
+  git -C "$w/seed" commit -qm same-patch-as-x
+  sed 's/^25$/twenty-five/' "$w/seed/notes.txt" > "$w/seed/notes.new"
+  mv "$w/seed/notes.new" "$w/seed/notes.txt"
+  git -C "$w/seed" add notes.txt
+  git -C "$w/seed" commit -qm later-edit-same-file
+  git -C "$w/seed" push -q origin main
+
+  out=$(run_update "$w")
+
+  marker="$w/home/state/.secondmate-update-reconcile/sm1.pending"
+  assert_contains "$out" "secondmate sm1: reconciled redundant divergence" \
+    "a home whose patch already landed stayed diverged after a later edit of the same file"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$(git -C "$w/sm1" rev-parse origin/main)" ] \
+    || fail "reconciled secondmate did not reach origin/main"
+  assert_absent "$marker" "successful reconciliation left the divergence marker behind"
+  pass "T5c a landed patch reconciles even after the target edits the same file again"
+}
+
+# The same shape with one extra local change the target lacks: the merge is clean
+# but its tree is not the target's, so the home stays diverged and keeps its commit.
+test_extra_local_change_stays_diverged() {
+  local w out before marker
+  w=$(new_world t5d)
+  seed_file_lines "$w" notes.txt
+  add_sm "$w" sm1
+
+  sed -e 's/^5$/five/' -e 's/^15$/fifteen/' "$w/sm1/notes.txt" > "$w/sm1/notes.new"
+  mv "$w/sm1/notes.new" "$w/sm1/notes.txt"
+  git -C "$w/sm1" add notes.txt
+  git -C "$w/sm1" commit -qm local-x-and-extra
+  before=$(git -C "$w/sm1" rev-parse HEAD)
+
+  sed -e 's/^5$/five/' -e 's/^25$/twenty-five/' "$w/seed/notes.txt" > "$w/seed/notes.new"
+  mv "$w/seed/notes.new" "$w/seed/notes.txt"
+  git -C "$w/seed" add notes.txt
+  git -C "$w/seed" commit -qm same-patch-without-extra
+  git -C "$w/seed" push -q origin main
+
+  out=$(run_update "$w")
+
+  marker="$w/home/state/.secondmate-update-reconcile/sm1.pending"
+  assert_contains "$out" "secondmate sm1: skipped: diverged from origin/main" \
+    "a home with a change the target lacks was not protected"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$before" ] \
+    || fail "diverged secondmate lost its commit (unlanded work at risk)"
+  assert_present "$marker" "the unique divergence left no durable record"
+  pass "T5d an extra local change stays diverged and keeps its commit"
+}
+
+# A conflict is never redundant: the target rewrote the very line the home changed.
+test_conflicting_divergence_stays_diverged() {
+  local w out before
+  w=$(new_world t5e)
+  seed_file_lines "$w" notes.txt
+  add_sm "$w" sm1
+
+  sed 's/^5$/five/' "$w/sm1/notes.txt" > "$w/sm1/notes.new"
+  mv "$w/sm1/notes.new" "$w/sm1/notes.txt"
+  git -C "$w/sm1" add notes.txt
+  git -C "$w/sm1" commit -qm local-x
+  before=$(git -C "$w/sm1" rev-parse HEAD)
+
+  sed 's/^5$/FIVE/' "$w/seed/notes.txt" > "$w/seed/notes.new"
+  mv "$w/seed/notes.new" "$w/seed/notes.txt"
+  git -C "$w/seed" add notes.txt
+  git -C "$w/seed" commit -qm conflicting-rewrite
+  git -C "$w/seed" push -q origin main
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "secondmate sm1: skipped: diverged from origin/main" \
+    "a conflicting divergence was not protected"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$before" ] \
+    || fail "conflicting secondmate lost its commit (unlanded work at risk)"
+  pass "T5e a conflicting divergence stays diverged and keeps its commit"
+}
+
 # --- T6: the git side is idempotent; the restart set is not -----------------
 # This is the SSHHIP case: that mate's home was already at the target commit, so
 # the old classifier skipped it entirely and its agent kept running the launch-time
@@ -700,6 +806,9 @@ test_legacy_remote_advance_restarts
 test_dirty_secondmate_skipped
 test_diverged_secondmate_skipped
 test_squash_merged_divergence_reconciles
+test_same_patch_with_later_edit_reconciles
+test_extra_local_change_stays_diverged
+test_conflicting_divergence_stays_diverged
 test_already_current_secondmate_still_restarts
 test_already_current_unprovable_mate_is_nudged
 test_registry_backstop_dedup_and_self_exclusion

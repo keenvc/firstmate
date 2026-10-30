@@ -30,9 +30,10 @@
 # The seeded .fm-secondmate-home identity marker is gitignored too; the local
 # sync tolerates only that marker during the one-time upgrade of pre-ignore
 # linked-worktree homes.
-# A clean secondmate divergence is reconciled only when a three-way tree proof
-# shows that its complete local result is already present in the target, as
-# happens after an upstream squash merge. Every other divergence stays put and
+# A clean secondmate divergence is reconciled only when a three-way content
+# merge proves that its complete local result is already present in the target,
+# as happens after an upstream squash merge, including one the target has since
+# edited further. Every other divergence stays put and
 # records an inspectable state/.secondmate-update-reconcile/<id>.pending marker
 # in the supervising home until a later successful convergence clears it.
 # Locally leased homes start at a detached HEAD on the default branch, so their
@@ -327,22 +328,18 @@ secondmate_update_reconcile_clear() { # <state> <id>
 }
 
 # Prove that merging LOCAL into TARGET from their real merge base adds no tree
-# change to TARGET. A temporary index performs the three-way comparison without
-# touching the worktree or writing a merge commit. Conflicts or any remaining
-# content difference are not redundant and therefore stay diverged.
+# change to TARGET. merge-tree performs the three-way merge at content level, so
+# a patch TARGET already carries is recognized even when TARGET later edited the
+# same file, without touching the worktree or writing a merge commit. A conflict,
+# a merge error (including a Git too old for --merge-base, added in 2.40), or any
+# other resulting tree is not redundant and therefore stays diverged.
 divergence_is_redundant() { # <dir> <local-commit> <target-commit>
-  local dir=$1 local_commit=$2 target_commit=$3 ancestor scratch index result=1
+  local dir=$1 local_commit=$2 target_commit=$3 ancestor merged target_tree
   ancestor=$(git -C "$dir" merge-base "$local_commit" "$target_commit" 2>/dev/null) || return 1
-  scratch=$(mktemp -d "${TMPDIR:-/tmp}/fm-ff-redundant.XXXXXX" 2>/dev/null) || return 1
-  index="$scratch/index"
-  if GIT_INDEX_FILE="$index" git -C "$dir" read-tree -m \
-      "$ancestor" "$target_commit" "$local_commit" 2>/dev/null \
-    && ! GIT_INDEX_FILE="$index" git -C "$dir" ls-files -u | grep -q . \
-    && GIT_INDEX_FILE="$index" git -C "$dir" diff --cached --quiet "$target_commit" --; then
-    result=0
-  fi
-  rm -rf -- "$scratch"
-  return "$result"
+  merged=$(git -C "$dir" merge-tree --write-tree --merge-base="$ancestor" \
+    "$target_commit" "$local_commit" 2>/dev/null) || return 1
+  target_tree=$(git -C "$dir" rev-parse --verify --quiet "$target_commit^{tree}" 2>/dev/null) || return 1
+  [ -n "$merged" ] && [ "$merged" = "$target_tree" ]
 }
 
 # List this home's LIVE secondmate direct reports from state/<id>.meta records.
