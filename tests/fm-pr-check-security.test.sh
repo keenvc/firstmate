@@ -2434,6 +2434,51 @@ assert_poll_absent() {
   done
 }
 
+# A printed result must not end the custom-check sweep. The rejected sibling is
+# deliberately unregistered: it proves the post-loop rejection report is also
+# reached when earlier and later authenticated checks both print.
+test_custom_check_sweep_drains_all_due_results() {
+  local dir state rc out
+  dir=$(make_case custom-check-sweep-drains)
+  state="$dir/home/state"
+  cat > "$state/a-prints.check.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'first result\n'
+SH
+  cat > "$state/m-rejected.check.sh" <<'SH'
+#!/usr/bin/env bash
+printf 'must not run\n'
+SH
+  cat > "$state/z-later.check.sh" <<'SH'
+#!/usr/bin/env bash
+: > "$FM_TEST_LATER_CHECK_RAN"
+printf 'later result\n'
+SH
+  chmod 0700 "$state/a-prints.check.sh" "$state/m-rejected.check.sh" "$state/z-later.check.sh"
+  FM_HOME="$dir/home" "$REGISTER" a-prints >/dev/null \
+    || fail "could not register the first custom sweep check"
+  FM_HOME="$dir/home" "$REGISTER" z-later >/dev/null \
+    || fail "could not register the later custom sweep check"
+
+  set +e
+  FM_TEST_LATER_CHECK_RAN="$dir/later-ran" run_watcher_bounded "$dir/home" "$dir/fakebin" \
+    > "$dir/watch.out" 2> "$dir/watch.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "custom check sweep watcher failed: $(cat "$dir/watch.err")"
+  out=$(cat "$dir/watch.out")
+  [ "$out" = "check: $state/a-prints.check.sh: first result" ] \
+    || fail "first custom check did not supply the single sweep wake: $out"
+  [ -e "$dir/later-ran" ] || fail "a printed earlier check starved the later due check"
+  grep -Fq "check: $state/a-prints.check.sh: first result" "$state/.wake-queue" \
+    || fail "first custom check result was not queued"
+  grep -Fq "check: $state/z-later.check.sh: later result" "$state/.wake-queue" \
+    || fail "later custom check result was not queued in the same sweep"
+  grep -Fq 'check: rejected unauthenticated state checks:' "$state/.wake-queue" \
+    || fail "rejected check was not reported in the printing-check sweep"
+  pass "custom check sweeps queue every due result before one wake"
+}
+
 poll_artifact_snapshot() {
   local state=$1 id=$2 suffix path
   for suffix in check.sh pr-poll pr-poll-registration pr-poll-retirement meta; do
@@ -3771,6 +3816,7 @@ test_gerrit_merge_watch
 test_gerrit_arming_records_no_patch_set_revision
 test_gerrit_ready_gate_reads_the_published_tree
 test_gerrit_nm_ready_gate_requires_recovered_custody
+test_custom_check_sweep_drains_all_due_results
 test_merged_poll_retires_once
 test_merged_poll_reregistration_after_notification_is_absorbed
 test_merged_poll_retries_a_failed_upward_report

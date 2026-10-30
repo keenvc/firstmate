@@ -3987,14 +3987,15 @@ while :; do
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.
-  # Evaluated BEFORE the signal scan: wake() exits the cycle, so a check placed
-  # after the signal scan would be starved whenever a chatty sibling crewmate
-  # keeps producing signals - the slow poll (e.g. merge detection) would then
-  # never run until the fleet went quiet. Checks are due only every
-  # CHECK_INTERVAL, so most cycles skip this block and fall straight through.
+  # Evaluated BEFORE the signal scan so a chatty sibling crewmate cannot starve
+  # a slow poll. Queue every result while the sweep runs, then wake once: wake()
+  # exits the cycle, so waking per result would restart this glob at its first
+  # entry and starve later checks. Checks are due only every CHECK_INTERVAL, so
+  # most cycles skip this block and fall straight through.
   if [ "$(age_of "$STATE/.last-check")" -ge "$CHECK_INTERVAL" ]; then
     rejected_checks=
     contribution_check_output=
+    first_check_reason=
     for c in "$STATE"/*.check.sh; do
       [ -e "$c" ] || continue
       is_pr_poll=0
@@ -4094,30 +4095,34 @@ EOF
           fi
           retire_merged_pr_poll "$id"
           pr_poll_control_release || exit 1
-          touch "$STATE/.last-check"
           if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
             triage_log "absorbed duplicate merged PR poll result for $id"
             continue
           fi
-          wake "$reason"
+          [ -n "$first_check_reason" ] || first_check_reason=$reason
+          continue
         fi
         pr_poll_control_release || exit 1
         fm_wake_append check "$c" "$reason" || exit 1
-        touch "$STATE/.last-check"
-        wake "$reason"
+        [ -n "$first_check_reason" ] || first_check_reason=$reason
       fi
       pr_poll_control_release || exit 1
     done
     if [ -n "$rejected_checks" ]; then
       reason="check: rejected unauthenticated state checks:$rejected_checks"
       fm_wake_append check unauthenticated-state-checks "$reason" || exit 1
-      touch "$STATE/.last-check"
-      wake "$reason"
+      [ -n "$first_check_reason" ] || first_check_reason=$reason
     fi
     touch "$STATE/.last-check"
     if [ -n "$contribution_check_output" ]; then
-      wake "$contribution_check_output"
+      while IFS= read -r contribution_reason; do
+        [ -n "$contribution_reason" ] || continue
+        [ -n "$first_check_reason" ] || first_check_reason=$contribution_reason
+      done <<EOF
+$contribution_check_output
+EOF
     fi
+    [ -z "$first_check_reason" ] || wake "$first_check_reason"
   fi
 
   # On the first changed signal, linger one grace period and re-scan before
