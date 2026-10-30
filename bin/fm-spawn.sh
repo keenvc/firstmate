@@ -329,7 +329,9 @@
 #   out as a transient rather than adopted and then refused, so a home that is
 #   itself a linked worktree of the project repository still launches. A pane
 #   that never reaches an isolated worktree refuses at the end of that wait,
-#   naming the last path seen and why it was rejected.
+#   naming the last path seen and why it was rejected. A pane showing that
+#   treehouse itself refused the acquire stops that wait at once and refuses with
+#   treehouse's own text.
 #   FM_SPAWN_TREEHOUSE_SETTLE_SECONDS (default 180) is how many one-second polls
 #   that wait allows after `treehouse get`; invalid values fall back to 180.
 #   That placement is proven only at launch. Every ship or scout therefore
@@ -5371,6 +5373,41 @@ spawn_current_path() { # <target>
   hc) fm_backend_hc_current_path "$1" "$W" ;;
   esac
 }
+# Print what `treehouse get` said in the task pane and succeed only when the pane
+# shows it refused the acquire. Treehouse's refusals carry no error prefix, so the
+# verdict reads the output after the last echoed command: the pool-full text, or
+# any treehouse text followed by the same prompt the command was typed at. A pane
+# still working has not returned to its prompt, and a successful acquire announces
+# it entered a worktree before its subshell draws that same prompt. An unreadable
+# pane or a prompt that changes between lines is no verdict; the wait then runs out.
+spawn_treehouse_refusal() {
+  local pane line prompt='' last='' output=''
+  pane=$(fm_backend_capture "$BACKEND" "$WT_TARGET" 40 "$W" 2>/dev/null) || return 1
+  while IFS= read -r line; do
+    line=${line%"${line##*[![:space:]]}"}
+    case "$line" in
+      '') continue ;;
+      *'treehouse get')
+        prompt=${line%treehouse get}
+        prompt=${prompt%"${prompt##*[![:space:]]}"}
+        last='' output=''
+        continue ;;
+      *'Setting up worktree'*) continue ;;
+      *'Entered worktree'*) return 1 ;;
+    esac
+    [ -z "$last" ] || output="${output:+$output }$last"
+    last=$line
+  done <<EOF
+$pane
+EOF
+  if [ -n "$prompt" ] && [ "$last" = "$prompt" ]; then
+    [ -n "$output" ] || return 1
+  else
+    output="${output:+$output }$last"
+    [[ "${output//[[:space:]]/}" =~ all[0-9]+worktreesareinuse ]] || return 1
+  fi
+  printf '%s\n' "$output"
+}
 spawn_send_literal() { # <target> <text>
   case "$BACKEND" in
   tmux) fm_backend_tmux_send_literal "$1" "$2" ;;
@@ -6017,9 +6054,13 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     # misconfiguration would need machinery this path does not want - so the
     # refusal has to be self-explaining instead: carry the last path seen and the
     # reason it was rejected, and report both at the deadline.
+    # The exception is a pane that shows treehouse refused the acquire: nothing is
+    # left to wait for, so two consecutive reads agreeing on that refusal stop the
+    # wait at once with treehouse's own text.
     candidate=""
     last_seen=""
     last_reason="the pane reported no path"
+    last_refusal=""
     TREEHOUSE_SETTLE_SECONDS=${FM_SPAWN_TREEHOUSE_SETTLE_SECONDS:-180}
     case "$TREEHOUSE_SETTLE_SECONDS" in ''|*[!0-9]*|0*) TREEHOUSE_SETTLE_SECONDS=180 ;; esac
     for _ in $(seq 1 "$TREEHOUSE_SETTLE_SECONDS"); do
@@ -6036,6 +6077,12 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
       else
         candidate=""
         [ -z "$p" ] || last_reason=$SPAWN_WT_REASON
+        refusal=$(spawn_treehouse_refusal) || refusal=""
+        if [ -n "$refusal" ] && [ "$refusal" = "$last_refusal" ]; then
+          echo "error: treehouse get refused to acquire a worktree: $refusal (spawning project '$PROJ_ABS'); $(spawn_endpoint_hint)" >&2
+          exit 1
+        fi
+        last_refusal=$refusal
       fi
       sleep 1
     done
