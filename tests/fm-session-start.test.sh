@@ -1257,6 +1257,91 @@ EOF
   pass "orphan status logs are printed once with bounded tails"
 }
 
+# A fresh orphan log is recovery input; an orphan untouched for a day is
+# history. Only the recent ones print, and the rest are disclosed by count with
+# the command that reads any one of them.
+test_orphan_status_logs_recent_window() {
+  local rec root home fakebin out
+  rec=$(new_world orphan-window)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+
+  printf 'working: recent orphan\n' > "$home/state/task-recent.status"
+  printf 'working: old orphan\n' > "$home/state/task-old.status"
+  touch -t 202001010000 "$home/state/task-old.status"
+
+  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+
+  assert_contains "$out" "--- task-recent ---" "a recently active orphan log was not printed"
+  assert_contains "$out" "working: recent orphan" "a recently active orphan log lost its tail"
+  assert_not_contains "$out" "--- task-old ---" "an orphan log untouched for over a day was still printed"
+  assert_not_contains "$out" "working: old orphan" "an orphan log untouched for over a day still leaked its tail"
+  assert_contains "$out" "1 older orphan status logs not printed" "the omitted orphan logs were not disclosed by count"
+  assert_contains "$out" "no activity in the last 24 hours" "the omission count did not state the window"
+  assert_contains "$out" "bin/fm-crew-state.sh <id>" "the omission count did not say how to read an omitted log"
+
+  pass "only orphan status logs touched in the last 24 hours print, with the rest counted"
+}
+
+# --- handoff pointer ---------------------------------------------------------
+
+test_handoff_pointer_leads_the_digest() {
+  local rec root home fakebin out first_line head1k absent reemit
+  rec=$(new_world handoff-pointer)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  mkdir -p "$home/data/handoff"
+  printf '# previous session handoff\n' > "$home/data/handoff/LATEST.md"
+
+  out=$(FM_FAKE_HARNESS_PID=$$ run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  first_line=$(printf '%s\n' "$out" | head -1)
+  assert_contains "$first_line" "HANDOFF: $home/data/handoff/LATEST.md" "the handoff pointer is not the first line of the digest"
+  assert_contains "$out" "READ THIS FIRST" "the handoff pointer does not tell the session to read it first"
+  assert_contains "$first_line" "ago" "the handoff pointer does not report the handoff's age"
+
+  head1k=$(printf '%s' "$out" | head -c 1024)
+  assert_contains "$head1k" "HANDOFF: $home/data/handoff/LATEST.md" "the handoff pointer did not fit in the first 1KB"
+  assert_contains "$head1k" "READ THIS FIRST" "the read-first instruction did not fit in the first 1KB"
+
+  reemit=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_HARNESS_PID=$$ PATH="$fakebin:$BASE_PATH" \
+    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
+    "$SESSION_START" --reemit)
+  assert_contains "$(printf '%s' "$reemit" | head -c 1024)" "HANDOFF: $home/data/handoff/LATEST.md" \
+    "a CONTEXT RE-EMIT did not lead with the handoff pointer"
+
+  rm -f "$home/data/handoff/LATEST.md"
+  absent=$(FM_FAKE_HARNESS_PID=$$ run_session_start "$home" "$root" "$fakebin:$BASE_PATH" 2>&1)
+  assert_not_contains "$absent" "HANDOFF:" "the digest printed a handoff pointer with no handoff file present"
+  assert_not_contains "$absent" "READ THIS FIRST" "the digest printed a read-first line with no handoff file present"
+
+  # An unreadable mtime must still print an honest pointer: a bare multi-word
+  # assignment would run a command named after its second word instead.
+  printf '# previous session handoff\n' > "$home/data/handoff/LATEST.md"
+  cat > "$fakebin/stat" <<'SH'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in
+    *handoff/LATEST.md*) exit 1 ;;
+  esac
+done
+exec /usr/bin/stat "$@"
+SH
+  chmod +x "$fakebin/stat"
+  unknown=$(FM_FAKE_HARNESS_PID=$$ run_session_start "$home" "$root" "$fakebin:$BASE_PATH" 2>&1)
+  assert_contains "$unknown" "HANDOFF: $home/data/handoff/LATEST.md (written an unknown time)" \
+    "an unreadable handoff mtime did not print an honest age"
+  assert_not_contains "$unknown" "unknown: command not found" \
+    "an unreadable handoff mtime ran a command named after the age words"
+
+  pass "the handoff pointer leads every start inside the first 1KB, and is absent with no handoff file"
+}
+
 # --- session-start secondmate recovery boundary -----------------------------
 
 test_session_start_relaunches_missing_pi_secondmate() {
@@ -3161,6 +3246,8 @@ test_session_start_relaunches_herdr_husk_secondmate
 test_status_tail_bounding
 test_status_tail_line_cap
 test_orphan_status_logs_are_printed
+test_orphan_status_logs_recent_window
+test_handoff_pointer_leads_the_digest
 test_endpoint_liveness_tmux
 test_endpoint_liveness_herdr
 test_endpoint_read_death_is_isolated_and_reported

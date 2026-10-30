@@ -408,6 +408,49 @@ SUBRULE='-----------------------------------------------------------------------
 section() { printf '\n%s\n%s\n%s\n' "$RULE" "$1" "$RULE"; }
 subsection() { printf '\n%s\n%s\n' "$1" "$SUBRULE"; }
 
+# Portable epoch mtime, following symlinks so an age describes the file's
+# content rather than the link that points at it. macOS (BSD) stat uses
+# `-f <fmt>`; Linux (GNU) stat uses `-c <fmt>`. Do not collapse these into one
+# command with a fallback: on GNU, -f is filesystem stat, which succeeds with a
+# non-numeric dump.
+file_mtime() {  # <path>: epoch seconds, empty when unavailable
+  if [ "$(uname)" = Darwin ]; then
+    /usr/bin/stat -Lf %m "$1" 2>/dev/null
+  else
+    stat -Lc %Y "$1" 2>/dev/null
+  fi
+}
+
+# The handoff the previous session left for this one. Printed before anything
+# else, and deliberately short: a harness that spills an oversized digest
+# delivers only its first ~2KB inline, so a handoff pointer at the tail is one
+# the new session never reads. Absent file prints nothing at all.
+print_handoff_pointer() {
+  local path="$DATA/handoff/LATEST.md" now mtime age
+  [ -f "$path" ] || return 0
+  now=$(date +%s)
+  mtime=$(file_mtime "$path")
+  case "$mtime" in
+    ''|*[!0-9]*) age='an unknown time' ;;
+    *)
+      [ "$mtime" -le "$now" ] || mtime=$now
+      local elapsed=$((now - mtime))
+      if [ "$elapsed" -lt 60 ]; then
+        age="${elapsed}s"
+      elif [ "$elapsed" -lt 3600 ]; then
+        age="$((elapsed / 60))m"
+      elif [ "$elapsed" -lt 86400 ]; then
+        age="$((elapsed / 3600))h"
+      else
+        age="$((elapsed / 86400))d"
+      fi
+      age="$age ago"
+      ;;
+  esac
+  printf 'HANDOFF: %s (written %s)\n' "$path" "$age"
+  printf 'READ THIS FIRST - the previous session left this handoff for you. Read it before any other step.\n\n'
+}
+
 # print_file_or_absent <path> <label>: full contents under a labeled
 # subsection, or an explicit ABSENT marker. Absence is semantically
 # meaningful for every one of these files (captain.md absent = firstmate
@@ -672,6 +715,11 @@ AGENTS_START_HASH=
 if [ "$REEMIT" -eq 0 ] && [ "$SESSION_SOURCE" = startup ]; then
   AGENTS_START_HASH=$(hash_file_sha256 "$FM_ROOT/AGENTS.md" 2>/dev/null || true)
 fi
+
+# --- handoff pointer (always the first lines of the digest) -----------------
+# Every start, including a CONTEXT RE-EMIT, so a session that lost its context
+# still gets the handoff in the first screenful.
+print_handoff_pointer
 
 if [ "$REEMIT" -eq 1 ]; then
   # First in the output on purpose: a harness that spills a large hook output
@@ -983,16 +1031,39 @@ done
 [ "$META_FOUND" -eq 1 ] || printf '(none)\n'
 
 subsection "Orphan status logs (state/*.status without matching .meta)"
+# Only orphans touched in the last 24 hours are shown: an orphan is a log whose
+# task meta is gone, so an old one is history rather than recovery input, and
+# printing every one of them was pure digest weight. The rest are disclosed by
+# count with the command that reads any one of them.
 ORPHAN_STATUS_FOUND=0
+ORPHAN_STATUS_OMITTED=0
+ORPHAN_NOW=$(date +%s)
 for status in "$STATE"/*.status; do
   [ -f "$status" ] || continue
   id=$(basename "$status" .status)
   [ -f "$STATE/$id.meta" ] && continue
   ORPHAN_STATUS_FOUND=1
+  ORPHAN_MTIME=$(file_mtime "$status")
+  case "$ORPHAN_MTIME" in
+    ''|*[!0-9]*) ORPHAN_AGE=0 ;;
+    *)
+      ORPHAN_AGE=$((ORPHAN_NOW - ORPHAN_MTIME))
+      [ "$ORPHAN_AGE" -ge 0 ] || ORPHAN_AGE=0
+      ;;
+  esac
+  if [ "$ORPHAN_AGE" -ge 86400 ]; then
+    ORPHAN_STATUS_OMITTED=$((ORPHAN_STATUS_OMITTED + 1))
+    continue
+  fi
   printf '\n--- %s ---\n' "$id"
   print_status_tail "$status"
 done
-[ "$ORPHAN_STATUS_FOUND" -eq 1 ] || printf '(none)\n'
+if [ "$ORPHAN_STATUS_FOUND" -eq 0 ]; then
+  printf '(none)\n'
+elif [ "$ORPHAN_STATUS_OMITTED" -gt 0 ]; then
+  printf '\n%d older orphan status logs not printed (no activity in the last 24 hours); read one with %s/bin/fm-crew-state.sh <id>, or its full log at %s/<id>.status\n' \
+    "$ORPHAN_STATUS_OMITTED" "$FM_ROOT" "$STATE"
+fi
 
 subsection "AFK"
 # The away posture is the record (bin/fm-afk-contract.sh); the legacy flag
