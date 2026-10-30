@@ -773,6 +773,24 @@ else
       "$SCRIPT_DIR/fm-bootstrap.sh" 2>&1
   )
 fi
+# A sync result is otherwise reported only by the deferred stage of the start that
+# ran the sync, so a re-emit or a lock-refused start would never show a second mate
+# left diverged. The durable marker survives until a later sync heals it, so every
+# start reports a live mate's marker here from that record alone.
+SECONDMATE_DIVERGED=$(
+  for marker in "$STATE"/.secondmate-update-reconcile/*.pending; do
+    if [ ! -f "$marker" ] || [ -L "$marker" ]; then continue; fi
+    id=$(basename "$marker" .pending)
+    if ! grep -qs '^kind=secondmate$' "$STATE/$id.meta"; then continue; fi
+    target=$(sed -n 's/^target=//p' "$marker" | tail -1)
+    printf 'SECONDMATE_SYNC: secondmate %s: skipped: diverged from %s; reconciliation required (record: %s)\n' \
+      "$id" "${target:-its sync target}" "$marker"
+  done
+)
+if [ -n "$SECONDMATE_DIVERGED" ]; then
+  BOOT_OUT="${BOOT_OUT:+$BOOT_OUT
+}$SECONDMATE_DIVERGED"
+fi
 if [ -n "$BOOT_OUT" ]; then
   printf '%s\n' "$BOOT_OUT"
 else

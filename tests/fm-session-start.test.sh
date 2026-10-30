@@ -2428,6 +2428,51 @@ FIXTURE
   pass "--reemit puts its read cue in the first 2000 characters and a normal start omits it"
 }
 
+test_every_start_reports_a_live_secondmates_pending_divergence() {
+  local rec root home fakebin reemit normal bootstrap marker_dir
+  rec=$(new_world reconcile-pending)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  mkdir -p "$home/other-secondmate/state"
+  marker_dir="$home/state/.secondmate-update-reconcile"
+  mkdir -p "$marker_dir"
+  fm_write_secondmate_meta "$home/state/sm-live.meta" "$home/other-secondmate" "firstmate:fm-sm-live" alpha
+  printf 'kind=ship\n' > "$home/state/ship-task.meta"
+  for id in sm-live ship-task sm-retired; do
+    printf 'schema=fm-secondmate-update-reconcile.v1\nid=%s\nstatus=diverged\nlocal_commit=aaa\ntarget_commit=bbb\ntarget=main-%s\n' \
+      "$id" "$id" > "$marker_dir/$id.pending"
+  done
+
+  reemit=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_HARNESS_PID=$$ PATH="$fakebin:$BASE_PATH" \
+    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
+    "$SESSION_START" --reemit)
+  bootstrap=$(printf '%s\n' "$reemit" | sed -n '/BOOTSTRAP/,/WAKE QUEUE/p')
+  assert_contains "$bootstrap" \
+    "SECONDMATE_SYNC: secondmate sm-live: skipped: diverged from main-sm-live; reconciliation required (record: $marker_dir/sm-live.pending)" \
+    "--reemit did not report the live second mate's pending divergence in BOOTSTRAP"
+  [ "$(printf '%s\n' "$reemit" | grep -c 'SECONDMATE_SYNC: secondmate sm-live: skipped: diverged')" -eq 1 ] \
+    || fail "--reemit did not print exactly one divergence line for the live second mate"
+  assert_not_contains "$reemit" "secondmate ship-task: skipped: diverged" "a non-secondmate record was reported as a diverged second mate"
+  assert_not_contains "$reemit" "secondmate sm-retired: skipped: diverged" "a marker with no live record was reported"
+
+  normal=$(FM_FAKE_HARNESS_PID=$$ run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  bootstrap=$(printf '%s\n' "$normal" | sed -n '/BOOTSTRAP/,/WAKE QUEUE/p')
+  assert_contains "$bootstrap" "SECONDMATE_SYNC: secondmate sm-live: skipped: diverged from main-sm-live" \
+    "a normal start did not report the live second mate's pending divergence in BOOTSTRAP"
+  assert_not_contains "$normal" "secondmate sm-retired: skipped: diverged" "a normal start reported a marker with no live record"
+
+  rm -f "$marker_dir/sm-live.pending"
+  reemit=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$root" FM_FAKE_HARNESS_PID=$$ PATH="$fakebin:$BASE_PATH" \
+    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
+    "$SESSION_START" --reemit)
+  assert_not_contains "$reemit" "secondmate sm-live: skipped: diverged" "a healed divergence kept being reported"
+
+  pass "every start reports a live second mate's pending divergence and nothing else"
+}
+
 test_reemit_skips_startup_sweeps_but_keeps_the_wake_drain() {
   local rec root home fakebin network_report reemit sequence generation
   rec=$(new_world reemit)
@@ -3151,6 +3196,7 @@ test_runtime_bound_truncates_loudly_and_exits_zero
 test_portable_timeout_escalates_term_resistant_process
 test_runtime_bound_leaves_a_healthy_digest_untouched
 test_runtime_bound_leaves_harness_ancestry_headroom
+test_every_start_reports_a_live_secondmates_pending_divergence
 test_reemit_skips_startup_sweeps_but_keeps_the_wake_drain
 test_reemit_cue_survives_the_hook_output_preview
 test_agents_baseline_stays_at_true_start_and_reemits_on_every_drifted_pi_compact
