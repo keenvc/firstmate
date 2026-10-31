@@ -2887,7 +2887,17 @@ launch_template() {
       printf '%s' 'codex __MODELFLAG____EFFORTFLAG____CODEXAPPROVALFLAG__ --disable hooks -c "notify=[\"bash\",\"-c\",\"touch __TURNEND__\"]" "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     fi
     ;;
-  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN__ __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # OpenCode 2's brief rides the same record-backed doorbell as Claude's: the
+  # whole launch brief would otherwise sit in this worker's argv, where any
+  # same-machine `pgrep -f`/`pkill -f` pattern that appears in a brief's own
+  # text - a tool name such as chrome-devtools-axi, or the words of another
+  # worker's task - matches this process too and can signal every worker at
+  # once (incident 2026-10-31T02:24Z: a `pkill -f chrome-devtools-axi` killed
+  # about 21 OpenCode workers across homes). The short printable doorbell
+  # carries no such words. OpenCode 2.0.32 has no system-prompt flag, so the
+  # doorbell line is self-describing and the worker opens it: verified live
+  # that an OpenCode 2.0.32 worker reads the named record and acts on it.
+  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIEXCLUDE____PIRESUME__'
     if [ "$kind" = secondmate ]; then
@@ -5726,17 +5736,21 @@ rovo_endpoint_cleanup() {
   fm_backend_kill "$BACKEND" "$T" "$tab_id" "fm-$ID" 2>/dev/null && SPAWN_ENDPOINT_CLOSED=1 || true
 }
 
-# OpenCode 2 takes its brief on the launch command (--prompt), but some 2.x
-# releases (2.0.11) only prefill the composer and never submit it, while later
-# ones (2.0.22) submit it on their own. This post-launch gate makes both work:
-# the turn has started once the worker's own busy-state plugin has written a
-# record (source opencode-plugin; the arm-time record is source fm-spawn), so
+# OpenCode 2 takes its launch input on the launch command (--prompt), but some
+# 2.x releases (2.0.11) only prefill the composer and never submit it, while
+# later ones (2.0.22) submit it on their own. This post-launch gate makes both
+# work: the turn has started once the worker's own busy-state plugin has written
+# a record (source opencode-plugin; the arm-time record is source fm-spawn), so
 # the gate waits for that. If none arrives within the settle window it sends
-# one Enter once the shared composer classifier reads the brief as pending -
-# skipped when it proves the composer empty, since the brief has then already
-# left it - and keeps waiting. An unknown read (a TUI that has not drawn yet)
-# keeps polling and only spends the Enter at the later submit deadline, so a
-# backend whose classifier can only answer unknown still gets its one Enter.
+# one Enter once the shared composer classifier reads that input as pending -
+# skipped when it proves the composer empty, since it has then already left it -
+# and keeps waiting. An unknown read (a TUI that has not drawn yet) keeps
+# polling and only spends the Enter at the later submit deadline, so a backend
+# whose classifier can only answer unknown still gets its one Enter.
+# That launch input is now the launch-brief doorbell line, not the brief text
+# (the brief would otherwise ride argv; see the opencode launch template), and
+# the gate is indifferent to which it is: it reads only whether the worker's
+# own plugin reports the turn started.
 # The composer is only a veto, never proof of delivery: OpenCode 2's sidebar
 # can make an already-submitted composer read pending.
 opencode2_turn_started() {

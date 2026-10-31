@@ -689,6 +689,15 @@ IFS= read -r -d '' SHARED_NO_CD_RULE <<'EOF' || true
 EOF
 SHARED_NO_CD_RULE=${SHARED_NO_CD_RULE%$'\n'}
 
+# One shared string keeps the ship and scout process-kill rule identical.
+# Matching a process by name or command-line pattern hits every worker on this
+# shared host whose argv contains that text, so a name kill is a fleet-wide
+# stop rather than a local cleanup.
+IFS= read -r -d '' SHARED_NO_NAME_KILL_RULE <<'EOF' || true
+9. Never kill or stop a process by name or command-line pattern (`pkill`, `killall`, `pkill -f`, `kill $(pgrep ...)`, or any equivalent); those match other workers on this shared host and stop them mid-work. Stop only a pid you started and recorded, and prefer a tool that reaps its own child (a session or job you named) over a pattern search.
+EOF
+SHARED_NO_NAME_KILL_RULE=${SHARED_NO_NAME_KILL_RULE%$'\n'}
+
 if [ -n "$BASE_BRANCH" ]; then
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean copy of its base branch.
 Base branch: $BASE_BRANCH"
@@ -737,6 +746,7 @@ $CREWMATE_PAUSE_INSTRUCTIONS
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
 $SHARED_INFRA_RULE
 $SHARED_NO_CD_RULE
+$SHARED_NO_NAME_KILL_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 
@@ -822,6 +832,7 @@ $ASK_USER_BLOCK
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
 $SHARED_INFRA_RULE
 $SHARED_NO_CD_RULE
+$SHARED_NO_NAME_KILL_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 

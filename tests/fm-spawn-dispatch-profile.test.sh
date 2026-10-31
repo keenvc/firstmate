@@ -264,6 +264,38 @@ test_claude_spawn_refuses_when_the_brief_record_cannot_publish() {
   pass "a claude spawn whose launch-brief record cannot publish stops with a clear error and sends no launch"
 }
 
+# An OpenCode worker's launch input is the record-backed doorbell, never the
+# brief text: the brief in argv is matched by any same-machine `pgrep -f` /
+# `pkill -f` pattern appearing in the brief's own words, which once stopped
+# every worker whose brief named that tool. The launch must carry a printable
+# doorbell naming a launch-brief record in the receiving home's inbox and must
+# not carry the brief body itself.
+test_opencode_launch_brief_rides_the_record_doorbell_not_argv() {
+  local rec id out status launch doorbell record
+  id="brief-doorbell-opencode-z8"
+  rec=$(make_spawn_case brief-doorbell-opencode opencode "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --model anthropic/claude-sonnet-4-5)
+  status=$?
+  expect_code 0 "$status" "opencode spawn for the doorbell check should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  doorbell=$(claude_launch_brief_arg "$launch")
+  printf '%s' "$doorbell" | LC_ALL=C grep -q '[^[:print:]]' \
+    && fail "the opencode doorbell is not one printable-ASCII line: $doorbell"
+  [ "$(printf '%s' "$doorbell" | "$ROOT/bin/fm-operational-input.sh" doorbell-kind)" = launch-brief ] \
+    || fail "the published record does not hold a launch-brief envelope: $doorbell"
+  record=$(printf '%s' "$doorbell" | sed -n "s/.*: Firstmate operational input waiting: read '\([^']*\)'.*/\1/p")
+  [ -n "$record" ] || fail "the opencode doorbell names no record: $doorbell"
+  [ "$(cd "$(dirname "$record")" && pwd -P)" = "$(cd "$HOME_DIR/state/operational-inbox" && pwd -P)" ] \
+    || fail "the launch record is not in this home's operational inbox: $record"
+  grep -q 'Current worker role contract' "$record" \
+    || fail "the launch record lost the worker brief: $(cat "$record")"
+  assert_not_contains "$launch" 'Current worker role contract' \
+    "the opencode launch carried the brief body in argv instead of the doorbell"
+  pass "an opencode launch publishes the brief as an operational-inbox record and passes only the doorbell"
+}
+
 test_non_cursor_launch_clears_inherited_cursor_markers() {
   local rec id out status launch
   id=profile-claude-cursor-markers-z1b
@@ -2742,6 +2774,7 @@ test_no_profile_keeps_claude_profile_defaults
 test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home
 test_claude_spawn_refuses_when_the_brief_record_cannot_publish
+test_opencode_launch_brief_rides_the_record_doorbell_not_argv
 test_non_cursor_launch_clears_inherited_cursor_markers
 test_relative_home_overrides_launch_with_absolute_cross_process_paths
 test_home_defaults_preserve_absolute_or_resolve_relative_paths
