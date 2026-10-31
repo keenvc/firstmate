@@ -3091,7 +3091,15 @@ launch_template() {
   # worktree would otherwise hand the worker the supervisor persona.
   # HOME is the per-task home droid_home_prepare built: every user entry linked
   # except the mcp.json catalog, so a worker starts no user-level MCP servers.
-  droid) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI HOME=__DROIDHOME__ __DROIDBIN__ --settings __DROIDSETTINGS__ --auto high --append-system-prompt __DROIDROLEPIN__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
+  # The launch input is the record-backed doorbell, not the typed envelope: a
+  # typed envelope carried as the positional prompt sits in this worker's argv,
+  # where any same-machine `pgrep -f`/`pkill -f` pattern appearing in the
+  # brief's own words matches the process and can stop every worker at once
+  # (incident 2026-10-31T02:24Z: a `pkill -f chrome-devtools-axi` killed about
+  # 21 workers whose briefs named that tool). The short printable doorbell
+  # carries no such words; --append-system-prompt still establishes the worker
+  # role, and the doorbell line names its own record.
+  droid) printf '%s' 'env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT -u FM_PI_HARNESS -u FM_OMP_HARNESS -u FM_OMP_HARNESS -u ATLASSIAN_AGENT_TYPE -u ROVODEV_CLI -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI HOME=__DROIDHOME__ __DROIDBIN__ --settings __DROIDSETTINGS__ --auto high --append-system-prompt __DROIDROLEPIN__ __BRIEFDOORBELL__' ;;
   # Kimi Code rejects a positional prompt, so it launches bare and receives
   # only an absolute brief pointer after the TUI readiness gate below.
   # Its turn-end signal is a globally configured Stop hook plus a guarded
@@ -5840,15 +5848,16 @@ agy_spawn_fail() {  # <detail>
   rovo_endpoint_cleanup
 }
 
-# droid carries its brief on the launch command, so it needs no delivery gate,
-# but a directory droid has not been told to trust parks the TUI on
-# "Trust this folder?" before the brief runs. The trust is pre-registered before
-# launch (bin/fm-droid-trust.sh, verified to remove the dialog), and this gate is
-# the backstop in the agy shape: answer the dialog once with the preselected
-# trust row when it renders anyway, then require positive proof that the brief is
-# being processed - the semantic busy record the UserPromptSubmit hook writes, or
-# the pinned `(Press ESC to stop)` status row through fm_busy_classify - before
-# the spawn reports success.
+# droid's launch input is the record-backed doorbell (never the brief text; see
+# the droid launch template), and the TUI submits it on start, so it needs no
+# delivery gate of its own, but a directory droid has not been told to trust
+# parks the TUI on "Trust this folder?" before it runs. The trust is
+# pre-registered before launch (bin/fm-droid-trust.sh, verified to remove the
+# dialog), and this gate is the backstop in the agy shape: answer the dialog
+# once with the preselected trust row when it renders anyway, then require
+# positive proof that the input is being processed - the semantic busy record
+# the UserPromptSubmit hook writes, or the pinned `(Press ESC to stop)` status
+# row through fm_busy_classify - before the spawn reports success.
 DROID_TRUST_DIALOG='Trust this folder?'
 DROID_TRUST_ANSWERED=0
 

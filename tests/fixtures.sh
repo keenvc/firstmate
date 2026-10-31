@@ -142,6 +142,28 @@ fake_opencode_launched() {
       ;;
   esac
 }
+# Simulate a Factory Droid worker's UserPromptSubmit hook firing on launch: run
+# the exact busy writer the spawn generated into the task's droid settings JSON
+# (source droid-hook), which is what the droid readiness gate waits for.
+# FM_FAKE_DROID_TURN=never leaves the record untouched so a test can prove the
+# gate fails when the turn never starts. The settings path is discoverable from
+# the staged launch line, so the hook command is parsed from the JSON the spawn
+# actually wrote rather than reconstructed.
+fake_droid_launched() {
+  [ "${FM_FAKE_DROID_TURN:-auto}" = never ] && return 0
+  local staged settings cmd
+  staged=$1
+  settings=$(sed -n 's#.*--settings \([^ ]*\).*#\1#' "$staged" 2>/dev/null | tr -d "'" | head -1)
+  [ -n "$settings" ] && [ -f "$settings" ] || return 0
+  cmd=$(grep -o '"[^"]*fm-busy-event\.sh[^"]*apply[^"]*busy[^"]*"' "$settings" 2>/dev/null | head -1)
+  [ -n "$cmd" ] || return 0
+  # The extracted command is the JSON-escaped hook body; unescape and run it
+  # with sh, exactly as droid's hook layer would.
+  cmd=${cmd#\"}
+  cmd=${cmd%\"}
+  cmd=$(printf '%s' "$cmd" | sed 's/\\"/"/g; s/\\\"/"/g')
+  sh -c "$cmd" >/dev/null 2>&1 || true
+}
 case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
@@ -208,6 +230,9 @@ case "${1:-}" in
             staged=${staged%"'"}
             if [ -f "$staged" ] && grep -q -- 'opencode.* --standalone --prompt' "$staged"; then
               fake_opencode_launched
+            fi
+            if [ -f "$staged" ] && grep -q -- 'droid.* --settings' "$staged"; then
+              fake_droid_launched "$staged"
             fi
             ;;
         esac

@@ -77,7 +77,19 @@ if [ "${1:-}" = --version ]; then
 fi
 exit 0
 SH
-  chmod +x "$fakebin/timeout" "$fakebin/cursor-agent" "$fakebin/opencode"
+  cat > "$fakebin/droid" <<'SH'
+#!/usr/bin/env bash
+# fm-spawn validates the requested droid model through `droid exec --list-tools
+# -m <model>`, which prints the account's model listing and exits 1 with
+# `Invalid model: <id>` when the id is unknown. Answer with a listing that never
+# names the requested model invalid, so the launch proceeds deterministically.
+if [ "${1:-}" = exec ] && [ "${2:-}" = --list-tools ]; then
+  printf '%s\n' 'deepseek-v4.1-flash-1017  DeepSeek V4.1 Flash (1017)'
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fakebin/timeout" "$fakebin/cursor-agent" "$fakebin/opencode" "$fakebin/droid"
   make_spawn_pi_probe "$fakebin" pi
   make_spawn_pi_probe "$fakebin" pi-signed
   printf '%s\n' "$fakebin"
@@ -294,6 +306,39 @@ test_opencode_launch_brief_rides_the_record_doorbell_not_argv() {
   assert_not_contains "$launch" 'Current worker role contract' \
     "the opencode launch carried the brief body in argv instead of the doorbell"
   pass "an opencode launch publishes the brief as an operational-inbox record and passes only the doorbell"
+}
+
+# Droid receives the same record-backed doorbell. Its brief used to ride the
+# positional prompt, so the same argv exposure applied: a brief naming a tool
+# matched a same-machine `pgrep -f`/`pkill -f` for it. The launch must carry a
+# printable doorbell naming a launch-brief record in the receiving home's inbox
+# and must not carry the brief body itself.
+test_droid_launch_brief_rides_the_record_doorbell_not_argv() {
+  local rec id out status launch doorbell record
+  id="brief-doorbell-droid-z9"
+  rec=$(make_spawn_case brief-doorbell-droid droid "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --model deepseek-v4.1-flash-1017)
+  status=$?
+  expect_code 0 "$status" "droid spawn for the doorbell check should succeed"$'\n'"$out"
+  launch=$(cat "$LAUNCH_LOG")
+  doorbell=$(claude_launch_brief_arg "$launch")
+  printf '%s' "$doorbell" | LC_ALL=C grep -q '[^[:print:]]' \
+    && fail "the droid doorbell is not one printable-ASCII line: $doorbell"
+  [ "$(printf '%s' "$doorbell" | "$ROOT/bin/fm-operational-input.sh" doorbell-kind)" = launch-brief ] \
+    || fail "the published record does not hold a launch-brief envelope: $doorbell"
+  record=$(printf '%s' "$doorbell" | sed -n "s/.*: Firstmate operational input waiting: read '\([^']*\)'.*/\1/p")
+  [ -n "$record" ] || fail "the droid doorbell names no record: $doorbell"
+  [ "$(cd "$(dirname "$record")" && pwd -P)" = "$(cd "$HOME_DIR/state/operational-inbox" && pwd -P)" ] \
+    || fail "the launch record is not in this home's operational inbox: $record"
+  grep -q 'Current worker role contract' "$record" \
+    || fail "the launch record lost the worker brief: $(cat "$record")"
+  assert_contains "$launch" '--append-system-prompt' \
+    "the droid launch dropped its worker-role system prompt"
+  assert_not_contains "$launch" 'Current worker role contract' \
+    "the droid launch carried the brief body in argv instead of the doorbell"
+  pass "a droid launch publishes the brief as an operational-inbox record and passes only the doorbell"
 }
 
 test_non_cursor_launch_clears_inherited_cursor_markers() {
@@ -2775,6 +2820,7 @@ test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home
 test_claude_spawn_refuses_when_the_brief_record_cannot_publish
 test_opencode_launch_brief_rides_the_record_doorbell_not_argv
+test_droid_launch_brief_rides_the_record_doorbell_not_argv
 test_non_cursor_launch_clears_inherited_cursor_markers
 test_relative_home_overrides_launch_with_absolute_cross_process_paths
 test_home_defaults_preserve_absolute_or_resolve_relative_paths
