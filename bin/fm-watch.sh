@@ -356,6 +356,12 @@ HOME_SUMMARY_INTERVAL=${FM_HOME_SUMMARY_INTERVAL:-300}
 case "$HOME_SUMMARY_INTERVAL" in
   ''|*[!0-9]*|0) HOME_SUMMARY_INTERVAL=300 ;;
 esac
+# Start time of the last home-summary refresh this watcher started. The publish
+# age alone cannot rate-limit a failing refresh: a failed attempt leaves the
+# ledger stale, so "older than the interval" stays true on every poll and the
+# retry fires as fast as publication can fail. This stamp adds the attempt
+# schedule that makes a failing refresh cost one attempt per interval.
+HOME_SUMMARY_ATTEMPT="$STATE/.last-home-summary-attempt"
 SIGNAL_GRACE=${FM_SIGNAL_GRACE:-30}   # seconds to linger after a signal so trailing
                                       # signals (a status write, then the same turn's
                                       # turn-end hook) coalesce into one wake
@@ -3762,6 +3768,37 @@ fi
 # first. Publication is eventually consistent by design and every reader
 # re-derives current state from the owning home anyway, while beacon freshness
 # is what the whole supervision chain rests on.
+#
+# Backoff for a failing refresh, the single owner of that policy: an attempt
+# that produced no newer ledger leaves the publish too old to satisfy any
+# cadence check, so without this a failing publication is retried on every
+# poll - and a producer that needs most of its deadline would then burn a core
+# continuously. While the last attempt is inside HOME_SUMMARY_INTERVAL and the
+# ledger is older than it, that attempt failed, so further attempts wait for
+# the interval to elapse. A ledger at or after the attempt stamp is how a
+# published refresh is recognised without the watcher reading the producer's
+# own records, and a publish inside the attempt's own second compares as
+# success: tying the other way would cost every fast refresh a silently
+# dropped status trigger, while this direction can only buy one extra attempt
+# after a publish. Every successful refresh therefore keeps today's behaviour,
+# including a status change refreshing immediately.
+home_summary_backoff_active() {
+  local attempt ledger
+  [ "$(age_of "$HOME_SUMMARY_ATTEMPT")" -lt "$HOME_SUMMARY_INTERVAL" ] \
+    || return 1
+  attempt=$(stat_mtime "$HOME_SUMMARY_ATTEMPT") || return 1
+  ledger=$(stat_mtime "$STATE/home-summary.json") || return 0
+  case "$ledger" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$ledger" -lt "$attempt" ]
+}
+
+# The cadence trigger: the publish is older than the interval, and no failing
+# attempt is still inside its backoff window.
+home_summary_refresh_due() {
+  [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ] \
+    && ! home_summary_backoff_active
+}
+
 HOME_SUMMARY_PID=
 home_summary_refresh_detached() {
   if [ -n "$HOME_SUMMARY_PID" ]; then
@@ -3771,6 +3808,10 @@ home_summary_refresh_detached() {
     wait "$HOME_SUMMARY_PID" 2>/dev/null || true
     HOME_SUMMARY_PID=
   fi
+  # The status-change trigger reaches this function directly, so the failing-
+  # attempt backoff is enforced here as well as in the cadence trigger.
+  home_summary_backoff_active && return 0
+  touch "$HOME_SUMMARY_ATTEMPT" 2>/dev/null || true
   FM_HOME_SUMMARY_IF_IDLE=1 \
     "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort </dev/null >/dev/null 2>&1 &
   HOME_SUMMARY_PID=$!
@@ -3924,7 +3965,7 @@ while :; do
     FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-rex-marks.sh" sync >/dev/null 2>&1 || true
   fi
 
-  if [ "$(age_of "$STATE/home-summary.json")" -ge "$HOME_SUMMARY_INTERVAL" ]; then
+  if home_summary_refresh_due; then
     home_summary_refresh_detached
   fi
   # Opt-in lane capacity facts: off costs one file test.

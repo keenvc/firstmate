@@ -316,6 +316,99 @@ wait "$WATCH_PID" >/dev/null 2>&1 || true
 WATCH_PID=
 pass "live watcher cadence bounds publication staleness without signals"
 
+# A producer that keeps failing must not be retried on every poll. A failed
+# attempt leaves the publish older than the interval, so the age test alone
+# stays true on every poll and the retry runs as fast as publication can fail -
+# which on a producer that needs most of its deadline holds a core all day. The
+# watcher must instead attempt at most once per HOME_SUMMARY_INTERVAL while
+# failing, and must resume publishing normally once the producer recovers.
+BACKOFF_HOME="$TMP_ROOT/backoff-home"
+BACKOFF_BIN="$TMP_ROOT/backoff-bin"
+BACKOFF_FAIL_MARKER="$TMP_ROOT/backoff-jq-failing"
+BACKOFF_REAL_JQ=$(command -v jq)
+mkdir -p "$BACKOFF_HOME/state" "$BACKOFF_HOME/data" "$BACKOFF_HOME/config" \
+  "$BACKOFF_HOME/projects" "$BACKOFF_BIN"
+printf '# Seeded Firstmate home\n' > "$BACKOFF_HOME/AGENTS.md"
+printf 'backoff\n' > "$BACKOFF_HOME/.fm-secondmate-home"
+cat > "$BACKOFF_HOME/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+
+## Done
+EOF
+# A jq that fails only while the marker exists, so one watcher covers both the
+# failing producer and its recovery without being restarted.
+cat > "$BACKOFF_BIN/jq" <<'SH'
+#!/usr/bin/env bash
+[ ! -e "$FM_TEST_JQ_FAIL" ] || exit 7
+exec "$FM_TEST_REAL_JQ" "$@"
+SH
+chmod +x "$BACKOFF_BIN/jq"
+PATH="$FAKEBIN:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$BACKOFF_HOME" \
+  "$WRITER" || fail "could not seed the backoff ledger"
+cp "$BACKOFF_HOME/state/home-summary.json" "$TMP_ROOT/backoff-seeded.json"
+# A publish that stays stale keeps the cadence check due on every poll, so only
+# the attempt backoff can bound how often a failing refresh is retried.
+touch -t 202001010000 "$BACKOFF_HOME/state/home-summary.json"
+: > "$BACKOFF_FAIL_MARKER"
+PATH="$BACKOFF_BIN:$FAKEBIN:$PATH" \
+  FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$BACKOFF_HOME" \
+  FM_TEST_JQ_FAIL="$BACKOFF_FAIL_MARKER" FM_TEST_REAL_JQ="$BACKOFF_REAL_JQ" \
+  FM_POLL=1 FM_HOME_SUMMARY_INTERVAL=5 FM_SIGNAL_GRACE=0 \
+  FM_CHECK_INTERVAL=9999999 FM_HEARTBEAT=9999999 \
+  "$WATCH" > "$TMP_ROOT/backoff-watch.out" 2> "$TMP_ROOT/backoff-watch.err" &
+WATCH_PID=$!
+i=0
+while [ ! -e "$BACKOFF_HOME/state/.last-watcher-beat" ] && [ "$i" -lt 100 ]; do
+  kill -0 "$WATCH_PID" 2>/dev/null || break
+  sleep 0.05
+  i=$((i + 1))
+done
+[ -e "$BACKOFF_HOME/state/.last-watcher-beat" ] \
+  || fail "the backoff watcher did not begin polling: $(cat "$TMP_ROOT/backoff-watch.err" 2>/dev/null)"
+sleep 12
+kill -0 "$WATCH_PID" 2>/dev/null \
+  || fail "the backoff watcher exited while its producer failed: $(cat "$TMP_ROOT/backoff-watch.err" 2>/dev/null)"
+backoff_attempts=$(grep -c . "$BACKOFF_HOME/state/.home-summary-refresh.log" 2>/dev/null || true)
+case "$backoff_attempts" in
+  ''|*[!0-9]*) backoff_attempts=0 ;;
+esac
+[ "$backoff_attempts" -ge 1 ] \
+  || fail "a failing refresh was never attempted at all"
+[ "$backoff_attempts" -le 5 ] \
+  || fail "a failing refresh retried $backoff_attempts times in 12s against a 5s interval"
+cmp -s "$TMP_ROOT/backoff-seeded.json" "$BACKOFF_HOME/state/home-summary.json" \
+  || fail "a failed refresh replaced the prior complete ledger"
+rm -f "$BACKOFF_FAIL_MARKER"
+i=0
+while cmp -s "$TMP_ROOT/backoff-seeded.json" "$BACKOFF_HOME/state/home-summary.json"; do
+  kill -0 "$WATCH_PID" 2>/dev/null \
+    || fail "the backoff watcher exited before its producer recovered"
+  [ "$i" -lt 150 ] \
+    || fail "publication did not resume after the producer recovered"
+  sleep 0.1
+  i=$((i + 1))
+done
+# A successful refresh keeps today's behaviour: a status change publishes at
+# once rather than waiting out the interval of a previous failure. Sleep past
+# the current second so the new publication cannot match the recovered bytes.
+cp "$BACKOFF_HOME/state/home-summary.json" "$TMP_ROOT/backoff-recovered.json"
+sleep 1
+printf 'working: status change after a recovered producer\n' \
+  > "$BACKOFF_HOME/state/backoff-task.status"
+i=0
+while cmp -s "$TMP_ROOT/backoff-recovered.json" "$BACKOFF_HOME/state/home-summary.json"; do
+  [ "$i" -lt 100 ] \
+    || fail "a status change did not publish once the producer had recovered"
+  sleep 0.1
+  i=$((i + 1))
+done
+kill "$WATCH_PID" >/dev/null 2>&1 || true
+wait "$WATCH_PID" >/dev/null 2>&1 || true
+WATCH_PID=
+pass "a failing refresh backs off to one attempt per interval"
+
 # Consumer boundary: first serialize behind any watcher-started publication,
 # then replace the ledger with a structurally complete but semantically false
 # state. The default parent snapshot must consume that publication rather than
