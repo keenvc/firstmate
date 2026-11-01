@@ -1892,9 +1892,10 @@ $fully_presented
       # contiguous cursor may advance through the captured endpoint. Routine
       # lines remain unacknowledged only while they are the sole unread content,
       # preserving delayed signal annotations without replaying a handled note
-      # that happened to follow a routine line. A routine secondmate child status
-      # is presented-surface too (status_line_is_unread_surface_for): the drain
-      # printed it, so holding the cursor back for it would replay it every drain.
+      # that happened to follow a routine line. A held secondmate line (a routine
+      # child status or a bare `working:`) is presented-surface too
+      # (status_line_is_unread_surface_for): the drain printed it, so holding the
+      # cursor back for it would replay it every drain.
       while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
           *[![:space:]]*)
@@ -2158,13 +2159,33 @@ status_line_is_routine_child_status() {  # <status-line>
   return 0
 }
 
+# 0 when a status line is unmarked routine progress from a supervised secondmate:
+# a bare `working:` line. The mate's own lead line here only reports that it is
+# still going, so the parent home reads it at its next drain instead of spending
+# a wake on it. Its raw verb is exactly `working`: resumed work after a pause and
+# every one of done, failed, needs-decision, blocked, and paused stay
+# parent-relevant and keep waking, and any corr= or delivery= token marks a
+# routed request whose answer the parent may still owe.
+status_line_is_secondmate_progress() {  # <status-line>
+  local line=$1 verb
+  case "$line" in
+    *[![:space:]]*) ;;
+    *) return 1 ;;
+  esac
+  case "$line" in *corr=*|*delivery=*) return 1 ;; esac
+  verb=$(status_line_verb "$line")
+  [ "$verb" = 'working' ]
+}
+
 # 0 when the whole new span [<start>,<end>) of a secondmate .status log holds at
-# least one non-blank line and every line in it is a routine child status.
+# least one non-blank line and every line in it is content the parent home reads
+# at its next drain without raising a wake of its own: a routine child status, or
+# the mate's own unmarked `working:` progress.
 # Span-based on purpose: a batch that also carries a decision, blocker, failure,
-# lead line, or a token-marked reply is not routine, so the caller's ordinary
-# wake rule handles its non-routine rows instead of swallowing them.
-# An unreadable or shrunk log is never routine.
-secondmate_status_span_is_routine_child() {  # <status-file> <start-offset> [<end-offset>]
+# lead line, pause, or a token-marked reply is not held, so the caller's ordinary
+# wake rule handles its other rows instead of swallowing them.
+# An unreadable or shrunk log is never held.
+secondmate_status_span_held_from_wake() {  # <status-file> <start-offset> [<end-offset>]
   local f=$1 start=${2:-0} end=${3:-} size chunk line seen=0
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 1
   case "$start" in ''|*[!0-9]*) start=0 ;; esac
@@ -2178,7 +2199,8 @@ secondmate_status_span_is_routine_child() {  # <status-file> <start-offset> [<en
   chunk=$(_fm_status_read_span "$f" "$start" "$((end - start))") || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in *[![:space:]]*) ;; *) continue ;; esac
-    status_line_is_routine_child_status "$line" || return 1
+    status_line_is_routine_child_status "$line" \
+      || status_line_is_secondmate_progress "$line" || return 1
     seen=1
   done <<EOF
 $chunk
@@ -2187,20 +2209,22 @@ EOF
 }
 
 # 0 when a task's status line belongs in the drain's UNREAD STATUS surface:
-# an informational `note:` or reserved-key resolution, or a routine child status
-# of a secondmate's routed-reply stream.
-# Those child lines no longer raise their own wake, so this is the one place
-# that still presents them - once, then never again.
+# an informational `note:` or reserved-key resolution, or content of a
+# secondmate's routed-reply stream that no longer raises its own wake (a routine
+# child status or the mate's own `working:` progress).
+# Those lines no longer raise their own wake, so this is the one place that still
+# presents them - once, then never again.
 status_line_is_unread_surface_for() {  # <state> <task-id> <status-line>
   local state=$1 task=$2 line=$3
   status_line_is_unread_surface "$line" && return 0
   task_is_secondmate "$state" "$task" || return 1
-  status_line_is_routine_child_status "$line"
+  status_line_is_routine_child_status "$line" \
+    || status_line_is_secondmate_progress "$line"
 }
 
 # Fleet-wide unread informational lines: one "<task>\t<status-line>" row per
-# still-unread `note:`, pending-reply resolution, or routine secondmate child
-# status, in glob (task id) order.
+# still-unread `note:`, pending-reply resolution, or secondmate line held back
+# from its own wake, in glob (task id) order.
 # Prints nothing when none are unread. Directory scan rejects status symlinks
 # the same way scan_open_decisions does.
 scan_unread_surface_lines() {  # <state>
@@ -2896,10 +2920,11 @@ crew_worktree_written_since() {  # <id> <state> <anchor-file>
 # caller); a caller without that library reads the whole log, which can only
 # surface more. An unreadable span surfaces. Scoped to .status files - a mate's
 # bare turn-ended ping always used the ordinary provably-working absorb.
-# This helper owns only NON-terminal progress here. A span made entirely of
-# terminal child outcome lines (secondmate_status_span_is_routine_child) is
-# captain-relevant by classification, and bin/fm-watch.sh holds that span back
-# from its own wake while the drain still presents it as unread.
+# This helper owns only the absorb of a provably working mate's NON-terminal
+# progress here. bin/fm-watch.sh holds a mate's whole held-class span back from
+# its own wake and leaves that presentation to the drain
+# (secondmate_status_span_held_from_wake), which is what covers an idle mate that
+# is not provably working at all.
 _fm_secondmate_status_new_lines_routine() {  # <status-file> <state>
   local f=$1 state=$2 start=0 size chunk line verb
   if command -v fm_wake_signal_seen_size >/dev/null 2>&1; then

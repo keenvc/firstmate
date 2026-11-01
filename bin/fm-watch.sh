@@ -3380,13 +3380,14 @@ EOF
 # is absorbed; it surfaces only an event the per-wake path absorbed by mistake -
 # the fail-safe backstop.
 #
-# A secondmate's whole-span routine child outcome (a child's done outcome, a
-# child PR handoff, a lane merge) is recorded through its endpoint but does not
-# set the actionable verdict: the signal path holds exactly that same span back
-# from its own wake, so re-surfacing it here would undo the hold. Recording the
-# endpoint still advances the task's surfaced marker - the absorbed branch below
-# commits every recorded endpoint - so the line cannot come back on a later
-# heartbeat, and the drain's UNREAD STATUS still presents it once.
+# A secondmate's whole-span held class (a child's done outcome, a child PR
+# handoff, a lane merge, or the mate's own bare `working:` progress) is recorded
+# through its endpoint but does not set the actionable verdict: the signal path
+# holds exactly that same span back from its own wake, so re-surfacing it here
+# would undo the hold. Recording the endpoint still advances the task's surfaced
+# marker - the absorbed branch below commits every recorded endpoint - so the
+# line cannot come back on a later heartbeat, and the drain's UNREAD STATUS still
+# presents it once.
 heartbeat_scan_finds_actionable() {
   local f task record rest endpoint ident rc found=1 sig marker exclude
   # Same self-home exclusion as scan_signals: a remote mate's parent channel
@@ -3411,7 +3412,7 @@ heartbeat_scan_finds_actionable() {
     endpoint=${record%%$'\t'*}; rest=${record#*$'\t'}; ident=${rest%%$'\t'*}
     FM_HEARTBEAT_SURFACE_ENDPOINTS="${FM_HEARTBEAT_SURFACE_ENDPOINTS}${f}"$'\t'"${endpoint}"$'\t'"${ident}"$'\n'
     if [ "$rc" -eq 0 ] && { ! task_is_secondmate "$STATE" "$task" \
-      || ! secondmate_status_span_is_routine_child "$f" \
+      || ! secondmate_status_span_held_from_wake "$f" \
         "$(hb_surfaced_offset "$task")" "$endpoint"; }; then
       found=0
     fi
@@ -4229,17 +4230,20 @@ EOF
     # shellcheck disable=SC2086  # $files is a space-separated status-path list (ids carry no spaces)
     signal_files_actionable $files
     signal_actionable=$?
-    # Secondmate child outcomes the parent home must not wake on. A whole
-    # classified span made only of routine child completions (a child's done
-    # outcome, a child PR handoff, a lane merge) still reads as captain-relevant
-    # above, so without this hold the branch below surfaces one wake per child
-    # append - hundreds a day in a busy fleet. Record those files here (never in
-    # away mode, where the daemon owns triage and wants every wake) so the emit
-    # loop can skip their rows while BOTH commit loops below still advance the
-    # seen and surfaced markers: the file is reported and cannot re-fire, and
-    # the drain's UNREAD STATUS still presents the line once because the
-    # presentation cursor is deliberately not advanced here.
-    FM_SIGNAL_ROUTINE_CHILD_FILES=''
+    # Secondmate lines the parent home must not wake on. A whole classified span
+    # of routine child completions (a child's done outcome, a child PR handoff, a
+    # lane merge) still reads as captain-relevant above, so without this hold the
+    # branch below surfaces one wake per child append - hundreds a day in a busy
+    # fleet. A span of the mate's own bare `working:` progress raises no
+    # captain-relevant event at all, yet it lands in the same branch whenever the
+    # mate is not provably working (an idle mate between tasks), so it is held
+    # here too. Record those files here (never in away mode, where the daemon owns
+    # triage and wants every wake) so the emit loop can skip their rows while BOTH
+    # commit loops below still advance the seen and surfaced markers: the file is
+    # reported and cannot re-fire, and the drain's UNREAD STATUS still presents
+    # the line once because the presentation cursor is deliberately not advanced
+    # here.
+    FM_SIGNAL_HELD_SECONDMATE_FILES=''
     if ! afk_present; then
       while IFS=$(printf '\t') read -r rt_f rt_end _rt_ident; do
         [ -n "$rt_f" ] || continue
@@ -4248,9 +4252,9 @@ EOF
         task_is_secondmate "$STATE" "$rt_task" || continue
         # Never hold a row the routing layer already owns as a decision.
         case " $FM_SIGNAL_NEEDS_DECISION_FILES " in *" $rt_f "*) continue ;; esac
-        secondmate_status_span_is_routine_child "$rt_f" \
+        secondmate_status_span_held_from_wake "$rt_f" \
           "$(fm_wake_signal_seen_size "$STATE" "$rt_f")" "$rt_end" || continue
-        FM_SIGNAL_ROUTINE_CHILD_FILES="$FM_SIGNAL_ROUTINE_CHILD_FILES $rt_f"
+        FM_SIGNAL_HELD_SECONDMATE_FILES="$FM_SIGNAL_HELD_SECONDMATE_FILES $rt_f"
       done <<EOF
 $FM_SIGNAL_SURFACE_ENDPOINTS
 EOF
@@ -4271,9 +4275,9 @@ EOF
       signal_rows_emitted=0
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
-        # A held-back secondmate routine child file keeps its rows out of the
-        # queue; its markers are still committed by the loops below.
-        case " $FM_SIGNAL_ROUTINE_CHILD_FILES " in *" $f "*) continue ;; esac
+        # A held-back secondmate file keeps its rows out of the queue; its
+        # markers are still committed by the loops below.
+        case " $FM_SIGNAL_HELD_SECONDMATE_FILES " in *" $f "*) continue ;; esac
         file_reason="$reason"
         case " $FM_SIGNAL_NEEDS_DECISION_FILES " in *" $f "*) file_reason="needs-decision:$files" ;; esac
         fm_wake_append signal "$(basename "$f")" "$file_reason" || exit 1
@@ -4311,7 +4315,7 @@ EOF
       if [ "$signal_rows_emitted" -gt 0 ]; then
         wake "$reason"
       else
-        triage_log "held routine secondmate child status $reason"
+        triage_log "held secondmate status $reason"
       fi
     else
       while IFS=$(printf '\t') read -r sf sig f; do

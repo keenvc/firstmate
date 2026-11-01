@@ -754,19 +754,19 @@ test_secondmate_routine_child_status_classifier() {
   done
   # A span is routine only when EVERY line in it is, and only when it holds one.
   printf 'done [key=child-pr-a1] [at=1]: child a1 PR ready: https://example.test/a1\n' > "$state/mate.status"
-  secondmate_status_span_is_routine_child "$state/mate.status" 0 \
+  secondmate_status_span_held_from_wake "$state/mate.status" 0 \
     || fail "a one-line child PR span was not routine"
   offset=$(size_of "$state/mate.status")
-  secondmate_status_span_is_routine_child "$state/mate.status" "$offset" \
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
     && fail "an empty span was classified routine"
   printf 'needs-decision [key=gate]: pick a lane\n' >> "$state/mate.status"
-  secondmate_status_span_is_routine_child "$state/mate.status" 0 \
+  secondmate_status_span_held_from_wake "$state/mate.status" 0 \
     && fail "a span carrying a decision alongside a child line was classified routine"
-  secondmate_status_span_is_routine_child "$state/mate.status" "$offset" \
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
     && fail "the decision-only tail was classified routine"
   offset=$(size_of "$state/mate.status")
   printf 'done [key=child-pr-a2] [at=2]: child a2 PR ready: https://example.test/a2\n' >> "$state/mate.status"
-  secondmate_status_span_is_routine_child "$state/mate.status" "$offset" \
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
     || fail "a child line appended after a decision was not routine on its own span"
   # The unread surface is task-scoped: the same line is presented for a
   # secondmate and NOT for an ordinary crewmate.
@@ -778,6 +778,60 @@ test_secondmate_routine_child_status_classifier() {
   status_line_is_unread_surface_for "$state" mate 'needs-decision [key=k]: pick one' \
     && fail "a plain decision became an unread surface line"
   pass "secondmate routine child statuses classify by class, verb, span, and task scope"
+}
+
+test_secondmate_working_progress_classifier() {
+  local dir state line offset
+  dir=$(make_case secondmate-working-classify); state="$dir/state"
+  printf 'kind=secondmate\n' > "$state/mate.meta"
+  printf 'kind=ship\n' > "$state/crew.meta"
+  # A bare `working:` line from a directly supervised mate is the only progress
+  # class held back; everything the parent must act on or track keeps its wake.
+  for line in 'working: step 2 of 5' 'working [at=1]: step 3 of 5'; do
+    status_line_is_secondmate_progress "$line" \
+      || fail "'$line' was not classified as secondmate working progress"
+  done
+  for line in 'paused [at=2]: waiting on CI' 'resolved [key=k1]: took A' \
+      'done [at=3]: shipped' 'needs-decision [key=k2]: pick one' \
+      'blocked [key=k3]: need access' 'failed [at=4]: broke' \
+      'working [corr=0123456789abcdef]: mirrored line' \
+      'working [key=child-pr-x] delivery=fire-and-forget: mirrored line' \
+      'note: unrelated'; do
+    status_line_is_secondmate_progress "$line" \
+      && fail "'$line' was held back as secondmate working progress"
+  done
+  # A span holds only when EVERY line in it is held-class content: working
+  # progress itself, a routine child status, or both.
+  printf 'working: step 1\nworking [at=5]: step 2 of 5\n' > "$state/mate.status"
+  secondmate_status_span_held_from_wake "$state/mate.status" 0 \
+    || fail "a working-only secondmate span was not held"
+  offset=$(size_of "$state/mate.status")
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
+    && fail "an empty span was held"
+  printf 'done [key=child-pr-b1] [at=6]: child b1 PR ready: https://example.test/b1\nworking: step 4\n' \
+    >> "$state/mate.status"
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
+    || fail "a child status plus working progress span was not held"
+  offset=$(size_of "$state/mate.status")
+  printf 'paused [at=7]: waiting on CI\n' >> "$state/mate.status"
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
+    && fail "a pause-only tail was held"
+  secondmate_status_span_held_from_wake "$state/mate.status" 0 \
+    && fail "a span carrying a pause alongside held lines was held"
+  printf 'needs-decision [key=gate]: pick a lane\n' >> "$state/mate.status"
+  offset=$(size_of "$state/mate.status")
+  secondmate_status_span_held_from_wake "$state/mate.status" "$offset" \
+    && fail "a decision span was held"
+  # The unread surface is task-scoped: the same line is presented for a
+  # secondmate and NOT for an ordinary crewmate.
+  line='working [at=8]: step 5 of 5'
+  status_line_is_unread_surface_for "$state" mate "$line" \
+    || fail "a held secondmate progress line was not part of the unread surface"
+  status_line_is_unread_surface_for "$state" crew "$line" \
+    && fail "a held progress line leaked onto an ordinary crewmate's unread surface"
+  status_line_is_unread_surface_for "$state" mate 'paused [at=9]: waiting on CI' \
+    && fail "a pause became an unread surface line"
+  pass "secondmate bare working: progress classifies by verb, token, span, and task scope"
 }
 
 # --- benign wakes are absorbed ONLY when the crew is provably working ---------
@@ -1743,7 +1797,7 @@ test_secondmate_routine_child_line_held_back_from_its_own_wake() {
     || { reap "$pid"; fail "a held child PR line did not advance its signal marker"; }
   [ -s "$state/.hb-surfaced-mate" ] \
     || { reap "$pid"; fail "a held child PR line did not advance its heartbeat marker"; }
-  grep -F 'held routine secondmate child status' "$state/.watch-triage.log" >/dev/null 2>&1 \
+  grep -F 'held secondmate status' "$state/.watch-triage.log" >/dev/null 2>&1 \
     || { reap "$pid"; fail "a held child PR line was not recorded as held back"; }
   # The same mate's next decision still wakes: only routine child classes hold.
   printf 'needs-decision [key=gate-1] [at=2]: pick a lane\n' >> "$state/mate.status"
@@ -1787,6 +1841,76 @@ test_secondmate_child_hold_scope_direct_workers_and_mixed_batches() {
   [ "$keys" = "gated.status " ] \
     || fail "a mixed batch queued rows other than its decision row: '$keys'"
   pass "the child-status hold is scoped to secondmate reports and to routine rows in a mixed batch"
+}
+
+test_secondmate_working_progress_held_back_from_its_own_wake() {
+  local dir state fakebin out pid
+  dir=$(make_case secondmate-working-held); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  printf 'kind=secondmate\n' > "$state/mate.meta"
+  printf 'working [at=1]: step 2 of 5\n' > "$state/mate.status"
+  # No busy evidence at all: the hold is a class decision, so an idle mate
+  # between tasks lands its routine progress at the next drain instead of waking
+  # the parent home.
+  export FM_FAKE_CREW_STATE='state: unknown · source: none · idle worker'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  if ! wait_poll_cycle "$state" "$pid"; then
+    reap "$pid"; fail "an idle secondmate's routine working: line woke the parent home: $(cat "$out")"
+  fi
+  [ ! -s "$out" ] || { reap "$pid"; fail "a held working: line printed a wake reason: $(cat "$out")"; }
+  [ ! -s "$state/.wake-queue" ] || { reap "$pid"; fail "a held working: line enqueued a durable wake"; }
+  [ -s "$state/.seen-mate_status" ] \
+    || { reap "$pid"; fail "a held working: line did not advance its signal marker"; }
+  [ -s "$state/.hb-surfaced-mate" ] \
+    || { reap "$pid"; fail "a held working: line did not advance its heartbeat marker"; }
+  grep -F 'held secondmate status' "$state/.watch-triage.log" >/dev/null 2>&1 \
+    || { reap "$pid"; fail "a held working: line was not recorded as held back"; }
+  # A pause is not progress: the mate's first external wait still wakes.
+  printf 'paused [at=2]: waiting on CI\n' >> "$state/mate.status"
+  wait_for_exit "$pid" 100 || fail "a secondmate pause after held progress did not wake"
+  grep -F "signal: $state/mate.status" "$out" >/dev/null \
+    || fail "the mate's pause was not surfaced"
+  grep -F "mate.status" "$state/.wake-queue" >/dev/null \
+    || fail "the mate's pause was not durably queued"
+  pass "a secondmate's routine working: progress is held back without waking while its next pause still wakes"
+}
+
+test_working_progress_hold_scope_direct_workers_and_non_progress_lines() {
+  local dir state fakebin out pid line n=0
+  # A direct worker of THIS home writes the identical working: line and must
+  # still wake: the hold is scoped to a recorded secondmate report, not content.
+  dir=$(make_case working-hold-direct); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"
+  printf 'kind=ship\n' > "$state/crew.meta"
+  printf 'working: step 2 of 5\n' > "$state/crew.status"
+  export FM_FAKE_CREW_STATE='state: unknown · source: none · idle worker'
+  watch_bg "$state" "$fakebin" "$out"
+  pid=$!
+  wait_for_exit "$pid" 100 || fail "a direct worker's working: line stopped waking"
+  grep -F "signal: $state/crew.status" "$out" >/dev/null \
+    || fail "a direct worker's working: line was not surfaced"
+  grep -F "$state/crew.status" "$state/.wake-queue" >/dev/null \
+    || fail "a direct worker's working: line was not durably queued"
+  # A secondmate's non-progress lines keep waking on their own.
+  for line in 'needs-decision [key=w1]: pick a lane' \
+      'blocked [key=w2]: need access' \
+      'done [at=3]: shipped' \
+      'resolved [key=w4]: took A' \
+      'failed [at=5]: broke' \
+      'working [corr=0123456789abcdef]: mirrored line'; do
+    n=$((n + 1))
+    dir=$(make_case "working-hold-$n"); state="$dir/state"; fakebin="$dir/fakebin"
+    out="$dir/watch.out"
+    printf 'kind=secondmate\n' > "$state/mate.meta"
+    printf 'working: routine\n%s\n' "$line" > "$state/mate.status"
+    watch_bg "$state" "$fakebin" "$out"
+    pid=$!
+    wait_for_exit "$pid" 100 || fail "a secondmate's '$line' stopped waking"
+    grep -F "signal: $state/mate.status" "$out" >/dev/null \
+      || fail "a secondmate's '$line' was not surfaced"
+  done
+  pass "the working-progress hold is scoped to secondmate reports and to bare progress rows"
 }
 
 test_secondmate_buried_block_wakes_despite_busy_agent() {
@@ -5445,6 +5569,7 @@ fm_test_run \
   test_signal_crew_provably_working_classifier \
   test_secondmate_status_routine_absorbed_routed_surfaced_classifier \
   test_secondmate_routine_child_status_classifier \
+  test_secondmate_working_progress_classifier \
   test_provably_working_signal_absorbed \
   test_turn_ended_provably_working_absorbed \
   test_turn_ended_not_working_surfaced \
@@ -5475,6 +5600,8 @@ fm_test_run \
   test_secondmate_routine_progress_absorbed_then_note_surfaced \
   test_secondmate_routine_child_line_held_back_from_its_own_wake \
   test_secondmate_child_hold_scope_direct_workers_and_mixed_batches \
+  test_secondmate_working_progress_held_back_from_its_own_wake \
+  test_working_progress_hold_scope_direct_workers_and_non_progress_lines \
   test_secondmate_buried_block_wakes_despite_busy_agent \
   test_self_announced_close_does_not_rewake_but_next_note_does \
   test_self_announced_close_after_open_decisions_fold_does_not_rewake \

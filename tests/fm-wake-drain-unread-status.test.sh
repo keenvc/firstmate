@@ -475,7 +475,45 @@ test_secondmate_routine_child_line_presented_once_as_unread() {
   pass "a held secondmate child status line is presented once through UNREAD STATUS and never replayed"
 }
 
+test_secondmate_working_progress_presented_once_as_unread() {
+  local dir state out status
+  dir=$(make_case secondmate-working-unread)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'kind=secondmate\n' > "$state/mate.meta"
+  status="$state/mate.status"
+  prime_cursor "$state" "$status"
+
+  printf 'working [at=1]: step 2 of 5\n' >> "$status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "drain failed on a held secondmate progress line"
+
+  grep -F 'UNREAD STATUS' "$out" >/dev/null \
+    || fail "a held secondmate progress line produced no UNREAD STATUS section: $(cat "$out")"
+  grep -F 'mate working [at=1]: step 2 of 5' "$out" >/dev/null \
+    || fail "a held secondmate progress line was not presented: $(cat "$out")"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "second drain after presenting a held progress line failed"
+  if grep -F 'step 2 of 5' "$out" >/dev/null; then
+    fail "an already-presented secondmate progress line replayed as new: $(cat "$out")"
+  fi
+  # An ordinary crewmate's identical line stays outside the unread surface: the
+  # hold is scoped to a supervised secondmate's report.
+  status="$state/crew.status"
+  printf 'kind=ship\n' > "$state/crew.meta"
+  prime_cursor "$state" "$status"
+  printf 'working [at=2]: step 2 of 5\n' >> "$status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "drain failed on a direct worker's progress line"
+  if grep -F 'crew working [at=2]' "$out" >/dev/null; then
+    fail "a direct worker's progress line was presented as unread status: $(cat "$out")"
+  fi
+  pass "a held secondmate progress line is presented once through UNREAD STATUS and never replayed"
+}
+
 test_secondmate_routine_child_line_presented_once_as_unread
+test_secondmate_working_progress_presented_once_as_unread
 test_incident_note_answer_buried_under_routine_note_surfaces_both
 test_already_presented_notes_are_not_replayed
 test_brand_new_note_after_presentation_is_surfaced
