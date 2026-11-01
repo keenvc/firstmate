@@ -449,6 +449,33 @@ test_routine_working_and_covered_done_stay_silent_on_the_empty_queue() {
   pass "routine working and branch-covered done lines print nothing on an empty-queue drain"
 }
 
+test_secondmate_routine_child_line_presented_once_as_unread() {
+  local dir state out status
+  dir=$(make_case secondmate-child-unread)
+  state="$dir/state"
+  out="$dir/drain.out"
+  printf 'kind=secondmate\n' > "$state/mate.meta"
+  status="$state/mate.status"
+  prime_cursor "$state" "$status"
+
+  printf 'done [key=child-pr-kid1] [at=1]: child kid1 PR ready: https://example.test/1\n' >> "$status"
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "drain failed on a held secondmate child line"
+
+  grep -F 'UNREAD STATUS' "$out" >/dev/null \
+    || fail "a held secondmate child line produced no UNREAD STATUS section: $(cat "$out")"
+  grep -F 'mate done [key=child-pr-kid1]' "$out" >/dev/null \
+    || fail "a held secondmate child line was not presented: $(cat "$out")"
+
+  FM_STATE_OVERRIDE="$state" "$DRAIN" > "$out" \
+    || fail "second drain after presenting a held child line failed"
+  if grep -F 'child-pr-kid1' "$out" >/dev/null; then
+    fail "an already-presented secondmate child line replayed as new: $(cat "$out")"
+  fi
+  pass "a held secondmate child status line is presented once through UNREAD STATUS and never replayed"
+}
+
+test_secondmate_routine_child_line_presented_once_as_unread
 test_incident_note_answer_buried_under_routine_note_surfaces_both
 test_already_presented_notes_are_not_replayed
 test_brand_new_note_after_presentation_is_surfaced

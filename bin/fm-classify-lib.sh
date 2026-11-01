@@ -1888,15 +1888,17 @@ $fully_presented
       f="$state/$task.status"
       offset=$(status_presentation_cursor_offset "$f") || return 1
       lines=$(status_new_lines_since_cursor "$f" "$endpoint") || return 1
-      # Once any informational line in this span is presented fleet-wide, the
+      # Once any presented-surface line in this span is presented fleet-wide, the
       # contiguous cursor may advance through the captured endpoint. Routine
       # lines remain unacknowledged only while they are the sole unread content,
       # preserving delayed signal annotations without replaying a handled note
-      # that happened to follow a routine line.
+      # that happened to follow a routine line. A routine secondmate child status
+      # is presented-surface too (status_line_is_unread_surface_for): the drain
+      # printed it, so holding the cursor back for it would replay it every drain.
       while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
           *[![:space:]]*)
-            if status_line_is_unread_surface "$line"; then safe=true; break; fi
+            if status_line_is_unread_surface_for "$state" "$task" "$line"; then safe=true; break; fi
             ;;
         esac
       done <<EOF
@@ -1979,6 +1981,8 @@ EOF
 # the replacement log unread at byte 0. Informational `note:` lines and
 # reserved-key pending-reply resolutions are the fleet-wide unread surface;
 # they are not open decisions and are not persisted in the folded open-set.
+# A secondmate's routine child status lines join that surface: the parent home
+# keeps them durable and unread instead of raising a wake of their own.
 
 # Read the legacy per-task open-decisions cursor used to seed the presentation
 # offset before the fleet manifest exists. A fold-version mismatch, identity
@@ -2109,8 +2113,94 @@ status_line_is_unread_surface() {  # <status-line>
   return 1
 }
 
+# 0 when <state>/<task-id>.meta declares a provisioned secondmate home.
+# A secondmate's parent-channel .status is a routed-reply stream: its child
+# outcome lines are the parent's record of work the mate already delivered, so
+# the parent home reads them without raising a wake of their own.
+# An unreadable or absent meta is not a secondmate, which keeps every existing
+# wake rule in force wherever the record is incomplete.
+task_is_secondmate() {  # <state> <task-id>
+  local state=$1 task=$2
+  [ -n "$task" ] || return 1
+  [ "$(grep '^kind=' "$state/$task.meta" 2>/dev/null | tail -1 | cut -d= -f2-)" = secondmate ]
+}
+
+# 0 when a status line is one of the routine secondmate child outcomes that stay
+# durable and unread without raising their own wake in the parent home:
+#   done [key=child-outcome-<child>-done-<fp8>]  a child's terminal outcome
+#   done [key=child-pr-<child>]                   a child's PR handoff
+#   done [key=merged-<lane>]                      a lane merge result
+# The verb must be exactly `done`, the key must be a stated slug, and the
+# child-outcome state segment must be `done`: `working`/`paused` progress was
+# always absorbed elsewhere, while failed/needs-decision/blocked/resolved and a
+# keyless line are the parent's own lead lines and must keep waking.
+# Any corr= or delivery= token marks a routed request whose answer the parent
+# may still owe, so it always surfaces.
+status_line_is_routine_child_status() {  # <status-line>
+  local line=$1 verb key rest state
+  case "$line" in
+    *[![:space:]]*) ;;
+    *) return 1 ;;
+  esac
+  case "$line" in *corr=*|*delivery=*) return 1 ;; esac
+  verb=$(status_line_verb "$line")
+  [ "$verb" = 'done' ] || return 1
+  key=$(_fm_decision_key "$line") || return 1
+  case "$key" in
+    child-outcome-*)
+      rest=${key%-*}
+      state=${rest##*-}
+      [ "$state" = 'done' ] || return 1
+      ;;
+    child-pr-*|merged-*) ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# 0 when the whole new span [<start>,<end>) of a secondmate .status log holds at
+# least one non-blank line and every line in it is a routine child status.
+# Span-based on purpose: a batch that also carries a decision, blocker, failure,
+# lead line, or a token-marked reply is not routine, so the caller's ordinary
+# wake rule handles its non-routine rows instead of swallowing them.
+# An unreadable or shrunk log is never routine.
+secondmate_status_span_is_routine_child() {  # <status-file> <start-offset> [<end-offset>]
+  local f=$1 start=${2:-0} end=${3:-} size chunk line seen=0
+  [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 1
+  case "$start" in ''|*[!0-9]*) start=0 ;; esac
+  size=$(_fm_status_file_size "$f") || return 1
+  size=${size//[[:space:]]/}
+  case "$size" in ''|*[!0-9]*) return 1 ;; esac
+  case "$end" in ''|*[!0-9]*) end=$size ;; esac
+  [ "$end" -le "$size" ] || end=$size
+  [ "$start" -le "$end" ] || start=0
+  [ "$start" -lt "$end" ] || return 1
+  chunk=$(_fm_status_read_span "$f" "$start" "$((end - start))") || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in *[![:space:]]*) ;; *) continue ;; esac
+    status_line_is_routine_child_status "$line" || return 1
+    seen=1
+  done <<EOF
+$chunk
+EOF
+  [ "$seen" -eq 1 ]
+}
+
+# 0 when a task's status line belongs in the drain's UNREAD STATUS surface:
+# an informational `note:` or reserved-key resolution, or a routine child status
+# of a secondmate's routed-reply stream.
+# Those child lines no longer raise their own wake, so this is the one place
+# that still presents them - once, then never again.
+status_line_is_unread_surface_for() {  # <state> <task-id> <status-line>
+  local state=$1 task=$2 line=$3
+  status_line_is_unread_surface "$line" && return 0
+  task_is_secondmate "$state" "$task" || return 1
+  status_line_is_routine_child_status "$line"
+}
+
 # Fleet-wide unread informational lines: one "<task>\t<status-line>" row per
-# still-unread `note:` or pending-reply resolution, in glob (task id) order.
+# still-unread `note:`, pending-reply resolution, or routine secondmate child
+# status, in glob (task id) order.
 # Prints nothing when none are unread. Directory scan rejects status symlinks
 # the same way scan_open_decisions does.
 scan_unread_surface_lines() {  # <state>
@@ -2124,7 +2214,7 @@ scan_unread_surface_lines() {  # <state>
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      status_line_is_unread_surface "$line" || continue
+      status_line_is_unread_surface_for "$state" "$task" "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines
@@ -2142,7 +2232,7 @@ scan_unread_surface_snapshot() {  # <state> <task-and-endpoint-snapshot>
     [ -n "$lines" ] || continue
     while IFS= read -r line; do
       [ -n "$line" ] || continue
-      status_line_is_unread_surface "$line" || continue
+      status_line_is_unread_surface_for "$state" "$task" "$line" || continue
       printf '%s\t%s\n' "$task" "$line"
     done <<EOF
 $lines
@@ -2806,6 +2896,10 @@ crew_worktree_written_since() {  # <id> <state> <anchor-file>
 # caller); a caller without that library reads the whole log, which can only
 # surface more. An unreadable span surfaces. Scoped to .status files - a mate's
 # bare turn-ended ping always used the ordinary provably-working absorb.
+# This helper owns only NON-terminal progress here. A span made entirely of
+# terminal child outcome lines (secondmate_status_span_is_routine_child) is
+# captain-relevant by classification, and bin/fm-watch.sh holds that span back
+# from its own wake while the drain still presents it as unread.
 _fm_secondmate_status_new_lines_routine() {  # <status-file> <state>
   local f=$1 state=$2 start=0 size chunk line verb
   if command -v fm_wake_signal_seen_size >/dev/null 2>&1; then
@@ -2845,7 +2939,7 @@ signal_crew_provably_working() {  # <file> ...
     [ -n "$task" ] || continue
     case "$base" in
       *.status)
-        if [ "$(grep '^kind=' "$dir/$task.meta" 2>/dev/null | tail -1 | cut -d= -f2-)" = secondmate ]; then
+        if task_is_secondmate "$dir" "$task"; then
           _fm_secondmate_status_new_lines_routine "$f" "$dir" || return 1
         fi
         ;;
