@@ -233,6 +233,59 @@ test_record_backed_doorbell_carrier() {
   pass "record-backed carrier: Claude-only selection, an ASCII doorbell naming an exact envelope record, home-bound open, and no recognition without the record"
 }
 
+# A launch brief is a worker's first message on a harness with no worker role of
+# its own, so its doorbell states who the reader is. Without that a worker
+# launched into a firstmate-repository worktree reads this repo's supervisor
+# AGENTS.md and never selects the worker role. Every other kind keeps the generic
+# wording, and both stay parseable.
+test_launch_brief_doorbell_names_the_worker_role() {
+  local tmp state doorbell record generic kind body
+  tmp=$(fm_test_tmproot fm-operational-input-launch-doorbell)
+  state="$tmp/state"
+  mkdir -p "$state"
+
+  doorbell=$(printf 'worker brief body\n' | FM_STATE_OVERRIDE="$state" "$OWNER" record launch-brief) \
+    || fail "the CLI could not publish a launch-brief record"
+  case "$doorbell" in
+    *"$FM_OPERATIONAL_MARK"*) fail "the launch-brief doorbell carries the invisible marker" ;;
+  esac
+  printf '%s' "$doorbell" | LC_ALL=C grep -q '[^[:print:]]' \
+    && fail "the launch-brief doorbell is not one printable-ASCII line: $doorbell"
+  case "$doorbell" in
+    *'you are a worker launched by Firstmate'*) ;;
+    *) fail "the launch-brief doorbell never tells the reader it is a Firstmate worker: $doorbell" ;;
+  esac
+  case "$doorbell" in
+    *'that record is your launch brief and role contract'*) ;;
+    *) fail "the launch-brief doorbell never names the record as the worker's role contract: $doorbell" ;;
+  esac
+  case "$doorbell" in
+    *'handle its contents as Firstmate operational input.'*) \
+      fail "the launch-brief doorbell kept the generic wording: $doorbell" ;;
+  esac
+  case "$doorbell" in
+    *'worker brief body'*) fail "the launch-brief doorbell carried brief text into argv: $doorbell" ;;
+  esac
+  fm_operational_doorbell_path "$doorbell" record || fail "the owner cannot parse its launch-brief doorbell"
+  [ "$(printf '%s' "$doorbell" | "$OWNER" doorbell-kind)" = launch-brief ] \
+    || fail "doorbell-kind lost the launch-brief record's kind"
+  body=$(FM_STATE_OVERRIDE="$state" "$OWNER" open "$record") || fail "open refused this home's launch-brief record"
+  [ "$body" = 'worker brief body' ] || fail "open did not print the launch brief body: $body"
+  fm_operational_doorbell_kind "$doorbell" "$state" kind && [ "$kind" = launch-brief ] \
+    || fail "the home-bound check rejected this home's own launch-brief doorbell"
+
+  generic=$(printf 'digest body' | FM_STATE_OVERRIDE="$state" "$OWNER" record session-start) \
+    || fail "the CLI could not publish a session-start record"
+  case "$generic" in
+    *'worker launched by Firstmate'*) fail "non-worker operational input gained the worker-role wording: $generic" ;;
+    *"$FM_OPERATIONAL_DOORBELL_SUFFIX") ;;
+    *) fail "non-worker operational input lost its generic doorbell wording: $generic" ;;
+  esac
+  [ "$(printf '%s' "$generic" | "$OWNER" doorbell-kind)" = session-start ] \
+    || fail "the generic doorbell stopped parsing after the launch-brief wording landed"
+  pass "a launch-brief doorbell names its reader as a Firstmate worker and the record as its role contract, while other kinds keep the generic wording"
+}
+
 test_record_prune_outgrows_one_argument_list() {
   local tmp state pad left
   tmp=$(fm_test_tmproot fm-operational-input-flood)
@@ -255,4 +308,5 @@ test_genuine_near_misses_remain_unclassified
 test_cross_language_adapter_uses_the_owner
 test_invalid_current_encodings_are_rejected
 test_record_backed_doorbell_carrier
+test_launch_brief_doorbell_names_the_worker_role
 test_record_prune_outgrows_one_argument_list

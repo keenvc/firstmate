@@ -303,6 +303,7 @@ test_opencode_launch_brief_rides_the_record_doorbell_not_argv() {
     || fail "the launch record is not in this home's operational inbox: $record"
   grep -q 'Current worker role contract' "$record" \
     || fail "the launch record lost the worker brief: $(cat "$record")"
+  assert_launch_brief_doorbell_names_the_worker_role opencode "$doorbell"
   assert_not_contains "$launch" 'Current worker role contract' \
     "the opencode launch carried the brief body in argv instead of the doorbell"
   pass "an opencode launch publishes the brief as an operational-inbox record and passes only the doorbell"
@@ -336,6 +337,7 @@ test_droid_launch_brief_rides_the_record_doorbell_not_argv() {
     || fail "the launch record lost the worker brief: $(cat "$record")"
   assert_contains "$launch" '--append-system-prompt' \
     "the droid launch dropped its worker-role system prompt"
+  assert_launch_brief_doorbell_names_the_worker_role droid "$doorbell"
   assert_not_contains "$launch" 'Current worker role contract' \
     "the droid launch carried the brief body in argv instead of the doorbell"
   pass "a droid launch publishes the brief as an operational-inbox record and passes only the doorbell"
@@ -2531,6 +2533,27 @@ claude_launch_brief_arg() {  # <launch>
     eval "set -- $command"
     eval "printf '%s' \"\${$#}\""
   )
+}
+
+# A launch-brief doorbell is a worker's first message on a harness that carries
+# no worker role of its own, so it must select the worker role there: a worker
+# launched into a firstmate-repository worktree otherwise reads this repo's
+# supervisor AGENTS.md and treats the record as another home's task. Fails on the
+# generic operational-input wording that caused exactly that.
+assert_launch_brief_doorbell_names_the_worker_role() {  # <label> <doorbell>
+  case "$2" in
+    *'you are a worker launched by Firstmate'*) ;;
+    *) fail "$1 launch-brief doorbell never names the reader as a Firstmate worker: $2" ;;
+  esac
+  case "$2" in
+    *'that record is your launch brief and role contract'*) ;;
+    *) fail "$1 launch-brief doorbell never names the record as the worker role contract: $2" ;;
+  esac
+  case "$2" in
+    *'handle its contents as Firstmate operational input.'*)
+      fail "$1 launch-brief doorbell kept the generic operational-input wording: $2"
+      ;;
+  esac
 }
 
 # The --add-dir segment every Claude worker launch now carries between the

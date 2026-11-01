@@ -104,17 +104,19 @@ export function classifyFirstmateOperationalText(message: string): string | unde
 const RECORD_DIRNAME = "operational-inbox";
 const DOORBELL_PREFIX = ": Firstmate operational input waiting: read '";
 const DOORBELL_SUFFIX = "' and handle its contents as Firstmate operational input.";
+// A launch brief's doorbell also states its reader's worker role; the shell
+// owner `bin/fm-operational-input.sh` is the single owner of both wordings.
+const LAUNCH_DOORBELL_SUFFIX =
+  "' - you are a worker launched by Firstmate, and that record is your launch brief and role contract.";
+const DOORBELL_SUFFIXES = [LAUNCH_DOORBELL_SUFFIX, DOORBELL_SUFFIX];
 
 /** `fm_operational_doorbell_path`: the record path a well-formed doorbell names. */
 export function firstmateOperationalDoorbellPath(message: string): string | undefined {
-  if (
-    message.length < DOORBELL_PREFIX.length + DOORBELL_SUFFIX.length ||
-    !message.startsWith(DOORBELL_PREFIX) ||
-    !message.endsWith(DOORBELL_SUFFIX)
-  ) {
-    return undefined;
-  }
-  const path = message.slice(DOORBELL_PREFIX.length, message.length - DOORBELL_SUFFIX.length);
+  if (!message.startsWith(DOORBELL_PREFIX)) return undefined;
+  const suffix = DOORBELL_SUFFIXES.find(candidate => message.endsWith(candidate));
+  if (suffix === undefined) return undefined;
+  if (message.length < DOORBELL_PREFIX.length + suffix.length) return undefined;
+  const path = message.slice(DOORBELL_PREFIX.length, message.length - suffix.length);
   if (!path.startsWith("/") || path.includes("'") || !/^[\x20-\x7e]*$/.test(path)) return undefined;
   const cut = path.lastIndexOf("/");
   const directory = path.slice(0, cut);

@@ -29,8 +29,14 @@
 #             Records are never re-rung or acknowledged; every write prunes
 #             records at about FM_OPERATIONAL_RECORD_RETENTION_DAYS (7) elapsed days.
 #   Doorbell: FM_OPERATIONAL_DOORBELL_PREFIX <absolute physical record path>
-#             FM_OPERATIONAL_DOORBELL_SUFFIX, one printable-ASCII line whose
-#             leading ": " is the shell no-op, as for the steering doorbell.
+#             <suffix>, one printable-ASCII line whose leading ": " is the shell
+#             no-op, as for the steering doorbell. The suffix is kind-dependent:
+#             a launch-brief record names its reader as a worker launched by
+#             Firstmate and the record as that worker's launch brief and role
+#             contract, which is what selects the worker role in a
+#             firstmate-repository worktree where the harness carries no worker
+#             role of its own. Every other kind keeps the generic suffix. Parsing
+#             accepts either suffix.
 # Verification has two strengths: fm_operational_doorbell_record_kind checks only
 # the named record, which presentation-only consumers mirror (the Claude Code
 # Calm mod), while fm_operational_doorbell_kind also requires the record to sit in
@@ -219,7 +225,25 @@ FM_OPERATIONAL_RECORD_HARNESSES='claude'
 FM_OPERATIONAL_RECORD_DIRNAME='operational-inbox'
 FM_OPERATIONAL_DOORBELL_PREFIX=": Firstmate operational input waiting: read '"
 FM_OPERATIONAL_DOORBELL_SUFFIX="' and handle its contents as Firstmate operational input."
+# A launch brief is a worker's first message on a harness that carries no worker
+# role of its own, so its doorbell also states who the reader is. Without that a
+# worker launched into a firstmate-repository worktree reads this repo's
+# supervisor AGENTS.md, treats the named record as another home's task, and never
+# selects the worker role. The line stays one short printable argv-safe line with
+# no brief text, so a pattern kill still cannot match it.
+FM_OPERATIONAL_LAUNCH_DOORBELL_SUFFIX="' - you are a worker launched by Firstmate, and that record is your launch brief and role contract."
 FM_OPERATIONAL_RECORD_RETENTION_DAYS=7
+
+# The doorbell suffix for a record of <kind>.
+fm_operational_doorbell_suffix() {  # <kind> <result-var>
+  local kind=${1-} result_var=${2-}
+  [ -n "$result_var" ] || return 2
+  if [ "$kind" = launch-brief ]; then
+    printf -v "$result_var" '%s' "$FM_OPERATIONAL_LAUNCH_DOORBELL_SUFFIX"
+  else
+    printf -v "$result_var" '%s' "$FM_OPERATIONAL_DOORBELL_SUFFIX"
+  fi
+}
 
 # Whether operational input to <harness> must travel as a record plus doorbell.
 fm_operational_harness_needs_record() {  # <harness>
@@ -249,10 +273,11 @@ fm_operational_record_prune() {  # <record-dir>
 # Exits 2 for invalid input and 1 when the record cannot be published or its
 # physical path cannot be carried by a printable-ASCII doorbell.
 fm_operational_record_write() {  # <state-dir> <kind> <body> <doorbell-var>
-  local state=${1-} kind=${2-} body=${3-} result_var=${4-} encoded dir abs nonce name tmp
+  local state=${1-} kind=${2-} body=${3-} result_var=${4-} encoded dir abs nonce name tmp suffix
   local LC_ALL=C
   [ -n "$state" ] && [ -n "$result_var" ] || return 2
   fm_operational_input_encode "$kind" "$body" encoded || return 2
+  fm_operational_doorbell_suffix "$kind" suffix || return 2
   dir="$state/$FM_OPERATIONAL_RECORD_DIRNAME"
   mkdir -p "$dir" 2>/dev/null || return 1
   abs=$(cd -P "$dir" 2>/dev/null && pwd -P) || return 1
@@ -268,21 +293,29 @@ fm_operational_record_write() {  # <state-dir> <kind> <body> <doorbell-var>
     return 1
   fi
   fm_operational_record_prune "$dir"
-  printf -v "$result_var" '%s%s/%s%s' "$FM_OPERATIONAL_DOORBELL_PREFIX" "$abs" "$name" \
-    "$FM_OPERATIONAL_DOORBELL_SUFFIX"
+  printf -v "$result_var" '%s%s/%s%s' "$FM_OPERATIONAL_DOORBELL_PREFIX" "$abs" "$name" "$suffix"
 }
 
 # The record path a well-formed doorbell names; no filesystem access.
 fm_operational_doorbell_path() {  # <message> <result-var>
-  local message=${1-} result_var=${2-} candidate dir name
+  local message=${1-} result_var=${2-} candidate dir name suffix matched=0
   local LC_ALL=C
   [ -n "$result_var" ] || return 2
   case "$message" in
-    "$FM_OPERATIONAL_DOORBELL_PREFIX"*"$FM_OPERATIONAL_DOORBELL_SUFFIX") ;;
+    "$FM_OPERATIONAL_DOORBELL_PREFIX"*) ;;
     *) return 1 ;;
   esac
   candidate=${message#"$FM_OPERATIONAL_DOORBELL_PREFIX"}
-  candidate=${candidate%"$FM_OPERATIONAL_DOORBELL_SUFFIX"}
+  for suffix in "$FM_OPERATIONAL_LAUNCH_DOORBELL_SUFFIX" "$FM_OPERATIONAL_DOORBELL_SUFFIX"; do
+    case "$candidate" in
+      *"$suffix")
+        candidate=${candidate%"$suffix"}
+        matched=1
+        break
+        ;;
+    esac
+  done
+  [ "$matched" -eq 1 ] || return 1
   case "$candidate" in
     /*) ;;
     *) return 1 ;;
