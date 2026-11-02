@@ -298,7 +298,7 @@ pass "worker readiness follows current crew state and the recorded accessible ga
 # treehouse: a worker pool must land inside the lab, never in ~/.treehouse.
 mkdir "$HOME/.treehouse/notes-leaked"
 run_check "$C"
-assert_contains "$CHECK_OUT" "fail treehouse: new ~/.treehouse entries: notes-leaked" "treehouse names the leaked pool"
+assert_contains "$CHECK_OUT" "fail treehouse: new $HOME/.treehouse entries: notes-leaked" "treehouse names the leaked pool"
 rmdir "$HOME/.treehouse/notes-leaked"
 LATER_HOME="$TMP_ROOT/later-home"
 mkdir -p "$LATER_HOME"
@@ -611,6 +611,32 @@ out=$($LIVE_LAB down "$PARTIAL" 2>&1)
 expect_code 0 "$?" "down cleans a lab whose checkout failed: $out"
 assert_absent "$PARTIAL" "partial lab removed"
 pass "up gives both task IDs a long nonce and down cleans partial setup"
+
+# The leak check follows the operator's configured Treehouse root, because a
+# configured root moves every operator pool out of ~/.treehouse: the user config's
+# absolute root, overridden by an ambient TREEHOUSE_ROOT.
+CFG_ROOT="$TMP_ROOT/cfg-root" ENV_ROOT="$TMP_ROOT/env-root"
+mkdir -p "$HOME/.config/treehouse" "$CFG_ROOT/.treehouse/existing-pool" "$ENV_ROOT/.treehouse"
+printf 'max_trees = 4\nroot = "%s"\n' "$CFG_ROOT" > "$HOME/.config/treehouse/config.toml"
+CFGLAB="$TMP_ROOT/cfg-lab"
+out=$(PATH="$TMP_ROOT/stub-bin:$PATH" "$LIVE_LAB" up --harness claude --source "$TMP_ROOT/missing-origin" "$CFGLAB" 2>&1)
+expect_code 1 "$?" "an unavailable source stops the configured-root lab before launch"
+assert_equals "$CFG_ROOT/.treehouse" "$(sed -n 's/^treehouse_dir=//p' "$CFGLAB/.fm-live-lab")" "up records the configured root's pool directory"
+mkdir "$CFG_ROOT/.treehouse/notes-leaked" "$HOME/.treehouse/home-only"
+out=$("$LIVE_LAB" down "$CFGLAB" 2>&1)
+expect_code 1 "$?" "down reports a pool leaked into the configured root: $out"
+assert_contains "$out" "warning: $CFG_ROOT/.treehouse gained entries during the lab; left as is: notes-leaked" "down names the leaked pool under the configured root"
+assert_not_contains "$out" "home-only" "down no longer watches ~/.treehouse once a root is configured"
+assert_absent "$CFGLAB" "configured-root lab removed"
+rmdir "$CFG_ROOT/.treehouse/notes-leaked" "$HOME/.treehouse/home-only"
+ENVLAB="$TMP_ROOT/env-lab"
+out=$(TREEHOUSE_ROOT="$ENV_ROOT" PATH="$TMP_ROOT/stub-bin:$PATH" "$LIVE_LAB" up --harness claude --source "$TMP_ROOT/missing-origin" "$ENVLAB" 2>&1)
+expect_code 1 "$?" "an unavailable source stops the env-root lab before launch"
+assert_equals "$ENV_ROOT/.treehouse" "$(sed -n 's/^treehouse_dir=//p' "$ENVLAB/.fm-live-lab")" "an ambient TREEHOUSE_ROOT overrides the configured root"
+out=$("$LIVE_LAB" down "$ENVLAB" 2>&1)
+expect_code 0 "$?" "down cleans the env-root lab: $out"
+rm "$HOME/.config/treehouse/config.toml"
+pass "the leak check follows the operator's configured Treehouse root"
 
 # A rival Claude writer drops the newly registered primary key once. The
 # stand-in primary checks the store on startup, while the readiness probe fails.
