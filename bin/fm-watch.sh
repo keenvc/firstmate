@@ -3060,8 +3060,8 @@ scan_signals() {
     [ -n "$sig" ] || continue
     sf=$(fm_wake_signal_seen_path "$STATE" "$f")
     case "$f" in
-      *.status) fm_wake_signal_seen_current "$STATE" "$f" && continue ;;
-      *) [ "$sig" = "$(cat "$sf" 2>/dev/null)" ] && continue ;;
+      *.status) fm_wake_signal_seen_current "$STATE" "$f" "$sig" && continue ;;
+      *) _fm_read_small_file_to _fm_sf_val "$sf" && [ "$sig" = "$_fm_sf_val" ] && continue ;;
     esac
     printf '%s\t%s\t%s\n' "$sf" "$sig" "$f"
   done

@@ -100,6 +100,15 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+# 2026-11-05: allow a captain-private override without editing this file.
+# The flat 300s default declared supervision off during healthy 5-minute
+# cycles under load (nine tasks in flight), eight times in one evening,
+# while the watchdog's own line is 600s. FM_GUARD_GRACE still wins; the
+# config file only fills the gap when the environment sets nothing.
+if [ -z "${FM_GUARD_GRACE:-}" ] && [ -r "$CONFIG/turnend-guard.env" ]; then
+  # shellcheck source=/dev/null
+  . "$CONFIG/turnend-guard.env"
+fi
 GRACE=${FM_GUARD_GRACE:-300}
 WATCH="$SCRIPT_DIR/fm-watch.sh"
 CLAUDE_MODE=0

@@ -70,6 +70,9 @@ case $- in *u*) _fm_classify_nounset=on ;; *) _fm_classify_nounset=off ;; esac
 # shellcheck source=bin/fm-timeout-lib.sh
 # shellcheck disable=SC1091
 . "$_FM_CLASSIFY_LIB_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-path-lib.sh
+# shellcheck disable=SC1091
+. "$_FM_CLASSIFY_LIB_DIR/fm-path-lib.sh"
 [ "$_fm_classify_nounset" = on ] || set +u
 unset _fm_classify_nounset
 
@@ -903,21 +906,236 @@ _fm_decision_fold_line() {  # <open-set> <status-line> <resolve-verb> <held-verb
 # before any read - a cheap builtin, unlike fm_wake_latest_event's O_NOFOLLOW
 # subprocess read, which exists for that function's much narrower payload-driven
 # path resolution rather than this directory-local glob.
+# Shared single-pass Perl implementation of the _fm_decision_fold_line stream rule.
+# Reads the initial open-set from $FM_FOLD_OPEN_INIT (when present) and folds
+# status lines from <status-file>, preserving 100% byte-for-byte conformance
+# with _fm_decision_fold_line (including timed=timed and trailing newline when
+# non-empty).
+_fm_decision_fold_stream_perl() {  # <status-file> <kind> <resolve> <held> <prefixes> [<timed>] [<initial-open>]
+  FM_FOLD_OPEN_INIT=${7:-} LC_ALL=C perl -e '
+    use strict;
+    use warnings;
+    my ($file, $kind, $resolve, $held, $prefixes_str, $timed) = @ARGV;
+    $timed //= "";
+    my @prefixes = split(" ", $prefixes_str);
+    my @order;
+    my %val;
+    if (defined $ENV{FM_FOLD_OPEN_INIT} && $ENV{FM_FOLD_OPEN_INIT} ne "") {
+      for my $row (split(/\n/, $ENV{FM_FOLD_OPEN_INIT})) {
+        next if $row eq "";
+        my $t = index($row, "\t");
+        next if $t < 0;
+        my $k = substr($row, 0, $t);
+        if (!exists $val{$k}) {
+          push @order, $k;
+        }
+        $val{$k} = $row;
+      }
+    }
+    open(my $fh, "<", $file) or do {
+      print join("\n", map { $val{$_} } @order);
+      exit 0;
+    };
+
+    sub unstamped {
+      my ($line) = @_;
+      return $line if index($line, "[at=") < 0;
+      my $keep = "";
+      my $rest = $line;
+      while ($rest =~ /\[at=.*\]/s) {
+        my $idx = index($rest, "[at=");
+        last if $idx < 0;
+        my $before = substr($rest, 0, $idx);
+        last if index($before, ":") >= 0;
+        $before =~ s/ \z//;
+        $keep .= $before;
+        my $after_at = substr($rest, $idx + 4);
+        my $rbr = index($after_at, "]");
+        last if $rbr < 0;
+        $rest = substr($after_at, $rbr + 1);
+      }
+      return $keep . $rest;
+    }
+
+    sub at_epoch {
+      my ($line) = @_;
+      my $c = index($line, ":");
+      return (0, "") if $c < 0;
+      my $head = substr($line, 0, $c);
+      return (0, "") unless $head =~ /\[at=.*\]/s;
+      my $idx = index($head, "[at=");
+      return (0, "") if $idx < 0;
+      my $rest = substr($head, $idx + 4);
+      my $rbr = index($rest, "]");
+      return (0, "") if $rbr < 0;
+      my $val_str = substr($rest, 0, $rbr);
+      my $after = substr($rest, $rbr + 1);
+      return (0, "") if index($after, "[at=") >= 0;
+      return (0, "") if $val_str eq "" || $val_str =~ /[^0-9]/ || $val_str =~ /\A0[0-9]/;
+      return (0, "") if length($val_str) > 12;
+      return (1, $val_str);
+    }
+
+    sub is_corr_token {
+      my ($w) = @_;
+      return $w =~ /\Acorr=[0-9A-Fa-f]{16}\z/ ? 1 : 0;
+    }
+
+    sub line_verb {
+      my ($line) = @_;
+      my $c = index($line, ":");
+      my $v = $c >= 0 ? substr($line, 0, $c) : $line;
+      my $b = index($v, "[");
+      $v = substr($v, 0, $b) if $b >= 0;
+      $v =~ s/\A[ \t\r\n\f\v]+//;
+      $v =~ s/[ \t\r\n\f\v]+\z//;
+      if (index($v, "corr=") >= 0) {
+        my @words = split(/[ \t\r\n\f\v]+/, $v);
+        if (@words) {
+          my $out = shift @words;
+          for my $w (@words) {
+            next if is_corr_token($w);
+            $out .= " $w";
+          }
+          return $out;
+        }
+        return "";
+      }
+      return $v;
+    }
+
+    sub key_before_colon {
+      my ($u) = @_;
+      my $c = index($u, ":");
+      my $head = $c >= 0 ? substr($u, 0, $c) : $u;
+      return ($head =~ /\[key=.*\]/s) ? 1 : 0;
+    }
+
+    sub key_at_note_head {
+      my ($u) = @_;
+      my $c = index($u, ":");
+      return (0, "") if $c < 0;
+      my $rest = substr($u, $c + 1);
+      $rest =~ s/\A[ \t\r\n\f\v]+//;
+      if ($rest =~ /\A\[key=.*\]/s) {
+        $rest = substr($rest, 5);
+        my $rbr = index($rest, "]");
+        return (1, substr($rest, 0, $rbr));
+      }
+      return (0, "");
+    }
+
+    sub slug_ok {
+      my ($s) = @_;
+      return ($s ne "" && $s !~ /[^A-Za-z0-9._-]/) ? 1 : 0;
+    }
+
+    sub line_note {
+      my ($u) = @_;
+      my $c = index($u, ":");
+      return $u if $c < 0;
+      my $n = substr($u, $c + 1);
+      $n =~ s/\A[ \t\r\n\f\v]+//;
+      if (!key_before_colon($u)) {
+        my ($ok, $k) = key_at_note_head($u);
+        if ($ok && slug_ok($k)) {
+          my $pat = "[key=$k]";
+          if (substr($n, 0, length($pat)) eq $pat) {
+            $n = substr($n, length($pat));
+            $n =~ s/\A[ \t\r\n\f\v]+//;
+          }
+        }
+      }
+      return $n;
+    }
+
+    sub decision_key {
+      my ($u, $keyless_default) = @_;
+      $keyless_default //= "default";
+      my $k;
+      if (key_before_colon($u)) {
+        my $c = index($u, ":");
+        my $head = $c >= 0 ? substr($u, 0, $c) : $u;
+        my $idx = index($head, "[key=");
+        my $after = substr($head, $idx + 5);
+        my $rbr = index($after, "]");
+        $k = substr($after, 0, $rbr);
+      } else {
+        my ($ok, $nh) = key_at_note_head($u);
+        if (!$ok) {
+          return (1, $keyless_default);
+        }
+        $k = $nh;
+      }
+      return slug_ok($k) ? (1, $k) : (0, "");
+    }
+
+    sub transition_allowed {
+      my ($k, $n) = @_;
+      for my $p (@prefixes) {
+        if (substr($k, 0, length($p)) eq $p) {
+          my $rest = substr($n, length($p));
+          return (substr($n, 0, length($p)) eq $p && index($rest, ":") >= 0) ? 1 : 0;
+        }
+      }
+      return 1;
+    }
+
+    sub drop_key {
+      my ($k) = @_;
+      if (exists $val{$k}) {
+        delete $val{$k};
+        @order = grep { $_ ne $k } @order;
+      }
+    }
+
+    while (my $line = <$fh>) {
+      $line =~ s/\n\z//;
+      my $u = unstamped($line);
+      next unless (index($u, ":") >= 0 || $u =~ /\[key=.*\]/s);
+      my $v = line_verb($line);
+      if (index($u, ":") >= 0) {
+        my $vk = "$v:$kind";
+        if ($vk eq "done:ship" || $vk eq "done:scout" || $vk eq "failed:ship" || $vk eq "failed:scout") {
+          @order = ();
+          %val = ();
+          next;
+        }
+      }
+      next unless ($v eq "needs-decision" || $v eq "blocked" || $v eq $resolve || $v eq $held);
+      my ($ok, $k) = decision_key($u, "default");
+      next unless $ok;
+      my $n = line_note($u);
+      next unless transition_allowed($k, $n);
+      if ($v eq "needs-decision" || $v eq "blocked") {
+        if ($timed eq "timed") {
+          my $ep = "unknown";
+          my ($kok, $k_explicit) = decision_key($u, "");
+          if ($kok && $k_explicit ne "") {
+            my ($eok, $eval) = at_epoch($line);
+            $ep = $eval if $eok;
+          }
+          $n = "$ep\t$n";
+        }
+        drop_key($k);
+        push @order, $k;
+        $val{$k} = "$k\t$v\t$n";
+      } elsif ($v eq $resolve || $v eq $held) {
+        drop_key($k);
+      }
+    }
+    print join("\n", map { $val{$_} } @order);
+  ' "$1" "$2" "$3" "$4" "$5" "${6:-}"
+}
+
 status_open_decisions() {  # <status-file> [<kind>]
-  local f=$1 kind=${2:-} line resolve held open='' verb
+  local f=$1 kind=${2:-} resolve held prefixes
   [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 0
   kind=$(_fm_status_kind "$f" "$kind")
   resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
   held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
-  while IFS= read -r line || [ -n "$line" ]; do
-    status_line_verb "$line" verb
-    case "$verb" in
-      needs-decision|blocked|done|failed|"$resolve"|"$held")
-        open=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held" "$kind")
-        ;;
-    esac
-  done < "$f"
-  printf '%s' "$open"
+  prefixes=${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}
+  _fm_decision_fold_stream_perl "$f" "$kind" "$resolve" "$held" "$prefixes"
 }
 
 # Resolve the log's current declaration at one boundary for crew-state consumers.
@@ -1208,8 +1426,8 @@ EOF
 # re-derives from whatever offset actually landed on disk.
 _fm_open_decisions_cursor_path() {  # <status-file>
   local f=$1 dir base
-  dir=$(dirname "$f")
-  base=$(basename "$f")
+  fm_dirname_to dir "$f"
+  fm_basename_to base "$f"
   printf '%s/.%s.open-decisions-cursor' "$dir" "${base%.status}"
 }
 
@@ -1427,9 +1645,7 @@ status_open_decisions_incremental() {  # <status-file> [<captured-end-offset>] [
       && printf '%s\t%s\n' "$f" "$chunk_size" >> "$FM_OPEN_DECISIONS_READ_PROBE"
     resolve=${FM_CLASSIFY_RESOLVE_VERB:-$FM_CLASSIFY_RESOLVE_VERB_DEFAULT}
     held=${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}
-    while IFS= read -r line || [ -n "$line" ]; do
-      open=$(_fm_decision_fold_line "$open" "$line" "$resolve" "$held" "$kind" "$timed")
-    done < "$chunk_file"
+    open=$(_fm_decision_fold_stream_perl "$chunk_file" "$kind" "$resolve" "$held" "${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT}" "$timed" "$open")
     rm -f "$chunk_file"
     offset=$size
     cursor_dirty=1
@@ -1478,10 +1694,10 @@ status_presentation_snapshot() {  # <state>
     [ -e "$f" ] || continue
     [ "$f" = "$exclude" ] && continue
     [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || continue
-    task=$(basename "$f"); task="${task%.status}"
-    size=$(_fm_status_file_size "$f") || return 1
-    size=${size//[[:space:]]/}
-    ident=$(_fm_open_decisions_file_ident "$f") || return 1
+    fm_basename_to task "$f"; task="${task%.status}"
+    _fm_status_read_ident_size "$f" || return 1
+    size=${_FM_STAT_SIZE//[[:space:]]/}
+    ident=$_FM_STAT_IDENTITY
     case "$size" in ''|*[!0-9]*) return 1 ;; esac
     [ -n "$ident" ] || return 1
     printf '%s\t%s\t%s\n' "$task" "$size" "$ident" || return 1
@@ -1699,6 +1915,32 @@ _status_observed_path_state() {
   fi
 }
 
+_fm_hex_encode_nul6() {  # <out-var> <s1> <s2> <s3> <s4> <s5> <s6>
+  local out_var=$1 s i j len c ord hex='' tmp
+  shift
+  local LC_ALL=C
+  for ((j=1; j<=6; j++)); do
+    s=${!j}
+    len=${#s}
+    for ((i=0; i<len; i++)); do
+      c=${s:i:1}
+      printf -v ord '%d' "'$c"
+      printf -v tmp '%02x' "$ord"
+      hex+="$tmp"
+    done
+    [ "$j" -lt 6 ] && hex+="00"
+  done
+  printf -v "$out_var" '%s' "$hex"
+}
+
+_fm_read_small_file_to() {  # <out-var> <path>
+  local _fm_raw=''
+  [ -r "$2" ] && [ ! -d "$2" ] || return 1
+  IFS= read -r -d '' _fm_raw < "$2" 2>/dev/null || true
+  while [ "${_fm_raw%$'\n'}" != "$_fm_raw" ]; do _fm_raw=${_fm_raw%$'\n'}; done
+  printf -v "$1" '%s' "$_fm_raw"
+}
+
 status_observed_signature() {
   local f=$1 size=${2-} ident=${3-} path_state link_target=- access kind encoded
   path_state=$(_status_observed_path_state "$f") || path_state=stat-error
@@ -1714,37 +1956,53 @@ status_observed_signature() {
   else
     kind=unreadable
   fi
-  if [ -z "$size" ]; then
-    size=$(_fm_status_file_size "$f") || size='size-error'
-    size=${size//[[:space:]]/}
-    case "$size" in ''|*[!0-9]*) size='size-error' ;; esac
-  fi
-  if [ -z "$ident" ]; then
-    ident=$(_fm_open_decisions_file_ident "$f") || ident=identity-error
-    [ -n "$ident" ] || ident=identity-error
+  if [ -z "$size" ] && [ -z "$ident" ]; then
+    if _fm_status_read_ident_size "$f"; then
+      size=${_FM_STAT_SIZE//[[:space:]]/}
+      case "$size" in ''|*[!0-9]*) size='size-error' ;; esac
+      ident=$_FM_STAT_IDENTITY
+      [ -n "$ident" ] || ident=identity-error
+    else
+      size=$(_fm_status_file_size "$f") || size='size-error'
+      size=${size//[[:space:]]/}
+      case "$size" in ''|*[!0-9]*) size='size-error' ;; esac
+      ident=$(_fm_open_decisions_file_ident "$f") || ident=identity-error
+      [ -n "$ident" ] || ident=identity-error
+    fi
+  else
+    if [ -z "$size" ]; then
+      size=$(_fm_status_file_size "$f") || size='size-error'
+      size=${size//[[:space:]]/}
+      case "$size" in ''|*[!0-9]*) size='size-error' ;; esac
+    fi
+    if [ -z "$ident" ]; then
+      ident=$(_fm_open_decisions_file_ident "$f") || ident=identity-error
+      [ -n "$ident" ] || ident=identity-error
+    fi
   fi
   if [ -r "$f" ]; then access=readable; else access=unreadable; fi
-  encoded=$(printf '%s\0%s\0%s\0%s\0%s\0%s' \
-    "$size" "$ident" "$path_state" "$link_target" "$access" "$kind" \
-    | LC_ALL=C od -An -v -tx1 | tr -d ' \n') || return 1
+  _fm_hex_encode_nul6 encoded "$size" "$ident" "$path_state" "$link_target" "$access" "$kind"
+  [ -n "$encoded" ] || return 1
   printf 'r1:%s' "$encoded"
 }
 
 status_presentation_marker_reported_matches() {
   local raw
-  raw=$(cat "$1" 2>/dev/null) || return 1
+  _fm_read_small_file_to raw "$1" || return 1
   status_presentation_marker_parse "$raw" || return 1
   [ "$STATUS_PRESENTATION_REPORTED" = "$2" ]
 }
 
 status_presentation_marker_offset() {
-  local raw classified offset ident current
-  raw=$(cat "$1" 2>/dev/null) || { printf '0'; return 0; }
+  local raw classified offset ident current=${3:-}
+  _fm_read_small_file_to raw "$1" || { printf '0'; return 0; }
   status_presentation_marker_parse "$raw" || { printf '0'; return 0; }
   classified=$STATUS_PRESENTATION_CLASSIFIED
   [ "$classified" != - ] || { printf '0'; return 0; }
   offset=${classified%%@*}; ident=${classified#*@}
-  current=$(_fm_open_decisions_file_ident "$2") || { printf '0'; return 0; }
+  if [ -z "$current" ]; then
+    current=$(_fm_open_decisions_file_ident "$2") || { printf '0'; return 0; }
+  fi
   [ "$ident" = "$current" ] || { printf '0'; return 0; }
   printf '%s' "$offset"
 }
@@ -1752,7 +2010,7 @@ status_presentation_marker_offset() {
 status_presentation_marker_report() {
   local marker=$1 reported=$2 raw classified=-
   _status_presentation_signature_valid "$reported" || return 1
-  if raw=$(cat "$marker" 2>/dev/null) && status_presentation_marker_parse "$raw"; then
+  if _fm_read_small_file_to raw "$marker" && status_presentation_marker_parse "$raw"; then
     classified=$STATUS_PRESENTATION_CLASSIFIED
   fi
   printf 'v2\t%s\t%s' "$reported" "$classified" > "$marker"
@@ -2405,8 +2663,8 @@ window_to_task() {
 
 status_home_appends_path() {  # <status-file>
   local f=$1 dir base
-  dir=$(dirname "$f")
-  base=$(basename "$f")
+  fm_dirname_to dir "$f"
+  fm_basename_to base "$f"
   printf '%s/.%s.home-appends' "$dir" "${base%.status}"
 }
 

@@ -3003,9 +3003,11 @@ fm_wake_signal_seen_size() {  # <state> <file>
 # This predicate never consults the owned-append ledger, which is what makes it
 # the safe gate for a captain-facing surface: a line must never be withheld from
 # presentation merely because this home is the writer that appended it.
-fm_wake_signal_reported_current() {  # <state> <file>
-  local sig marker
-  sig=$(fm_wake_signal_sig "$2") || return 1
+fm_wake_signal_reported_current() {  # <state> <file> [<precomputed-sig>]
+  local sig=${3:-} marker mval
+  if [ -z "$sig" ]; then
+    sig=$(fm_wake_signal_sig "$2") || return 1
+  fi
   [ -n "$sig" ] || return 1
   marker=$(fm_wake_signal_seen_path "$1" "$2")
   case "$2" in
@@ -3013,7 +3015,10 @@ fm_wake_signal_reported_current() {  # <state> <file>
       _fm_wake_require_classify || return 1
       status_presentation_marker_reported_matches "$marker" "$sig"
       ;;
-    *) [ "$(cat "$marker" 2>/dev/null)" = "$sig" ] ;;
+    *)
+      _fm_wake_require_classify || return 1
+      _fm_read_small_file_to mval "$marker" && [ "$mval" = "$sig" ]
+      ;;
   esac
 }
 
@@ -3026,9 +3031,9 @@ fm_wake_signal_reported_current() {  # <state> <file>
 # This is the wake-scan predicate and answers only "should this wake the home?".
 # Presentation asks the different question and uses
 # fm_wake_signal_reported_current.
-fm_wake_signal_seen_current() {  # <state> <file>
+fm_wake_signal_seen_current() {  # <state> <file> [<precomputed-sig>]
   local classified size
-  fm_wake_signal_reported_current "$1" "$2" && return 0
+  fm_wake_signal_reported_current "$1" "$2" "${3:-}" && return 0
   case "$2" in *.status) ;; *) return 1 ;; esac
   _fm_wake_require_classify || return 1
   classified=$(fm_wake_signal_seen_size "$1" "$2")
@@ -3054,8 +3059,13 @@ fm_wake_status_seen_commit() {  # <state> <status-file> <captured-end> <captured
 fm_wake_status_mark_current() {  # <state> <status-file>
   local size ident
   _fm_wake_require_classify || return 1
-  size=$(_fm_status_file_size "$2") || return 1
-  ident=$(_fm_open_decisions_file_ident "$2") || return 1
+  if _fm_status_read_ident_size "$2"; then
+    size=$_FM_STAT_SIZE
+    ident=$_FM_STAT_IDENTITY
+  else
+    size=$(_fm_status_file_size "$2") || return 1
+    ident=$(_fm_open_decisions_file_ident "$2") || return 1
+  fi
   fm_wake_status_seen_commit "$1" "$2" "$size" "$ident"
 }
 

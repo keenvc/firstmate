@@ -222,8 +222,8 @@ jq_lib() { # jq options/program via final argument
 }
 
 read_saved() {
-  local file dir task
-  : > "$TMP/saved.jsonl"
+  local file dir task perl_errs=0 jq_errs=0
+  : > "$TMP/candidates.nul"
   ERRORS=0
   if [ -L "$DATA" ]; then
     ERRORS=1; printf '[]\n' > "$TMP/saved.json"; return 0
@@ -232,19 +232,80 @@ read_saved() {
     [ -e "$file" ] || [ -L "$file" ] || continue
     fm_dirname_to dir "$file"
     fm_basename_to task "$dir"
-    if [ -L "$file" ] || [ -L "$dir" ] || [ ! -f "$file" ] \
-      || [ "$(wc -c < "$file")" -gt 1048576 ] \
-      || ! jq_lib -ne --slurpfile record "$file" '($record | length) == 1 and ($record[0] | valid_record)' >/dev/null 2>&1; then
+    if [ -L "$file" ] || [ -L "$dir" ] || [ ! -f "$file" ]; then
       ERRORS=$((ERRORS + 1))
       continue
     fi
-    # A file's task identity must match its durable directory, not arbitrary JSON.
-    if ! jq -e --arg task "$task" '.task == $task' "$file" >/dev/null; then
-      ERRORS=$((ERRORS + 1)); continue
-    fi
-    jq -c . "$file" >> "$TMP/saved.jsonl"
+    printf '%s\0%s\0' "$task" "$file" >> "$TMP/candidates.nul"
   done
-  jq -s . "$TMP/saved.jsonl" > "$TMP/saved.json"
+  if [ ! -s "$TMP/candidates.nul" ]; then
+    printf '[]\n' > "$TMP/saved.json"
+    return 0
+  fi
+  perl_errs=$(perl -e '
+    use strict;
+    use warnings;
+    my ($in_path, $out_path) = @ARGV;
+    open(my $in, "<:raw", $in_path) or die $!;
+    local $/ = undef;
+    my $buf = <$in>;
+    close($in);
+    my @parts = split(/\0/, $buf, -1);
+    pop @parts if @parts && $parts[-1] eq "";
+    open(my $out, ">:raw", $out_path) or die $!;
+    my $errors = 0;
+    for (my $i = 0; $i < @parts; $i += 2) {
+      my ($task, $f) = ($parts[$i], $parts[$i+1]);
+      my @st = lstat($f);
+      if (!@st || -l _ || !-f _ || !-r _ || $st[7] > 1048576) {
+        $errors++;
+        next;
+      }
+      my $fh;
+      if (!open($fh, "<:raw", $f)) {
+        $errors++;
+        next;
+      }
+      my $raw = <$fh>;
+      close($fh);
+      if (!defined($raw) || index($raw, "\0") != -1) {
+        $errors++;
+        next;
+      }
+      my $copy = $raw;
+      if (!utf8::decode($copy)) {
+        $errors++;
+        next;
+      }
+      print $out $task, "\0", $raw, "\0";
+    }
+    close($out);
+    print $errors;
+  ' "$TMP/candidates.nul" "$TMP/raw_pairs.nul")
+  ERRORS=$((ERRORS + perl_errs))
+  if [ -s "$TMP/raw_pairs.nul" ]; then
+    {
+      IFS= read -r jq_errs
+      cat > "$TMP/saved.json"
+    } < <(jq_lib -Rnsr --rawfile blob "$TMP/raw_pairs.nul" '
+      ($blob | split("\u0000") | if (length > 0 and last == "") then .[:-1] else . end) as $parts
+      | reduce range(0; $parts | length; 2) as $i (
+          {valid: [], errors: 0};
+          ($parts[$i]) as $task
+          | ($parts[$i+1]) as $raw
+          | (try ($raw | fromjson) catch "__FM_INVALID__") as $rec
+          | if ($rec | type) == "object" and ($rec | valid_record) and $rec.task == $task then
+              .valid += [$rec]
+            else
+              .errors += 1
+            end
+        )
+      | (.errors | tostring), (.valid | @json)
+    ')
+    ERRORS=$((ERRORS + jq_errs))
+  else
+    printf '[]\n' > "$TMP/saved.json"
+  fi
 }
 
 get_input() {
@@ -589,22 +650,33 @@ poll() {
   [ "$ERRORS" -eq 0 ] || printf 'contributions: %s unreadable durable record(s)\n' "$ERRORS"
   clear_unsupported_errors
   # Only supported URLs enter final settlement and the forge-read rotation.
-  # One line per distinct URL: the URL, then every owning task.
+  # One line per distinct URL: bucket (settle|live), URL, then every owning task.
   jq_lib -nr --slurpfile input "$TMP/input.json" --slurpfile saved "$TMP/saved.json" '
     known($input[0];$saved[0]) | map(select(.url | supported_url))
     | group_by(.url) | map({url:.[0].url,tasks:(map(.task) | unique)})
-    | .[] | [.url] + .tasks | @tsv' > "$TMP/known.tsv"
+    | .[]
+    | .url as $url | .tasks as $tasks
+    | [$tasks[] as $t | [$saved[0][] | select(.task == $t) | .records[] | select(.url == $url)] | first] as $recs
+    | if any($recs[]; . != null and (.observation.state | IN("merged","closed"))) then
+        if any(range(0; $tasks | length) as $i |
+          ($tasks[$i] | test("^[A-Za-z0-9._-]{1,64}$") and (startswith(".") | not) | not)
+          or $recs[$i] == null
+          or (($recs[$i].observation.state | IN("merged","closed") | not) or $recs[$i].error != null); .) then
+          (["settle", $url] + $tasks | @tsv)
+        else
+          empty
+        end
+      else
+        (["live", $url] + $tasks | @tsv)
+      end' > "$TMP/known.tsv"
   : > "$TMP/live.tsv"
   while IFS=$'\t' read -r -a row; do
-    [ "${#row[@]}" -ge 2 ] || continue
-    url=${row[0]}
-    # A contribution with a final observation is not re-read for any owner.
-    if jq -ne --slurpfile saved "$TMP/saved.json" --arg url "$url" --args \
-      'any($ARGS.positional[] as $task | [$saved[0][] | select(.task == $task) | .records[] | select(.url == $url)] | first;
-        . != null and (.observation.state | IN("merged","closed")))' "${row[@]:1}" >/dev/null; then
-      settle_final "$url" "${row[@]:1}"
+    [ "${#row[@]}" -ge 3 ] || continue
+    url=${row[1]}
+    if [ "${row[0]}" = settle ]; then
+      settle_final "$url" "${row[@]:2}"
     else
-      (IFS=$'\t'; printf '%s\n' "${row[*]}") >> "$TMP/live.tsv"
+      (IFS=$'\t'; printf '%s\n' "${row[*]:1}") >> "$TMP/live.tsv"
     fi
   done < "$TMP/known.tsv"
   jq -Rnr --argjson bucket "$((EPOCH / 300))" '
