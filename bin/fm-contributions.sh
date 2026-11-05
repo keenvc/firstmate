@@ -23,7 +23,8 @@
 # task already has a record for that URL and fails when that record is
 # retired, so a retirement is never undone by rediscovery.
 # owned prints the supported PR URLs this home owns as a JSON array of
-# {url,tasks,final}, where final means a saved observation is merged or closed.
+# {url,tasks,recorded,final}, where recorded names the tasks holding a durable
+# record for the URL and final means a saved observation is merged or closed.
 # It is read-only and never contacts a forge.
 # Only canonical PR and issue URLs on the exact github.com host are supported;
 # other accepted URLs remain visibly unmeasured.
@@ -222,8 +223,8 @@ jq_lib() { # jq options/program via final argument
 }
 
 read_saved() {
-  local file dir task perl_errs=0 jq_errs=0
-  : > "$TMP/candidates.nul"
+  local file dir task
+  local -a files=() tasks=()
   ERRORS=0
   if [ -L "$DATA" ]; then
     ERRORS=1; printf '[]\n' > "$TMP/saved.json"; return 0
@@ -232,80 +233,37 @@ read_saved() {
     [ -e "$file" ] || [ -L "$file" ] || continue
     fm_dirname_to dir "$file"
     fm_basename_to task "$dir"
-    if [ -L "$file" ] || [ -L "$dir" ] || [ ! -f "$file" ]; then
+    if [ -L "$file" ] || [ -L "$dir" ] || [ ! -f "$file" ] || [ "$(wc -c < "$file")" -gt 1048576 ]; then
       ERRORS=$((ERRORS + 1))
       continue
     fi
-    printf '%s\0%s\0' "$task" "$file" >> "$TMP/candidates.nul"
+    files+=("$file"); tasks+=("$task")
   done
-  if [ ! -s "$TMP/candidates.nul" ]; then
-    printf '[]\n' > "$TMP/saved.json"
-    return 0
-  fi
-  perl_errs=$(perl -e '
-    use strict;
-    use warnings;
-    my ($in_path, $out_path) = @ARGV;
-    open(my $in, "<:raw", $in_path) or die $!;
-    local $/ = undef;
-    my $buf = <$in>;
-    close($in);
-    my @parts = split(/\0/, $buf, -1);
-    pop @parts if @parts && $parts[-1] eq "";
-    open(my $out, ">:raw", $out_path) or die $!;
-    my $errors = 0;
-    for (my $i = 0; $i < @parts; $i += 2) {
-      my ($task, $f) = ($parts[$i], $parts[$i+1]);
-      my @st = lstat($f);
-      if (!@st || -l _ || !-f _ || !-r _ || $st[7] > 1048576) {
-        $errors++;
-        next;
-      }
-      my $fh;
-      if (!open($fh, "<:raw", $f)) {
-        $errors++;
-        next;
-      }
-      my $raw = <$fh>;
-      close($fh);
-      if (!defined($raw) || index($raw, "\0") != -1) {
-        $errors++;
-        next;
-      }
-      my $copy = $raw;
-      if (!utf8::decode($copy)) {
-        $errors++;
-        next;
-      }
-      print $out $task, "\0", $raw, "\0";
-    }
-    close($out);
-    print $errors;
-  ' "$TMP/candidates.nul" "$TMP/raw_pairs.nul")
-  ERRORS=$((ERRORS + perl_errs))
-  if [ -s "$TMP/raw_pairs.nul" ]; then
-    {
-      IFS= read -r jq_errs
-      cat > "$TMP/saved.json"
-    } < <(jq_lib -Rnsr --rawfile blob "$TMP/raw_pairs.nul" '
-      ($blob | split("\u0000") | if (length > 0 and last == "") then .[:-1] else . end) as $parts
-      | reduce range(0; $parts | length; 2) as $i (
-          {valid: [], errors: 0};
-          ($parts[$i]) as $task
-          | ($parts[$i+1]) as $raw
-          | (try ($raw | fromjson) catch "__FM_INVALID__") as $rec
-          | if ($rec | type) == "object" and ($rec | valid_record) and $rec.task == $task then
-              .valid += [$rec]
-            else
-              .errors += 1
-            end
-        )
-      | (.errors | tostring), (.valid | @json)
-    ')
-    ERRORS=$((ERRORS + jq_errs))
-  else
-    printf '[]\n' > "$TMP/saved.json"
-  fi
+  # Validate records in bounded jq batches: one process per file outgrows the
+  # watcher's check timeout, and one process for all files outgrows ARG_MAX.
+  [ "${#files[@]}" -gt 0 ] || { printf '[]\n' > "$TMP/saved.json"; return 0; }
+  local batch=100 start n=0
+  local -a args=() part=()
+  for ((start = 0; start < ${#files[@]}; start += batch)); do
+    part=("${tasks[@]:start:batch}")
+    printf '%s\0' "${part[@]}" | jq -Rs 'split("\u0000")[:-1]' > "$TMP/tasks.json"
+    args=()
+    for i in "${!part[@]}"; do args+=(--rawfile "rec$i" "${files[start + i]}"); done
+    jq -L "$SCRIPT_DIR" -n --slurpfile tasks "$TMP/tasks.json" "${args[@]}" 'include "fm-contributions";
+      [range(0; $tasks[0] | length) as $i
+        | [try ($ARGS.named["rec\($i)"] | fromjson) catch empty] as $parsed
+        | if ($parsed | length) == 1
+            and (try ($parsed[0] | valid_record) catch false)
+            and $parsed[0].task == $tasks[0][$i]
+          then $parsed[0] else null end] as $checked
+      | {records: [$checked[] | select(. != null)], errors: ($checked | map(select(. == null)) | length)}' \
+      > "$TMP/checked.$n.json"
+    n=$((n + 1))
+  done
+  jq -s '{records: (map(.records) | add), errors: (map(.errors) | add)}' "$TMP"/checked.*.json > "$TMP/checked.json"
+  rm -f "$TMP"/checked.[0-9]*.json
+  ERRORS=$((ERRORS + $(jq '.errors' "$TMP/checked.json")))
+  jq '.records' "$TMP/checked.json" > "$TMP/saved.json"
 }
 
 get_input() {
@@ -650,34 +608,25 @@ poll() {
   [ "$ERRORS" -eq 0 ] || printf 'contributions: %s unreadable durable record(s)\n' "$ERRORS"
   clear_unsupported_errors
   # Only supported URLs enter final settlement and the forge-read rotation.
-  # One line per distinct URL: bucket (settle|live), URL, then every owning task.
+  # One line per distinct URL: its settlement, the URL, then every owning task.
+  # A contribution with a final observation is not re-read for any owner; it
+  # is settled once every owner holds that final observation without an error.
   jq_lib -nr --slurpfile input "$TMP/input.json" --slurpfile saved "$TMP/saved.json" '
     known($input[0];$saved[0]) | map(select(.url | supported_url))
     | group_by(.url) | map({url:.[0].url,tasks:(map(.task) | unique)})
-    | .[]
-    | .url as $url | .tasks as $tasks
-    | [$tasks[] as $t | [$saved[0][] | select(.task == $t) | .records[] | select(.url == $url)] | first] as $recs
-    | if any($recs[]; . != null and (.observation.state | IN("merged","closed"))) then
-        if any(range(0; $tasks | length) as $i |
-          ($tasks[$i] | test("^[A-Za-z0-9._-]{1,64}$") and (startswith(".") | not) | not)
-          or $recs[$i] == null
-          or (($recs[$i].observation.state | IN("merged","closed") | not) or $recs[$i].error != null); .) then
-          (["settle", $url] + $tasks | @tsv)
-        else
-          empty
-        end
-      else
-        (["live", $url] + $tasks | @tsv)
-      end' > "$TMP/known.tsv"
+    | .[] | . as $known
+    | [$known.tasks[] as $task | [$saved[0][] | select(.task == $task) | .records[] | select(.url == $known.url)] | first
+      | if . != null and (.observation.state | IN("merged","closed")) then .error == null else null end] as $final
+    | [(if all($final[]; .) then "settled" elif any($final[]; . != null) then "final" else "live" end), $known.url]
+      + $known.tasks | @tsv' > "$TMP/known.tsv"
   : > "$TMP/live.tsv"
   while IFS=$'\t' read -r -a row; do
     [ "${#row[@]}" -ge 3 ] || continue
-    url=${row[1]}
-    if [ "${row[0]}" = settle ]; then
-      settle_final "$url" "${row[@]:2}"
-    else
-      (IFS=$'\t'; printf '%s\n' "${row[*]:1}") >> "$TMP/live.tsv"
-    fi
+    case "${row[0]}" in
+      settled) ;;
+      final) settle_final "${row[@]:1}" ;;
+      *) (IFS=$'\t'; printf '%s\n' "${row[*]:1}") >> "$TMP/live.tsv" ;;
+    esac
   done < "$TMP/known.tsv"
   jq -Rnr --argjson bucket "$((EPOCH / 300))" '
     [inputs] | if length == 0 then . else ($bucket % length) as $offset | .[$offset:] + .[:$offset] end
@@ -785,7 +734,8 @@ case "${1:-}" in
     jq_lib -n --slurpfile input "$TMP/input.json" --slurpfile saved "$TMP/saved.json" '
       [$saved[0][] | .records[] | select(.error == null and (.observation.state | IN("merged","closed"))) | .url] as $final
       | known($input[0];$saved[0]) | map(select((.url | supported_url) and (.url | contains("/pull/"))))
-      | group_by(.url) | map({url:.[0].url,tasks:(map(.task) | unique),final:(.[0].url | IN($final[]))})'
+      | group_by(.url) | map(.[0].url as $url | {url:$url,tasks:(map(.task) | unique),
+        recorded:([$saved[0][] | select(any(.records[]; .url == $url)) | .task] | unique),final:($url | IN($final[]))})'
     ;;
   enroll)
     [ "$#" -eq 3 ] || fail 'enroll needs a task and a PR URL'
