@@ -190,7 +190,7 @@ fm_quota_provider_for_harness() {
     # disclosed uncertainty, not a refusal: the agent-driven quota-array-dispatch
     # procedure keeps an unmodeled candidate eligible, while this helper's
     # known-positive-only rule skips it rather than dying on an unknown harness.
-    cline)        printf 'clinepass\n' ;;
+    cline)        printf 'cline-pass\n' ;;
     *)            return 1 ;;
   esac
 }
