@@ -1844,6 +1844,7 @@ make_arm_decision_fixture() {  # <name>
   git init -q -b main "$repo"
   : > "$repo/AGENTS.md"
   cp "$ROOT/bin/fm-supervision-lib.sh" "$repo/bin/fm-supervision-lib.sh"
+  cp "$ROOT/bin/fm-primary-scope-lib.sh" "$repo/bin/fm-primary-scope-lib.sh"
   cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
 printf 'arm\n' >> "${FM_ARM_LOG:?}"
@@ -1957,6 +1958,81 @@ EOF
   pass "watch-arm: the OpenCode arm plugin decides with the shared supervision predicate"
 }
 
+test_opencode_arm_plugin_arms_a_secondmate_home() {
+  command -v node >/dev/null 2>&1 || { printf 'skip: node not found\n'; return 0; }
+  local driver case_name dir repo out status expect
+  driver="$TMP_ROOT/arm-scope-driver.mjs"
+  cat > "$driver" <<'EOF'
+import { existsSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const state = `${process.env.FM_HOME}/state`;
+const armLog = process.env.FM_ARM_LOG;
+const expectArm = process.env.EXPECT_ARM === "1";
+
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+const client = { session: { promptAsync: async () => {} } };
+await mod.FmPrimaryWatchArm({ client, directory: process.env.WORKTREE, worktree: process.env.WORKTREE });
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const status = await globalThis.__firstmateOpenCodeWatchArm.ensureArmed("session-test", client);
+if (!expectArm) {
+  if (status !== "not-primary") {
+    console.error(`expected a not-primary decline, got ${status}`);
+    process.exit(1);
+  }
+  if (existsSync(armLog)) {
+    console.error("the plugin declined but the arm ran");
+    process.exit(1);
+  }
+  process.exit(0);
+}
+if (status === "not-primary") {
+  console.error("the plugin declined a home that must arm");
+  process.exit(1);
+}
+for (let i = 0; i < 250 && !existsSync(armLog); i += 1) {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+if (!existsSync(armLog)) {
+  console.error(`the arm never ran (ensureArmed status ${status})`);
+  process.exit(1);
+}
+process.exit(0);
+EOF
+  # A seeded secondmate home arms whether it is a plain clone or a linked
+  # worktree; an unmarked linked worktree (a crewmate's) stays silent.
+  for case_name in secondmate-clone secondmate-linked-worktree unmarked-linked-worktree; do
+    dir=$(make_arm_decision_fixture "opencode-scope-$case_name")
+    repo="$dir/repo"
+    expect=1
+    case "$case_name" in
+      secondmate-clone)
+        printf 'fixture-mate\n' > "$repo/.fm-secondmate-home"
+        ;;
+      secondmate-linked-worktree|unmarked-linked-worktree)
+        git -C "$repo" add -A >/dev/null 2>&1
+        git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -q -m fixture --no-gpg-sign
+        git -C "$repo" worktree add -q "$dir/linked" -b linked >/dev/null 2>&1
+        repo="$dir/linked"
+        if [ "$case_name" = secondmate-linked-worktree ]; then
+          printf 'fixture-mate\n' > "$repo/.fm-secondmate-home"
+        else
+          expect=0
+        fi
+        ;;
+    esac
+    mkdir -p "$repo/state/procevent" "$repo/config"
+    : > "$repo/state/procevent/fixture.source"
+    out=$(FM_ROOT_OVERRIDE="$repo" WORKTREE="$repo" FM_HOME="$repo" \
+      FM_ARM_LOG="$dir/arm.log" NODE_NO_WARNINGS=1 EXPECT_ARM="$expect" \
+      PLUGIN="$ROOT/.opencode/plugins/fm-primary-watch-arm.js" node "$driver" 2>&1)
+    status=$?
+    expect_code 0 "$status" "OpenCode arm plugin primary scope ($case_name): $out"
+    [ -z "$out" ] || fail "OpenCode arm scope case $case_name printed output: $out"
+  done
+  pass "watch-arm: the OpenCode arm plugin arms a secondmate home and stays silent in a crewmate worktree"
+}
+
 test_append_wakes_handling_successor after-ack
 test_append_wakes_handling_successor before-ack
 test_append_wakes_handling_successor after-ack missing
@@ -1998,3 +2074,4 @@ test_take_over_owns_a_fresh_cycle_and_keeps_queued_work_surfacing
 test_take_over_preserves_downtime_from_watcher_self_exit
 test_take_over_confirms_a_watcher_stopped_inside_its_event_wait
 test_opencode_arm_plugin_decides_with_the_shared_predicate
+test_opencode_arm_plugin_arms_a_secondmate_home

@@ -107,15 +107,19 @@ function effectivePaths(root) {
   return { root: fmRoot, home: fmHome, state, config };
 }
 
-async function isPrimaryRoot(root, home) {
+// bin/fm-primary-scope-lib.sh's fm_primary_root_matches is the single owner of
+// primary scope, shared with the turn-end guard and the Claude stop hook: a
+// genuine .fm-secondmate-home marker includes a secondmate home, linked
+// worktree or plain clone, and otherwise only a plain checkout is primary.
+async function isPrimaryRoot(root) {
   if (!root) return false;
-  if (!existsSync(`${root}/AGENTS.md`) || !existsSync(`${root}/bin`)) return false;
-  if (existsSync(`${root}/.fm-secondmate-home`)) return false;
-  if (home && home !== root && existsSync(`${home}/.fm-secondmate-home`)) return false;
-  const gitDir = await runProcess("git", ["-C", root, "rev-parse", "--git-dir"]);
-  const commonDir = await runProcess("git", ["-C", root, "rev-parse", "--git-common-dir"]);
-  if (gitDir.code !== 0 || commonDir.code !== 0) return false;
-  return gitDir.stdout.trim() === commonDir.stdout.trim();
+  const result = await runProcess("bash", [
+    "-c",
+    '. "$1/bin/fm-primary-scope-lib.sh" 2>/dev/null && fm_primary_root_matches "$1"',
+    "fm-primary-watch-arm",
+    root,
+  ]);
+  return result.code === 0;
 }
 
 // bin/fm-supervision-lib.sh's fm_supervision_needed is the single owner of the
@@ -525,7 +529,7 @@ function spawnArm(paths, sessionID, client, predecessorArmPid = "") {
 
 async function beginArm(paths, sessionID, client, predecessorArmPid) {
   if (!sessionID) return { status: "skipped", armChild: null };
-  if (!(await isPrimaryRoot(paths.root, paths.home))) return { status: "not-primary", armChild: null };
+  if (!(await isPrimaryRoot(paths.root))) return { status: "not-primary", armChild: null };
   if (!(await sessionOwnsLock(paths))) return { status: "read-only", armChild: null };
   if (child) return { status: "existing", armChild: child };
   if (retryTimer) return { status: "retrying", armChild: null };
