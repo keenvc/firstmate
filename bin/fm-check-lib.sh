@@ -45,6 +45,21 @@ fm_custom_check_registered() {
   [ "$hash" = "$FM_CUSTOM_CHECK_HASH" ]
 }
 
+# fm_custom_check_clone <state> <dir> <id>: copy a registered custom check into
+# <dir> with its exact mode, so a caller that must verify it on another device
+# path (a concurrent sweep lane) can build the same snapshot there. Returns 1
+# unless the source check is a valid registered file.
+fm_custom_check_clone() {
+  local state=$1 dir=$2 id=$3 check state_device
+  check="$state/$id.check.sh"
+  [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
+  state_device=$(fm_pr_file_device "$state") || return 1
+  fm_pr_private_file_valid "$check" 700 "$state_device" || return 1
+  cp "$check" "$dir/$id.check.sh" || return 1
+  chmod 0700 "$dir/$id.check.sh" || return 1
+  fm_pr_private_file_valid "$dir/$id.check.sh" 700 "$(fm_pr_file_device "$dir")"
+}
+
 fm_custom_check_snapshot_prepare() {
   local state=$1 id=$2 check hash state_device
   fm_custom_check_snapshot_cleanup

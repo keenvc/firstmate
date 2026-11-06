@@ -3164,11 +3164,6 @@ FM_CHECK_OUTPUT=
 FM_CHECK_RESULT=
 FM_CHECK_SIGNAL_PENDING=
 
-fm_check_output_cleanup() {
-  [ -z "$FM_CHECK_OUTPUT" ] || rm -f -- "$FM_CHECK_OUTPUT"
-  FM_CHECK_OUTPUT=
-}
-
 fm_active_check_stop() {
   local pid=${FM_ACTIVE_CHECK_PID:-} pgid=${FM_ACTIVE_CHECK_PGID:-} i
   [ -n "$pid" ] || [ -n "$pgid" ] || return 0
@@ -3210,16 +3205,32 @@ watcher_stop_signals() {
   trap 'exit 1' INT
 }
 
+# One check sweep runs its checks concurrently (check_sweep below), so a check
+# that runs inside a sweep lane records against that lane instead of the single
+# active-check slots here: its own output file, its own process group, and its
+# own result file. The lane directory carries that state through <lane-var>
+# (FM_CHECK_LANE_DIR); a lane child never writes the watcher's own variables, so
+# the caller's wake payload keeps coming only from its own reads.
+FM_CHECK_LANE_CHILD=${FM_CHECK_LANE_CHILD:-0}
+
+# Temporary capture file for the check now running in THIS shell (the watcher
+# itself, or a lane child).
+FM_CHECK_OUTPUT_EFFECTIVE=
+
+fm_check_output_cleanup() {
+  [ -z "$FM_CHECK_OUTPUT_EFFECTIVE" ] || rm -f -- "$FM_CHECK_OUTPUT_EFFECTIVE"
+  FM_CHECK_OUTPUT_EFFECTIVE=
+}
+
 run_check_capture() {
   local pgid rc=0
+  [ "$FM_CHECK_LANE_CHILD" != 1 ] || { check_lane_run "$@"; return; }
   fm_check_output_cleanup
   FM_CHECK_RESULT=
   FM_CHECK_OUTPUT=$(mktemp "$STATE/.fm-check-output.XXXXXX") || return 1
-  chmod 0600 "$FM_CHECK_OUTPUT" || { fm_check_output_cleanup; return 1; }
+  chmod 0600 "$FM_CHECK_OUTPUT" || return 1
+  FM_CHECK_OUTPUT_EFFECTIVE=$FM_CHECK_OUTPUT
   FM_CHECK_SIGNAL_PENDING=
-  # Defer stop signals only until the check's process group is recorded for
-  # watcher_cleanup. Keep command substitutions out of this window: bash 5.2
-  # can drop a trap that is pending when one is parsed (watcher_stop_signals).
   trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
   set -m
   ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) > "$FM_CHECK_OUTPUT" 2>/dev/null &
@@ -3231,16 +3242,435 @@ run_check_capture() {
   pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
   if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
     fm_active_check_stop || true
-    fm_check_output_cleanup
     return 1
   fi
   wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || rc=$?
   FM_ACTIVE_CHECK_PID=
   fm_active_check_stop || return 1
   FM_CHECK_RESULT=$(cat "$FM_CHECK_OUTPUT" 2>/dev/null || true)
-  fm_check_output_cleanup
-  # Keep what the check printed before the cut, then report the cut itself.
   [ "$rc" -ne 124 ] || FM_CHECK_RESULT="${FM_CHECK_RESULT:+$FM_CHECK_RESULT$'\n'}timed out after ${CHECK_TIMEOUT}s"
+}
+
+# The same timeout and process-group mechanics for one check running in a sweep
+# lane, recorded against the lane's own files so a stop kills that lane's check
+# alone. A stop that lands here ends the lane; its verdict file is then absent
+# and the sweep delivers nothing for it.
+check_lane_run() {  # <command...>
+  local pgid rc=0 result out_dir
+  out_dir=$FM_CHECK_LANE_DIR
+  # Never carry a previous check's process group into this lane's stop: a relay
+  # already observed in another shell may be gone, and its reap must not land on
+  # this check.
+  FM_ACTIVE_CHECK_PID=
+  : > "$out_dir/output" || return 1
+  rm -f -- "$out_dir/result"
+  FM_CHECK_OUTPUT_EFFECTIVE="$out_dir/output"
+  FM_CHECK_SIGNAL_PENDING=
+  trap 'FM_CHECK_SIGNAL_PENDING=1' HUP INT TERM
+  set -m
+  ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) > "$out_dir/output" 2>/dev/null &
+  FM_ACTIVE_CHECK_PID=$!
+  FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
+  set +m
+  watcher_stop_signals
+  [ -z "$FM_CHECK_SIGNAL_PENDING" ] || exit 1
+  pgid=$(ps -o pgid= -p "$FM_ACTIVE_CHECK_PID" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$pgid" ] && [ "$pgid" != "$FM_ACTIVE_CHECK_PGID" ]; then
+    fm_active_check_stop || true
+    return 1
+  fi
+  wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || rc=$?
+  # The check has already exited: stop tracks the process group through the
+  # still-recorded pid, and never blocks the lane on a group that just closed.
+  fm_active_check_stop || return 1
+  result=$(cat "$out_dir/output" 2>/dev/null || true)
+  [ "$rc" -ne 124 ] || result="${result:+$result$'\n'}timed out after ${CHECK_TIMEOUT}s"
+  printf '%s' "$result" > "$out_dir/result"
+}
+
+# The check sweep's lane executor: run one due check, in its own lane
+# directory, with its own timeout and process group, and leave its verdict in
+# <lane-dir>/result.
+
+# Most checks one sweep runs at once. The checks are network-bound polls (forge,
+# mail, Linear, a home's own custom work), so a sweep finishes in about its
+# slowest check rather than the sum of all of them, while a small bound keeps a
+# large home from firing its whole inventory at one service at once.
+CHECK_LANE_MAX=${FM_CHECK_LANE_MAX:-6}
+case "$CHECK_LANE_MAX" in ''|*[!0-9]*|0) CHECK_LANE_MAX=6 ;; esac
+# How often a sweep refreshes the liveness beacon while its lanes run. The
+# guard's grace is minutes, so one second keeps a long sweep reading as alive.
+CHECK_LANE_BEAT_SECS=1
+# How long a sweep trusts the lanes it is holding. Each lane already enforces
+# CHECK_TIMEOUT on its own check, so this only fires when a lane itself wedged;
+# the allowance covers that timeout plus the process-group teardown and the
+# fence helpers around a check snapshot.
+CHECK_LANE_WAIT_MAX=$((CHECK_TIMEOUT + 60))
+
+fm_check_lanes_cleanup() {
+  local lane
+  for lane in "$STATE"/.fm-check-lane.*; do
+    [ -e "$lane" ] || continue
+    rm -rf -- "$lane"
+  done
+}
+
+# Remove the lane frame the check just applied was read from.
+FM_CHECK_LANE_FRAME=
+
+fm_check_lane_frame_cleanup() {
+  [ -z "$FM_CHECK_LANE_FRAME" ] || rm -rf -- "$FM_CHECK_LANE_FRAME" 2>/dev/null || true
+  FM_CHECK_LANE_FRAME=
+}
+
+# Print one "<mode>\t<check-path>[\t<pr-poll field...>]" line per check due this
+# sweep, in the order `for c in "$STATE"/*.check.sh` gives them, plus a
+# `rejected\t<check-path>` line for one that cannot be validated. Mode is `pr`
+# (a validated merge poll), `custom` (a registered custom check), or `x` (the X
+# shim). Everything that can refuse this cycle happens here, in the watcher
+# itself, before any lane starts; the lanes only execute.
+check_sweep_due() {
+  local c id
+  for c in "$STATE"/*.check.sh; do
+    [ -e "$c" ] || continue
+    if [ "$(basename "$c")" = x-watch.check.sh ]; then
+      if fmx_poll_shim_valid "$c" "$FM_HOME" "$FM_ROOT" \
+        && [ -f "$FM_ROOT/bin/fm-x-poll.sh" ] && [ ! -L "$FM_ROOT/bin/fm-x-poll.sh" ]; then
+        printf 'x\t%s\n' "$c"
+      else
+        printf 'rejected\t%s\n' "$c"
+      fi
+      continue
+    fi
+    id=$(basename "$c" .check.sh)
+    if fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" \
+      || { rerecord_device_shifted_pr_poll "$id" \
+        && fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; }; then
+      PR_POLL_CONTROL_LOCK="$STATE/.control-$id.lock"
+      fm_lock_acquire_wait "$PR_POLL_CONTROL_LOCK" || exit 1
+      if ! fm_pr_poll_snapshot_matches "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
+        pr_poll_control_release || exit 1
+        triage_log "PR poll for $id changed before its validated check; skipping the stale snapshot"
+        continue
+      fi
+      pr_poll_control_release || exit 1
+      printf 'pr\t%s\t%s\t%s\t%s\t%s\t%s\n' "$c" "$FM_PR_POLL_SNAPSHOT_PROVIDER" \
+        "$FM_PR_POLL_SNAPSHOT_URL" "$FM_PR_POLL_SNAPSHOT_HOST" \
+        "$FM_PR_POLL_SNAPSHOT_PATH" "$FM_PR_POLL_SNAPSHOT_NUMBER"
+    elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
+      fm_custom_check_snapshot_cleanup
+      printf 'custom\t%s\n' "$c"
+    else
+      fm_custom_check_snapshot_cleanup
+      printf 'rejected\t%s\n' "$c"
+    fi
+  done
+}
+
+# Run one due check inside its lane and write the lane's verdict file, which is
+# exactly the single-check path's FM_CHECK_RESULT: the output, or its timed-out
+# note. A lane whose check cannot be set up writes no verdict, and the sweep
+# reports that rather than guessing at output.
+# A custom check runs from an immutable snapshot so a rewrite mid-run cannot
+# swap what executes (fm_custom_check_snapshot_prepare). The lane keeps that
+# snapshot beside its other files, under the check's own id, so the trust file
+# it must be bound to is a copy of the registered one made inside the frame -
+# the device-bound state directory is what makes that binding meaningful.
+check_lane_snapshot_prepare() {  # <lane-dir> <task-id>
+  local dir=$1 id=$2 device
+  device=$(fm_pr_file_device "$STATE") || return 1
+  [ "$(fm_pr_file_device "$dir")" = "$device" ] || return 1
+  fm_pr_private_file_valid "$STATE/$id.check-trust" 600 "$device" || return 1
+  cp "$STATE/$id.check-trust" "$dir/$id.check-trust" || return 1
+  chmod 0600 "$dir/$id.check-trust" || return 1
+  fm_custom_check_clone "$STATE" "$dir" "$id" || return 1
+  fm_custom_check_snapshot_prepare "$dir" "$id"
+}
+
+check_lane_execute() {  # <mode> <lane-dir> <task-id> <check-path> [pr-poll field...]
+  local mode=$1 dir=$2 id=$3 c=$4 rc=0
+  shift 4
+  case "$mode" in
+    x)
+      FM_HOME="$FM_HOME" run_check_capture "$FM_ROOT/bin/fm-x-poll.sh" || rc=$?
+      ;;
+    custom)
+      if ! check_lane_snapshot_prepare "$dir" "$id"; then
+        fm_custom_check_snapshot_cleanup
+        return 1
+      fi
+      run_check_capture "$FM_CUSTOM_CHECK_SNAPSHOT" || rc=$?
+      fm_custom_check_snapshot_cleanup
+      ;;
+    pr)
+      run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated "$@" || rc=$?
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  [ "$rc" -eq 0 ] && [ -e "$dir/result" ]
+}
+
+# Refresh the liveness beacon at most once per CHECK_LANE_BEAT_SECS while a
+# sweep runs: a sweep that outlasts the guard grace must never read as a
+# stalled watcher. <beat-var> holds the last refresh epoch in the caller.
+check_sweep_beat_refresh() {  # <beat-var>
+  local now
+  now=$(date +%s)
+  [ "$((now - ${!1}))" -lt "$CHECK_LANE_BEAT_SECS" ] || {
+    printf -v "$1" '%s' "$now"
+    touch "$STATE/.last-watcher-beat" 2>/dev/null || true
+  }
+}
+
+check_sweep_running() {  # <lane...>
+  local lane running=0
+  for lane in "$@"; do
+    [ -e "$lane/done" ] || running=$((running + 1))
+  done
+  printf '%s' "$running"
+}
+
+# A lane whose own shell is gone will never write its done file: it was killed
+# or died without a verdict. An empty <pid> counts as gone, so a lane that never
+# recorded one cannot wedge the sweep.
+check_lane_pid_alive() {  # <pid>
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null
+}
+
+# Mark every lane that stopped moving as done: a reaped lane, or one whose own
+# shell is gone. A lane with no verdict then delivers nothing, and the sweep
+# carries on with the others instead of waiting on a process that will never
+# report.
+check_sweep_reap_lanes() {  # <lane...>
+  local lane
+  for lane in "$@"; do
+    [ -e "$lane/done" ] && continue
+    if [ -e "$lane/reaped" ] || ! check_lane_pid_alive "$(cat "$lane/pid" 2>/dev/null || true)"; then
+      : > "$lane/done"
+    fi
+  done
+}
+
+# Kill a lane's process group so a wedged check cannot outlive its attempt.
+check_sweep_kill_lane() {  # <lane>
+  local pid
+  [ -e "$1/reaped" ] && return 0
+  pid=$(cat "$1/pid" 2>/dev/null || true)
+  [ -z "$pid" ] || kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  : > "$1/reaped"
+}
+
+# Launch one lane for one due check. The lane gets its own shell and its own
+# files; the spec line it was written with is all it needs to know what to run.
+check_sweep_lane_launch() {  # <lane-dir> <mode> <check-path> <task-id>
+  local lane_dir=$1 mode=$2 c=$3 id=$4
+  (
+    set +e
+    trap '' HUP INT TERM
+    FM_CHECK_LANE_CHILD=1
+    FM_CHECK_LANE_DIR=$lane_dir
+    printf '%s\n' "$$" > "$lane_dir/pid"
+    if [ "$mode" = pr ]; then
+      local line fields=()
+      while IFS= read -r line; do fields+=("$line"); done < "$lane_dir/spec"
+      check_lane_execute pr "$lane_dir" "$id" "$c" \
+        "${fields[2]}" "${fields[3]}" "${fields[4]}" "${fields[5]}" "${fields[6]}"
+    else
+      check_lane_execute "$mode" "$lane_dir" "$id" "$c"
+    fi || exit 1
+    : > "$lane_dir/done"
+  ) </dev/null >/dev/null 2>&1 &
+}
+
+# Start one lane per due check, at most CHECK_LANE_MAX at a time, and wait for
+# all of them. Appends each lane directory to <lane-list-var>, in check order,
+# so the apply loop reads results in exactly the order a serial sweep produced
+# them. Each lane keeps its own FM_CHECK_TIMEOUT, its own process group, and its
+# own files; nothing it does writes this watcher's variables.
+check_sweep_run_lanes() {  # <due-file> <lane-list-var>
+  local spec mode c n=0 beat_at=0 lane_dir running since due_file=$1
+
+  local -n lanes=$2
+  lanes=()
+  while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    case "$spec" in rejected$'\t'*) continue ;; esac
+    since=$(date +%s)
+    while :; do
+      check_sweep_reap_lanes ${lanes[@]+"${lanes[@]}"}
+      running=$(check_sweep_running ${lanes[@]+"${lanes[@]}"})
+      [ "$running" -ge "$CHECK_LANE_MAX" ] || break
+      check_sweep_beat_refresh beat_at
+      if [ "$(( $(date +%s) - since ))" -ge "$CHECK_LANE_WAIT_MAX" ]; then
+        triage_log "check lanes are still running past their timeout; cutting them"
+        for lane_dir in ${lanes[@]+"${lanes[@]}"}; do
+          check_sweep_kill_lane "$lane_dir"
+        done
+        check_sweep_reap_lanes ${lanes[@]+"${lanes[@]}"}
+        break
+      fi
+      sleep 0.2
+    done
+    n=$((n + 1))
+    lane_dir=$(printf '%s/.fm-check-lane.%s.%s' "$STATE" "$n" "$RANDOM")
+    mkdir -p -- "$lane_dir" || return 1
+    # The spec line, verbatim: everything the lane needs to know what to run.
+    printf '%s\n' "$spec" > "$lane_dir/spec" || { rm -rf -- "$lane_dir"; return 1; }
+    lanes+=("$lane_dir")
+    mode=${spec%%$'\t'*}
+    c=${spec#*$'\t'}
+    c=${c%%$'\t'*}
+    check_sweep_lane_launch "$lane_dir" "$mode" "$c" "$(basename "$c" .check.sh)" || return 1
+    check_sweep_beat_refresh beat_at
+  done < "$due_file"
+  since=$(date +%s)
+  while :; do
+    check_sweep_reap_lanes ${lanes[@]+"${lanes[@]}"}
+    [ "$(check_sweep_running ${lanes[@]+"${lanes[@]}"})" -gt 0 ] || break
+    check_sweep_beat_refresh beat_at
+    if [ "$(( $(date +%s) - since ))" -ge "$CHECK_LANE_WAIT_MAX" ]; then
+      triage_log "check lanes are still running past their timeout; cutting them"
+      for lane_dir in ${lanes[@]+"${lanes[@]}"}; do
+        check_sweep_kill_lane "$lane_dir"
+      done
+      check_sweep_reap_lanes ${lanes[@]+"${lanes[@]}"}
+      break
+    fi
+    sleep 0.2
+  done
+  wait 2>/dev/null || true
+  touch "$STATE/.last-watcher-beat" 2>/dev/null || true
+}
+
+# Apply one finished lane's verdict in check order, the way the serial sweep
+# always did: a merged PR poll records its outcome and retires, everything else
+# appends its wake and hands it to wake(), which ends the cycle. <lane-list-var>
+# in the caller holds every lane of the sweep; each frame is cleaned here on the
+# way out. Returns 1 only where the sweep must stop the watcher.
+check_sweep_apply_lane() {  # <lane>
+  local lane=$1 spec rest c id provider url host path number out is_pr_poll=0
+  local pr_frame=0 contribution_check_line contribution_check_output
+  local contribution_check_diagnostics merge_authority merge_authority_record_identity
+  local merge_outcome_rc
+  spec=$(cat "$lane/spec" 2>/dev/null || true)
+  case "$spec" in *$'\t'*$'\t'*$'\t'*$'\t'*$'\t'*$'\t'*$'\t'*)
+    triage_log "check spec for $lane holds an unexpected field; nothing delivered for it"
+    fm_check_lane_frame_cleanup "$lane"
+    return 0
+    ;;
+  esac
+  rest=${spec#*$'\t'}
+  c=${rest%%$'\t'*}
+  if [ "${spec%%$'\t'*}" = pr ]; then
+    IFS=$(printf '\t') read -r _ _ id provider url host path number <<EOF
+$spec
+EOF
+    pr_frame=1
+    PR_POLL_CONTROL_LOCK="$STATE/.control-$id.lock"
+    fm_lock_acquire_wait "$PR_POLL_CONTROL_LOCK" || return 1
+    if ! fm_pr_poll_snapshot_matches "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
+      pr_poll_control_release || return 1
+      pr_frame=0
+      triage_log "PR poll for $id changed while its validated check ran; dropping that stale result"
+      fm_check_lane_frame_cleanup "$lane"
+      return 0
+    fi
+  else
+    id=$(basename "$c" .check.sh)
+  fi
+  if [ ! -e "$lane/done" ]; then
+    # The lane never produced a result: its check could not be set up, or
+    # the lane was cut. Report it as not delivered and retry next sweep.
+    triage_log "check lane for $c produced no result; nothing delivered this sweep"
+    [ "$pr_frame" -eq 0 ] || { pr_poll_control_release || return 1; pr_frame=0; }
+    fm_check_lane_frame_cleanup "$lane"
+    return 0
+  fi
+  out=$(cat "$lane/result" 2>/dev/null || true)
+  is_pr_poll=0
+  [ "${spec%%$'\t'*}" != pr ] || is_pr_poll=1
+  if [ -n "$out" ]; then
+    if [ "$(basename "$c")" = contributions.check.sh ]; then
+      contribution_check_output=
+      contribution_check_diagnostics=
+      while IFS= read -r contribution_check_line; do
+        case "$contribution_check_line" in
+          'contribution-wake: check: contributions '*)
+            contribution_check_output="${contribution_check_output}${contribution_check_line#contribution-wake: }"$'\n'
+            ;;
+          *) contribution_check_diagnostics="${contribution_check_diagnostics}${contribution_check_line}"$'\n' ;;
+        esac
+      done <<EOF
+$out
+EOF
+      if [ -n "$contribution_check_diagnostics" ]; then
+        out=${contribution_check_diagnostics%$'\n'}
+      elif [ -n "$contribution_check_output" ]; then
+        pr_poll_control_release || return 1
+        fm_check_lane_frame_cleanup "$lane"
+        return 0
+      fi
+    fi
+    # One line, as the queued row stores it: wake consumers keep only
+    # prefixed lines, so a later output line would otherwise be dropped.
+    reason="check: $c: $(printf '%s' "$out" | fm_wake_clean_field)"
+    if [ "$is_pr_poll" -eq 1 ] && [ "$out" = merged ]; then
+      if [ "$(fm_meta_get "$STATE/$id.meta" kind)" = secondmate ]; then
+        # A merge poll armed on a secondmate is residue: the mate is a
+        # persistent worker, never landed work, and the merge it detected
+        # belongs to a task in the mate's own home. Retire the poll with no
+        # outcome and no wake; bin/fm-pr-check.sh refuses to arm another.
+        retire_merged_pr_poll "$id"
+        pr_poll_control_release || return 1
+        touch "$STATE/.last-check"
+        triage_log "retired a merge poll armed on secondmate $id without reporting an outcome"
+        fm_check_lane_frame_cleanup "$lane"
+        return 0
+      fi
+      if ! fm_merge_authority_read "$STATE" "$id" \
+          "$provider" "$host" "$path" "$number"; then
+        triage_log "no matching persisted merge authority for $id; recording an external merge outcome"
+      fi
+      merge_authority=$FM_MERGE_AUTHORITY
+      merge_authority_record_identity=$FM_MERGE_AUTHORITY_RECORD_IDENTITY
+      merge_outcome_rc=0
+      fm_merge_outcome_report "$FM_HOME" "$STATE" "$id" "$url" poll \
+        "$merge_authority" || merge_outcome_rc=$?
+      if [ "$merge_outcome_rc" -ne 0 ]; then
+        triage_log "merge outcome for $id could not be recorded (rc=$merge_outcome_rc)"
+        return 1
+      fi
+      if [ -n "$merge_authority_record_identity" ] \
+        && ! fm_merge_authority_remove_if_matches "$STATE" "$id" \
+          "$provider" "$host" "$path" "$number" "$merge_authority" \
+          "$merge_authority_record_identity"; then
+        triage_log "published merge outcome for $id but could not retire its authority record"
+        return 1
+      fi
+      retire_merged_pr_poll "$id"
+      pr_poll_control_release || return 1
+      touch "$STATE/.last-check"
+      if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
+        triage_log "absorbed duplicate merged PR poll result for $id"
+        fm_check_lane_frame_cleanup "$lane"
+        return 0
+      fi
+      fm_check_lane_frame_cleanup "$lane"
+      wake "$reason"
+    fi
+    pr_poll_control_release || return 1
+    fm_wake_append check "$c" "$reason" || return 1
+    # Stamped here, exactly as the serial sweep always did: wake() ends this
+    # cycle, and every later lane still delivers into the wake queue below.
+    touch "$STATE/.last-check"
+    fm_check_lane_frame_cleanup "$lane"
+    wake "$reason"
+  fi
+  pr_poll_control_release || return 1
+  fm_check_lane_frame_cleanup "$lane"
+  return 0
 }
 
 FM_CAPTURE_OUTPUT=
@@ -4057,11 +4487,14 @@ while :; do
 
   # Slow per-task checks (firstmate writes these, e.g. a merged-PR poll).
   # Time-based via .last-check mtime so the cadence survives watcher restarts.
-  # Evaluated BEFORE the signal scan so a chatty sibling crewmate cannot starve
-  # a slow poll. Queue every result while the sweep runs, then wake once: wake()
-  # exits the cycle, so waking per result would restart this glob at its first
-  # entry and starve later checks. Checks are due only every CHECK_INTERVAL, so
-  # most cycles skip this block and fall straight through.
+  # Evaluated BEFORE the signal scan: wake() exits the cycle, so a check placed
+  # after the signal scan would be starved whenever a chatty sibling crewmate
+  # keeps producing signals - the slow poll (e.g. merge detection) would then
+  # never run until the fleet went quiet. Checks are due only every
+  # CHECK_INTERVAL, so most cycles skip this block and fall straight through.
+  # The due checks run CONCURRENTLY (check_sweep_run_lanes), so one sweep costs
+  # about its slowest check rather than their sum, and their results are then
+  # applied below in the serial order this loop has always used.
   if [ "$(age_of "$STATE/.last-check")" -ge "$CHECK_INTERVAL" ]; then
     rejected_checks=
     contribution_check_output=
@@ -4076,119 +4509,23 @@ while :; do
         fm_wake_append check pr-register "$pr_register_reason" || exit 1
       fi
     fi
-    for c in "$STATE"/*.check.sh; do
-      [ -e "$c" ] || continue
-      is_pr_poll=0
-      if [ "$(basename "$c")" = x-watch.check.sh ]; then
-        if fmx_poll_shim_valid "$c" "$FM_HOME" "$FM_ROOT" \
-          && [ -f "$FM_ROOT/bin/fm-x-poll.sh" ] && [ ! -L "$FM_ROOT/bin/fm-x-poll.sh" ]; then
-          FM_HOME="$FM_HOME" run_check_capture "$FM_ROOT/bin/fm-x-poll.sh" || exit 1
-          out=$FM_CHECK_RESULT
-        else
-          rejected_checks="$rejected_checks $c"
-          continue
-        fi
-      else
-        id=$(basename "$c" .check.sh)
-        if fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh" \
-          || { rerecord_device_shifted_pr_poll "$id" \
-            && fm_pr_poll_snapshot_capture "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; }; then
-          is_pr_poll=1
-          provider=$FM_PR_POLL_SNAPSHOT_PROVIDER
-          url=$FM_PR_POLL_SNAPSHOT_URL
-          host=$FM_PR_POLL_SNAPSHOT_HOST
-          path=$FM_PR_POLL_SNAPSHOT_PATH
-          number=$FM_PR_POLL_SNAPSHOT_NUMBER
-          PR_POLL_CONTROL_LOCK="$STATE/.control-$id.lock"
-          fm_lock_acquire_wait "$PR_POLL_CONTROL_LOCK" || exit 1
-          if ! fm_pr_poll_snapshot_matches "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
-            pr_poll_control_release || exit 1
-            triage_log "PR poll for $id changed before its validated check; skipping the stale snapshot"
-            continue
-          fi
-          run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
-            "$provider" "$url" "$host" "$path" "$number" || exit 1
-          out=$FM_CHECK_RESULT
-        elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
-          custom_snapshot=$FM_CUSTOM_CHECK_SNAPSHOT
-          run_check_capture "$custom_snapshot" || exit 1
-          out=$FM_CHECK_RESULT
-          fm_custom_check_snapshot_cleanup
-        else
-          fm_custom_check_snapshot_cleanup
-          rejected_checks="$rejected_checks $c"
-          continue
-        fi
+    sweep_lanes=()
+    sweep_specs=$(mktemp "$STATE/.fm-check-due.XXXXXX") || exit 1
+    if ! check_sweep_due > "$sweep_specs"; then
+      rm -f -- "$sweep_specs"
+      exit 1
+    fi
+    fm_check_lanes_cleanup
+    if ! check_sweep_run_lanes "$sweep_specs" sweep_lanes; then
+      rm -f -- "$sweep_specs"
+      exit 1
+    fi
+    rm -f -- "$sweep_specs"
+    for lane in "${sweep_lanes[@]}"; do
+      if ! check_sweep_apply_lane "$lane"; then
+        fm_check_lanes_cleanup
+        exit 1
       fi
-      if [ -n "$out" ]; then
-        if [ "$(basename "$c")" = contributions.check.sh ]; then
-          contribution_check_output=
-          contribution_check_diagnostics=
-          while IFS= read -r contribution_check_line; do
-            case "$contribution_check_line" in
-              'contribution-wake: check: contributions '*)
-                contribution_check_output="${contribution_check_output}${contribution_check_line#contribution-wake: }"$'\n'
-                ;;
-              *) contribution_check_diagnostics="${contribution_check_diagnostics}${contribution_check_line}"$'\n' ;;
-            esac
-          done <<EOF
-$out
-EOF
-          if [ -n "$contribution_check_diagnostics" ]; then
-            out=${contribution_check_diagnostics%$'\n'}
-          elif [ -n "$contribution_check_output" ]; then
-            continue
-          fi
-        fi
-        # One line, as the queued row stores it: wake consumers keep only
-        # prefixed lines, so a later output line would otherwise be dropped.
-        reason="check: $c: $(printf '%s' "$out" | fm_wake_clean_field)"
-        if [ "$is_pr_poll" -eq 1 ] && [ "$out" = merged ]; then
-          if [ "$(fm_meta_get "$STATE/$id.meta" kind)" = secondmate ]; then
-            # A merge poll armed on a secondmate is residue: the mate is a
-            # persistent worker, never landed work, and the merge it detected
-            # belongs to a task in the mate's own home. Retire the poll with no
-            # outcome and no wake; bin/fm-pr-check.sh refuses to arm another.
-            retire_merged_pr_poll "$id"
-            pr_poll_control_release || exit 1
-            touch "$STATE/.last-check"
-            triage_log "retired a merge poll armed on secondmate $id without reporting an outcome"
-            continue
-          fi
-          if ! fm_merge_authority_read "$STATE" "$id" \
-              "$provider" "$host" "$path" "$number"; then
-            triage_log "no matching persisted merge authority for $id; recording an external merge outcome"
-          fi
-          merge_authority=$FM_MERGE_AUTHORITY
-          merge_authority_record_identity=$FM_MERGE_AUTHORITY_RECORD_IDENTITY
-          merge_outcome_rc=0
-          fm_merge_outcome_report "$FM_HOME" "$STATE" "$id" "$url" poll \
-            "$merge_authority" || merge_outcome_rc=$?
-          if [ "$merge_outcome_rc" -ne 0 ]; then
-            triage_log "merge outcome for $id could not be recorded (rc=$merge_outcome_rc)"
-            exit 1
-          fi
-          if [ -n "$merge_authority_record_identity" ] \
-            && ! fm_merge_authority_remove_if_matches "$STATE" "$id" \
-              "$provider" "$host" "$path" "$number" "$merge_authority" \
-              "$merge_authority_record_identity"; then
-            triage_log "published merge outcome for $id but could not retire its authority record"
-            exit 1
-          fi
-          retire_merged_pr_poll "$id"
-          pr_poll_control_release || exit 1
-          if [ "$FM_MERGE_OUTCOME_ALREADY_RECORDED" = true ]; then
-            triage_log "absorbed duplicate merged PR poll result for $id"
-            continue
-          fi
-          [ -n "$first_check_reason" ] || first_check_reason=$reason
-          continue
-        fi
-        pr_poll_control_release || exit 1
-        fm_wake_append check "$c" "$reason" || exit 1
-        [ -n "$first_check_reason" ] || first_check_reason=$reason
-      fi
-      pr_poll_control_release || exit 1
     done
     if [ -n "$rejected_checks" ]; then
       reason="check: rejected unauthenticated state checks:$rejected_checks"
@@ -4414,6 +4751,7 @@ EOF
     ewf="$STATE/.wedge-escalations-$key"
     pf="$STATE/.paused-$key"   # flag: this key's stale is using the bounded pause cadence
     prev=$(cat "$hf" 2>/dev/null || true)
+    
     # Busy match: a backend's native semantic state when available (herdr, rex), else
     # the last 6 non-blank lines only (the TUI footer area, where every verified
     # harness renders its busy indicator) so busy-looking strings in displayed
