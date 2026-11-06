@@ -4523,6 +4523,13 @@ while :; do
   # about its slowest check rather than their sum, and their results are then
   # applied below in the serial order this loop has always used.
   if [ "$(age_of "$STATE/.last-check")" -ge "$CHECK_INTERVAL" ]; then
+    # A teardown that landed after this cycle's home-gone test would otherwise
+    # surface as this mktemp's bare exit 1, which reads to the arm as "exited 1
+    # without an actionable reason". Report the teardown instead.
+    [ -d "$STATE" ] || {
+      echo "watcher: exiting - state directory no longer exists: $STATE" >&2
+      exit 1
+    }
     rejected_checks=
     contribution_check_output=
     first_check_reason=
