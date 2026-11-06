@@ -3518,11 +3518,19 @@ check_sweep_kill_lane() {  # <lane>
 # files; the spec line it was written with is all it needs to know what to run.
 check_sweep_lane_launch() {  # <lane-dir> <mode> <check-path> <task-id>
   local lane_dir=$1 mode=$2 c=$3 id=$4
+  # `set -m` around the fork puts the lane in its OWN process group, which the
+  # comment on check_sweep_run_lanes promises: a watcher stop reaches the lane's
+  # check group without killing the lane shell, and a lane never shares the
+  # watcher's group. This mirrors the single-check launch at run_check_capture.
+  set -m
   (
     set +e
     trap '' HUP INT TERM
     FM_CHECK_LANE_CHILD=1
     FM_CHECK_LANE_DIR=$lane_dir
+    # $BASHPID, never $$: inside a subshell $$ still holds the PARENT's pid, so
+    # this would record the watcher's own pid. ${BASHPID:-$$} keeps older bash
+    # working, where fm_check_lanes_stop_cleanup refuses to signal that pid.
     printf '%s\n' "${BASHPID:-$$}" > "$lane_dir/pid"
     if [ "$mode" = pr ]; then
       local -a fields=()
@@ -3554,6 +3562,7 @@ check_sweep_lane_launch() {  # <lane-dir> <mode> <check-path> <task-id>
     fi || exit 1
     : > "$lane_dir/done"
   ) </dev/null >/dev/null 2>&1 &
+  set +m
 }
 
 # Start one lane per due check, at most CHECK_LANE_MAX at a time, and wait for
