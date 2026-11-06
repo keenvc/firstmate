@@ -349,7 +349,7 @@ test_turnend_guard_agy_supervision_host_park() {
 }
 
 test_turnend_guard_agy_park_timeout_rearms() {
-  local dir payload out decision reason
+  local dir payload out decision reason start
   dir=$(make_primary_dir "$TMP_ROOT/stop-timeout")
   : > "$dir/state/task1.meta"
   write_arm_fixture "$dir" slow
@@ -365,8 +365,27 @@ test_turnend_guard_agy_park_timeout_rearms() {
   : > "$dir/state/task1.meta"
   write_arm_fixture "$dir" slow-failed
   out=$(FM_AGY_PARK_TIMEOUT=2 run_agy_stop "$dir" "$payload")
-  [ "$(wc -l < "$dir/state/arm-ran")" -eq 1 ] \
+  # The fixture fails after 1.5s, so the first pass crosses the 2s deadline
+  # while its child is still running and the second can only open because that
+  # pass began before it. Reopening the retry budget after the deadline is what
+  # this bound forbids, so three cycles mean the deadline was never charged.
+  [ "$(wc -l < "$dir/state/arm-ran")" -le 2 ] \
     || fail "FM_AGY_PARK_TIMEOUT must bound the total park, not grant each arm attempt a fresh budget"
+
+  # A cycle that closes before the poll interval reaches has not charged the
+  # deadline, and a retry budget that reopens after it would let a fast-failing
+  # arm spin here forever instead of returning a reasoned continuation.
+  dir=$(make_primary_dir "$TMP_ROOT/stop-timeout-fast")
+  : > "$dir/state/task1.meta"
+  write_arm_fixture "$dir" failed
+  start=$SECONDS
+  out=$(FM_AGY_PARK_TIMEOUT=1 FM_AGY_PARK_POLL=30 run_agy_stop "$dir" "$payload")
+  reason=$(printf '%s' "$out" | jq -r '.reason // empty' 2>/dev/null)
+  assert_contains "$reason" "[supervision-park]" "a spent park budget under a long poll interval must return the park reason"
+  [ "$(wc -l < "$dir/state/arm-ran")" -eq 2 ] \
+    || fail "a fast-failing arm must use each bounded park attempt once, saw $(wc -l < "$dir/state/arm-ran")"
+  [ $((SECONDS - start)) -le 20 ] \
+    || fail "a fast-failing arm held the park for $((SECONDS - start))s instead of returning at its budget"
   pass "fm-turnend-guard-agy: park timeout stops the arm and returns continue with [supervision-park]"
 }
 

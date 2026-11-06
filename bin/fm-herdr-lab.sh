@@ -15,6 +15,9 @@
 # Session names must begin with "fm-lab-" and can never be "default".
 # The name command sanitizes the label, caps it at 16 characters, and appends
 # process/random suffixes to keep generated socket paths short.
+# Provision, viewer start, and prepare refuse a session whose Herdr socket path
+# would exceed the platform's sun_path capacity, naming the path and its budget
+# instead of failing later inside `herdr server`.
 # Every Herdr call made here carries --session <session>: trailing, or
 # immediately before the first -- delimiter so it stays a Herdr option instead
 # of becoming a passthrough argument such as an agent start argument.
@@ -54,6 +57,44 @@ fm_herdr_lab_validate_name() { # <session>
 
 fm_herdr_lab_state_dir() {
   printf '%s' "${FM_HERDR_LAB_STATE_DIR:-${TMPDIR:-/tmp}/fm-herdr-lab-${UID}}"
+}
+
+# Herdr places a named session's socket at
+# <config>/herdr/sessions/<name>/herdr.sock, and a Unix-domain socket path
+# cannot exceed the sun_path capacity of the platform's sockaddr_un: 103 bytes
+# on macOS and Linux. A longer one fails inside `herdr server` with a
+# unix-socket error, or only as the opaque "did not report running within 60
+# seconds", so every real-Herdr test on a host whose config home or session
+# name is long enough dies in the lab setup rather than in what it asserts.
+# Measure it against that budget and name the real cause instead of accepting
+# whatever the caller passed.
+fm_herdr_lab_socket_path_capacity() {
+  printf '%s' "${FM_HERDR_LAB_SOCKET_PATH_CAPACITY:-103}"
+}
+
+# The socket path for <name> under the config home a Herdr call resolves, using
+# the same layout `herdr session list --json` reports for a named session.
+fm_herdr_lab_socket_path() { # <session>
+  printf '%s/herdr/sessions/%s/herdr.sock' "${XDG_CONFIG_HOME:-$HOME/.config}" "$1"
+}
+
+# True when <name> keeps that socket inside the platform capacity. A Herdr
+# started outside this check fails deep inside `herdr server` with an
+# unix-socket error, or only as the opaque "did not report running within
+# 60 seconds", so every entry point checks it first and names the real cause.
+fm_herdr_lab_name_fits() { # <session>
+  local path
+  path=$(fm_herdr_lab_socket_path "$1")
+  [ "${#path}" -le "$(fm_herdr_lab_socket_path_capacity)" ]
+}
+
+fm_herdr_lab_require_socket_fits() { # <session>
+  local capacity path
+  fm_herdr_lab_name_fits "$1" && return 0
+  capacity=$(fm_herdr_lab_socket_path_capacity)
+  path=$(fm_herdr_lab_socket_path "$1")
+  fm_herdr_lab_error "session '$1' is unusable on this host: its Herdr socket path is ${#path} bytes, over the ${capacity}-byte platform limit ($path). Set XDG_CONFIG_HOME to a shorter directory or pass a shorter session name."
+  return 1
 }
 
 fm_herdr_lab_tripwire_path() { # <session>
@@ -99,6 +140,7 @@ fm_herdr_lab_fleet_state() { # <session>
 fm_herdr_lab_prepare() { # <session>
   local name=$1 sessions state_dir tripwire
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_socket_fits "$name" || return 1
   command -v herdr >/dev/null 2>&1 || { fm_herdr_lab_error "herdr is required"; return 1; }
   command -v jq >/dev/null 2>&1 || { fm_herdr_lab_error "jq is required"; return 1; }
 
@@ -275,6 +317,7 @@ fm_herdr_lab_viewer_session_stopped_or_absent() { # <session>
 fm_herdr_lab_viewer_start() { # <session>
   local name=$1 record log launcher launcher_pid waited attempt reason pid interrupt_traps=0 timeout=$fm_herdr_lab_viewer_timeout_seconds
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_socket_fits "$name" || return 1
   command -v herdr >/dev/null 2>&1 || { fm_herdr_lab_error "herdr is required"; return 1; }
   command -v jq >/dev/null 2>&1 || { fm_herdr_lab_error "jq is required"; return 1; }
   command -v python3 >/dev/null 2>&1 || { fm_herdr_lab_error "python3 is required for the lab viewer"; return 1; }
@@ -410,6 +453,7 @@ fm_herdr_lab_cancel_provision() { # <pid>
 fm_herdr_lab_provision() { # <session>
   local name=$1 sessions tripwire running attempt server_pid max_attempts timeout_seconds
   fm_herdr_lab_validate_name "$name" || return 1
+  fm_herdr_lab_require_socket_fits "$name" || return 1
   command -v herdr >/dev/null 2>&1 || { fm_herdr_lab_error "herdr is required"; return 1; }
   command -v jq >/dev/null 2>&1 || { fm_herdr_lab_error "jq is required"; return 1; }
 

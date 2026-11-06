@@ -11,10 +11,13 @@
 #   - The child is polled every FM_AGY_PARK_POLL seconds (default 2) and the
 #     park waits on it under the 28800s hooks.json timeout, so an idle cycle
 #     spends no model turn. Only when FM_AGY_PARK_TIMEOUT is set to a positive
-#     number of seconds, and that total wait across every attempt passes with
-#     the child still running, is the child stopped and
-#     {"decision":"continue","reason":"[supervision-park] ..."} returned so the
-#     next turn boundary parks again.
+#     number of seconds does that deadline bound the whole park: the pass that
+#     observes it stops the child and returns
+#     {"decision":"continue","reason":"[supervision-park] ..."} so the next
+#     turn boundary parks again, and a retry budget a cycle consumed without
+#     crossing the deadline is not reopened once it has. A failed cycle that
+#     returns faster than FM_AGY_PARK_POLL can therefore never spin past the
+#     deadline nor keep retrying after it.
 #   - An actionable close (a signal:/stale:/check:/heartbeat line, or a
 #     supervision-host: line in host mode) resets state/.turnend-blocks and
 #     returns {"decision":"continue","reason":"<wake>"} on stdout.
@@ -133,10 +136,15 @@ fi
 # Never leave a park child or its capture file behind, on any exit path.
 trap '[ -n "$ARM_PID" ] && kill "$ARM_PID" 2>/dev/null; [ -n "$ARM_OUT" ] && rm -f "$ARM_OUT" 2>/dev/null; :' EXIT
 
+# A budget in whole seconds can never bound a wait the loop itself has never
+# started to charge. attempts_left bounds the retries this park may still open
+# once the deadline passes, so a fixture that fails faster than POLL seconds
+# cannot restart the cycle forever and starve the caller.
 waited=0
 attempt=0
+attempts_left=$ARM_ATTEMPTS
 while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
-  [ "$PARK_TIMEOUT" -eq 0 ] || [ "$waited" -lt "$PARK_TIMEOUT" ] || break
+  [ "$PARK_TIMEOUT" -eq 0 ] || [ "$attempts_left" -gt 0 ] || break
   attempt=$((attempt + 1))
   ARM_OUT=$(mktemp "$STATE/.agy-park-output.XXXXXX") || { ARM_OUT=; break; }
   if [ "$HOST_MODE" -eq 1 ]; then
@@ -162,6 +170,7 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   HOST_RC=0
   wait "$ARM_PID" 2>/dev/null || HOST_RC=$?
   ARM_PID=
+  [ "$PARK_TIMEOUT" -eq 0 ] || [ "$waited" -lt "$PARK_TIMEOUT" ] || attempts_left=$((attempts_left - 1))
 
   park_still_ours || allow_stop
   [ -e "$STATE/.afk" ] && allow_stop
@@ -216,6 +225,13 @@ fi
 if [ "$HEALTHY" -eq 1 ]; then
   rm -f "$STATE/.turnend-blocks" 2>/dev/null || true
   allow_stop
+fi
+
+# The park budget is spent: every attempt closed without an actionable wake
+# inside the deadline, so the remaining retry budget is forfeit rather than
+# reopened. Say so with the same reasoned continuation a killed child gets.
+if [ "$PARK_TIMEOUT" -gt 0 ] && [ "$attempts_left" -le 0 ]; then
+  continue_turn "[supervision-park] The ${PARK_TIMEOUT}s park budget was spent across $attempt closed watch cycles with no actionable wake while supervision is still needed. End your turn briefly so the Antigravity Stop hook can re-park on the next turn boundary."
 fi
 
 # The park could not establish supervision: the shared guard owns the bounded

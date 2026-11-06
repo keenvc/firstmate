@@ -110,6 +110,27 @@ test_refuses_unsafe_names() {
   pass "fm-herdr-lab: names fail closed and require the lab prefix"
 }
 
+test_refuses_sessions_over_the_socket_path_budget() {
+  local name="fm-lab-socket-budget-$$" long_home status=0 err
+  long_home="$TMP_ROOT/$name-$(printf 'd%.0s' {1..80})/config"
+  : > "$FAKE_LOG"
+  err=$(XDG_CONFIG_HOME="$long_home" run_with_fake fm_herdr_lab_provision "$name" 2>&1 >/dev/null) || status=$?
+  expect_code 1 "$status" "provision must refuse a session whose Herdr socket path is over capacity"
+  case "$err" in
+    *"over the 103-byte platform limit"*) ;;
+    *) fail "the refusal must name the capacity and the path, got: $err" ;;
+  esac
+  assert_absent "$TRIPWIRES/$name.fleet-state.json" "an over-budget provision still wrote an ownership record"
+  assert_no_grep "server" "$FAKE_LOG" "an over-budget provision still reached Herdr"
+  status=0
+  XDG_CONFIG_HOME="$long_home" run_with_fake fm_herdr_lab_viewer_start "$name" >/dev/null 2>&1 || status=$?
+  expect_code 1 "$status" "viewer start must refuse an over-budget session"
+  status=0
+  run_with_fake fm_herdr_lab_provision "$name" || fail "a session inside the socket budget must still provision"
+  run_with_fake fm_herdr_lab_teardown "$name" || fail "teardown after the in-budget provision failed"
+  pass "fm-herdr-lab: provision and viewer start refuse socket paths over the platform capacity"
+}
+
 test_provision_run_and_guarded_teardown() {
   local name='' line_count status=0 stop_line delete_line
   name="fm-lab-behavior-$$"
@@ -535,6 +556,7 @@ test_viewer_launcher_refuses_unsafe_arguments() {
 }
 
 test_refuses_unsafe_names
+test_refuses_sessions_over_the_socket_path_budget
 test_provision_run_and_guarded_teardown
 test_run_scopes_session_before_double_dash
 test_missing_tripwire_blocks_destruction
