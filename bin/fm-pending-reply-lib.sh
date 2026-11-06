@@ -195,11 +195,21 @@ fm_pending_reply_extract_corr() {  # <text>
   printf '%s' "$text" | grep -oE "$FM_PENDING_REPLY_CORR_RE" 2>/dev/null | head -1 | cut -d= -f2- | tr 'A-F' 'a-f' || true
 }
 
+# The whole-word match pattern for <corr_id>. Every caller that tests more than
+# one line for one correlation builds this ONCE and reuses it: a command
+# substitution inside a per-line loop forks once per line, and a multi-megabyte
+# status file turns the poll's resolve scan into seconds of forking.
+fm_pending_reply_corr_re() {  # <corr_id>
+  printf '(^|[^[:alnum:]_])corr=%s([^[:alnum:]_]|$)' "$1"
+}
+
 # 0 if <text> carries the exact correlation token for <corr_id>, as a whole
 # word: xcorr=<id> or corr=<id>ff is a different token, not this one.
-fm_pending_reply_text_has_corr() {  # <text> <corr_id>
-  local text=$1 corr=$2 re
-  re="(^|[^[:alnum:]_])$(fm_pending_reply_corr_token "$corr")([^[:alnum:]_]|\$)"
+# Takes an OPTIONAL pre-built pattern as <re> so a caller scanning many lines
+# pays for it once.
+fm_pending_reply_text_has_corr() {  # <text> <corr_id> [<re>]
+  local text=$1 corr=$2 re=${3-}
+  [ -n "$re" ] || re=$(fm_pending_reply_corr_re "$corr")
   [[ $text =~ $re ]]
 }
 
@@ -600,22 +610,29 @@ fm_pending_reply_discard_undelivered() {  # <state-dir> <corr_id>
 # Unrelated verbs without the token never match. Stale/wrong corr never match.
 # The parent's own pending-reply-missed escalation line must not self-resolve:
 # it names the request with pending-reply-id= rather than corr=.
-fm_pending_reply_line_resolves() {  # <line> <corr_id>
-  local line=$1 corr=$2
+fm_pending_reply_line_resolves() {  # <line> <corr_id> [<re>]
+  local line=$1 corr=$2 re=${3-}
   [ -n "$line" ] && [ -n "$corr" ] || return 1
   case "$line" in
     *pending-reply-missed*) return 1 ;;
   esac
-  fm_pending_reply_text_has_corr "$line" "$corr"
+  [ -n "$re" ] || re=$(fm_pending_reply_corr_re "$corr")
+  fm_pending_reply_text_has_corr "$line" "$corr" "$re"
 }
 
 # Scan a status file for a correlated resolve. Prints the matching line or empty.
+# The literal token is pre-filtered with one C-speed pass first: a status file
+# carrying no token at all (the overwhelmingly common case, and these files reach
+# megabytes) costs no regex work, while the whole-word pattern still decides
+# every line the literal does reach.
 fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id>
-  local status_file=$1 corr=$2 line
+  local status_file=$1 corr=$2 line re
   [ -f "$status_file" ] || return 0
+  LC_ALL=C grep -F -q -- "corr=$corr" "$status_file" 2>/dev/null || return 0
+  re=$(fm_pending_reply_corr_re "$corr")
   while IFS= read -r line || [ -n "$line" ]; do
     [ -n "$line" ] || continue
-    if fm_pending_reply_line_resolves "$line" "$corr"; then
+    if fm_pending_reply_line_resolves "$line" "$corr" "$re"; then
       printf '%s' "$line"
       return 0
     fi
@@ -1370,7 +1387,7 @@ _fm_pending_reply_maybe_escalate_locked() {  # <state-dir> <corr_id>
 # parent-replies.status is its parent channel, not a stranded self-home file.
 fm_pending_reply_detect_wrong_home() {  # <state-dir> <corr_id> <secondmate-home>
   local state=$1 corr=$2 sm_home=$3
-  local rec delivered hits first sightings snapshot previous status_file line line_no sighting_base sighting_id phase changed=0
+  local rec delivered hits first sightings snapshot previous status_file line line_no sighting_base sighting_id phase changed=0 re
   local remote_parent_channel=0
   rec=$(fm_pending_reply_path "$state" "$corr")
   [ -f "$rec" ] || return 1
@@ -1402,10 +1419,14 @@ fm_pending_reply_detect_wrong_home() {  # <state-dir> <corr_id> <secondmate-home
     fi
     sighting_base=$(fm_pending_reply_sighting_encode "$status_file" 0) || continue
     sighting_base=${sighting_base%:0}
+    # Same C-speed pre-filter as fm_pending_reply_find_resolve_line: a wrong-home
+    # file without the literal token contributes no sighting.
+    LC_ALL=C grep -F -q -- "corr=$corr" "$status_file" 2>/dev/null || continue
+    [ -n "${re-}" ] || re=$(fm_pending_reply_corr_re "$corr")
     line_no=0
     while IFS= read -r line || [ -n "$line" ]; do
       line_no=$((line_no + 1))
-      fm_pending_reply_line_resolves "$line" "$corr" || continue
+      fm_pending_reply_line_resolves "$line" "$corr" "$re" || continue
       sighting_id="$sighting_base:$line_no"
       [ -n "$first" ] || first=$sighting_id
       case ",$sightings," in

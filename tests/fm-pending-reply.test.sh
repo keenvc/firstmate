@@ -2123,6 +2123,64 @@ test_summary_keeps_accents_and_caps_by_character() {
   pass "the summary keeps accented letters, drops control characters, and caps by character"
 }
 
+# A status file carrying no correlation token costs one literal pass, not a
+# regex evaluation per line. The whole-word verdict is unchanged: a token
+# embedded in a longer word or another correlation's id is still no match.
+test_resolve_scan_matches_whole_token_only() {
+  local dir corr other file line got rc
+  dir="$TMP_ROOT/scan-whole-token"
+  mkdir -p "$dir"
+  corr=00ff00ff00ff00ff
+  other=00ff00ff00ff00fe
+  file="$dir/probe.status"
+  cat >"$file" <<EOF
+plain unrelated line
+xcorr=$corr suffix-glued-to-a-word
+corr=${corr}ff
+corr=$other
+EOF
+  got=$(fm_pending_reply_find_resolve_line "$file" "$corr")
+  [ -z "$got" ] || fail "an embedded or longer token must not resolve, got '$got'"
+  # Positive control: the very same file with a genuine whole-word line.
+  printf 'done [at=1]: corr=%s settled\n' "$corr" >>"$file"
+  got=$(fm_pending_reply_find_resolve_line "$file" "$corr")
+  [ "$got" = "done [at=1]: corr=$corr settled" ] \
+    || fail "a whole-word token must resolve, got '$got'"
+  # The library pattern and the public helpers agree.
+  [ "$(fm_pending_reply_corr_re "$corr")" = "(^|[^[:alnum:]_])corr=$corr([^[:alnum:]_]|\$)" ] \
+    || fail "corr_re must build the whole-word pattern"
+  fm_pending_reply_text_has_corr "corr=$corr" "$corr" || fail "bare token must match"
+  if fm_pending_reply_text_has_corr "xcorr=$corr" "$corr"; then
+    fail "xcorr=<id> must not match"
+  fi
+  # A pre-built pattern is honoured, so multi-line scanners build it once.
+  fm_pending_reply_line_resolves "a corr=$corr b" "$corr" \
+    "$(fm_pending_reply_corr_re "$corr")" || fail "pre-built pattern must match"
+  pass "the resolve scan matches the whole correlation token only"
+}
+
+# The resolve scan over a large, token-free status file must stay cheap and
+# fork-free: it is on the watcher's per-poll path, and a per-line command
+# substitution there turns a multi-megabyte file into seconds of forking.
+test_resolve_scan_stays_cheap_on_large_status() {
+  local dir file t0 t1 elapsed lines
+  dir="$TMP_ROOT/scan-large"
+  mkdir -p "$dir"
+  file="$dir/big.status"
+  lines=20000
+  awk -v n="$lines" 'BEGIN { for (i = 1; i <= n; i++) printf "working [at=%d]: unrelated progress line %d corr=ffffffffffffffff\n", i, i }' >"$file"
+  t0=${EPOCHREALTIME/./}
+  fm_pending_reply_find_resolve_line "$file" 0123456789abcdef >/dev/null
+  t1=${EPOCHREALTIME/./}
+  elapsed=$(( (t1 - t0) / 1000 ))
+  [ -s "$file" ] || fail "fixture must produce a non-empty status file"
+  # 20k lines is a few megabytes' worth of scanning; the old per-line
+  # substitution took tens of seconds here, so 5000ms separates the shapes
+  # with a wide margin even on a loaded host.
+  [ "$elapsed" -lt 5000 ] || fail "token-free scan of $lines lines took ${elapsed}ms; the per-line work regressed"
+  pass "the resolve scan stays cheap on a large token-free status file (${elapsed}ms for $lines lines)"
+}
+
 # --- run --------------------------------------------------------------------
 
 test_normal_correlated_reply_resolves_once
@@ -2174,5 +2232,7 @@ test_local_parent_replies_is_wrong_home_evidence
 test_escalated_undelivered_correlation_stays_retryable
 test_same_kind_escalation_reopens_after_operator_close
 test_summary_keeps_accents_and_caps_by_character
+test_resolve_scan_matches_whole_token_only
+test_resolve_scan_stays_cheap_on_large_status
 
 printf 'ok - all pending-reply tests passed\n'

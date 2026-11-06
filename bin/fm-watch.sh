@@ -3301,6 +3301,10 @@ case "$CHECK_LANE_MAX" in ''|*[!0-9]*|0) CHECK_LANE_MAX=6 ;; esac
 # How often a sweep refreshes the liveness beacon while its lanes run. The
 # guard's grace is minutes, so one second keeps a long sweep reading as alive.
 CHECK_LANE_BEAT_SECS=1
+# Ceiling for the liveness-beacon refresh between cycle stages (stage_beat_
+# refresh below). Independent of CHECK_LANE_BEAT_SECS because it bounds work
+# outside a sweep; same rationale, same one second.
+STAGE_BEAT_SECS=1
 # How long a sweep trusts the lanes it is holding. Each lane already enforces
 # CHECK_TIMEOUT on its own check, so this only fires when a lane itself wedged;
 # the allowance covers that timeout plus the process-group teardown and the
@@ -3419,6 +3423,24 @@ check_sweep_beat_refresh() {  # <beat-var>
   local now
   now=$(date +%s)
   [ "$((now - ${!1}))" -lt "$CHECK_LANE_BEAT_SECS" ] || {
+    printf -v "$1" '%s' "$now"
+    touch "$STATE/.last-watcher-beat" 2>/dev/null || true
+  }
+}
+
+# Refresh the liveness beacon between cycle stages, at most once per
+# STAGE_BEAT_SECS. The poll touches the beacon once at the top of a cycle and
+# then runs every stage to the end before the next touch, so any single slow
+# stage - pending-reply reconciliation over a large state, a liveness tick, an
+# inactive-outcome scan - separates two touches by that stage's whole runtime
+# and reads to fm-guard.sh as a stalled watcher even though the watcher is
+# working. <beat-var> holds the last refresh epoch in the caller. Cheap: one
+# clock read per call, and a touch in the vast majority of cases, since a stage
+# is only slow enough to matter when it is slow enough to reach this.
+stage_beat_refresh() {  # <beat-var>
+  local now
+  now=$(date +%s)
+  [ "$((now - ${!1}))" -lt "$STAGE_BEAT_SECS" ] || {
     printf -v "$1" '%s' "$now"
     touch "$STATE/.last-watcher-beat" 2>/dev/null || true
   }
@@ -4345,6 +4367,8 @@ resurface_after_downtime() {
 }
 
 while :; do
+  # Last epoch this stage touched the liveness beacon; see stage_beat_refresh.
+  beat_at=$(date +%s)
   # Native Codex may tear down the async hook and its watchdog together.
   # fm-codex-stop-park.sh owns this optional identity binding. Self-expiry
   # closes the normal recovery generation and lets the arm/host exit too.
@@ -4432,6 +4456,7 @@ while :; do
   # repost after grace, and escalate once if the recovery turn is also missed.
   # No conversation scraping; unresolved records are never silently expired.
   fm_pending_reply_tick "$STATE" || true
+  stage_beat_refresh beat_at
 
   open_decision_reminder_tick || {
     echo 'watcher: open-decision reminder check failed' >&2
@@ -4448,6 +4473,7 @@ while :; do
     echo "watcher: secondmate liveness check failed" >&2
     exit 1
   }
+  stage_beat_refresh beat_at
 
   # A live secondmate endpoint does not prove that its own wake loop is alive.
   # Observe the foreign queue before the rest of this cycle so an aged row wakes
@@ -4456,6 +4482,7 @@ while :; do
     echo "watcher: secondmate wake-loop observation failed" >&2
     exit 1
   }
+  stage_beat_refresh beat_at
 
   # Process-to-event liveness repair. This never discovers a result by polling:
   # each registered source has its own child blocking on that source, and this
@@ -4551,6 +4578,7 @@ EOF
   # costs a full firstmate turn each. The re-scan also picks up a newer
   # signature for an already-pending file (last write wins below).
   pending=$(scan_signals)
+  stage_beat_refresh beat_at
   if [ -n "$pending" ]; then
     sleep "$SIGNAL_GRACE"
     pending=$(printf '%s\n%s' "$pending" "$(scan_signals)")
@@ -4969,6 +4997,7 @@ EOF
       fi
     fi
   done < <(recorded_windows)
+  stage_beat_refresh beat_at
 
   # Heartbeat: the watcher runs a cheap fleet-scan at a regular cadence no matter
   # what. Time-based via .last-heartbeat mtime; interval doubles per consecutive
