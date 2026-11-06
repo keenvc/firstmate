@@ -3270,6 +3270,9 @@ check_lane_run() {  # <command...>
   set -m
   ( FM_CHECK_OWNED_GROUP=1 run_check_process "$@" ) > "$out_dir/output" 2>/dev/null &
   FM_ACTIVE_CHECK_PID=$!
+  # The lane's own pid cannot stop this check: check_lane_run gives it a process
+  # group of its own. Record that group so a watcher stop can reach it.
+  printf '%s\n' "$FM_ACTIVE_CHECK_PID" > "$out_dir/check-pgid" 2>/dev/null || true
   FM_ACTIVE_CHECK_PGID=$FM_ACTIVE_CHECK_PID
   set +m
   watcher_stop_signals
@@ -3280,6 +3283,9 @@ check_lane_run() {  # <command...>
     return 1
   fi
   wait "$FM_ACTIVE_CHECK_PID" 2>/dev/null || rc=$?
+  # The group is gone (or about to be stopped below); a stale pgid file must
+  # never let a later stop signal an unrelated process group.
+  rm -f -- "$out_dir/check-pgid"
   # The check has already exited: stop tracks the process group through the
   # still-recorded pid, and never blocks the lane on a group that just closed.
   fm_active_check_stop || return 1
@@ -3317,6 +3323,28 @@ fm_check_lanes_cleanup() {
     [ -e "$lane" ] || continue
     rm -rf -- "$lane"
   done
+}
+
+# Stop and remove every sweep lane a stop signal interrupted. A lane ignores
+# HUP/INT/TERM so a stop cannot kill it mid-write, and its check runs in a
+# process group of its own, so an exit that only cleaned this shell would
+# leave a live check and its private frame (trust copy, check copy, snapshot)
+# behind for the next watcher to inherit. Kill the check's group, then the
+# lane shell, then the frame.
+fm_check_lanes_stop_cleanup() {
+  local lane pid pgid self=${BASHPID:-$$}
+  for lane in "$STATE"/.fm-check-lane.*; do
+    [ -e "$lane" ] || continue
+    pgid=$(cat "$lane/check-pgid" 2>/dev/null || true)
+    [ -z "$pgid" ] || kill -KILL "-$pgid" 2>/dev/null || kill -KILL "$pgid" 2>/dev/null || true
+    pid=$(cat "$lane/pid" 2>/dev/null || true)
+    # Never signal ourselves: on a bash without BASHPID the lane records $$.
+    case "$pid" in
+      ''|"$self"|"${WATCHER_PID:-}") ;;
+      *) kill -KILL "$pid" 2>/dev/null || true ;;
+    esac
+  done
+  fm_check_lanes_cleanup
 }
 
 # Remove the lane frame the check just applied was read from.
@@ -3477,10 +3505,12 @@ check_sweep_reap_lanes() {  # <lane...>
 
 # Kill a lane's process group so a wedged check cannot outlive its attempt.
 check_sweep_kill_lane() {  # <lane>
-  local pid
+  local pid pgid
   [ -e "$1/reaped" ] && return 0
+  pgid=$(cat "$1/check-pgid" 2>/dev/null || true)
+  [ -z "$pgid" ] || kill -KILL "-$pgid" 2>/dev/null || kill -KILL "$pgid" 2>/dev/null || true
   pid=$(cat "$1/pid" 2>/dev/null || true)
-  [ -z "$pid" ] || kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+  [ -z "$pid" ] || kill -KILL "$pid" 2>/dev/null || true
   : > "$1/reaped"
 }
 
@@ -3493,10 +3523,30 @@ check_sweep_lane_launch() {  # <lane-dir> <mode> <check-path> <task-id>
     trap '' HUP INT TERM
     FM_CHECK_LANE_CHILD=1
     FM_CHECK_LANE_DIR=$lane_dir
-    printf '%s\n' "$$" > "$lane_dir/pid"
+    printf '%s\n' "${BASHPID:-$$}" > "$lane_dir/pid"
     if [ "$mode" = pr ]; then
-      local line fields=()
-      while IFS= read -r line; do fields+=("$line"); done < "$lane_dir/spec"
+      local -a fields=()
+      local control_lock="$STATE/.control-$id.lock"
+      # The spec line is tab-separated: mode, check path, then the validated
+      # poll fields. Read it with a tab IFS so each field is its own element.
+      IFS=$'\t' read -r -a fields < "$lane_dir/spec" || exit 1
+      # Hold the task's control lock for the whole validated poll, exactly as
+      # the serial sweep did: a teardown or other lifecycle action must not
+      # remove the merge authority and poll artifacts while this poll is in
+      # flight. Revalidate the snapshot under the lock before polling.
+      trap "fm_lock_release $(printf '%q' "$control_lock")" EXIT
+      if ! fm_lock_acquire_wait "$control_lock"; then
+        : > "$lane_dir/done"
+        exit 1
+      fi
+      if ! fm_pr_poll_snapshot_matches "$STATE" "$id" "$SCRIPT_DIR/fm-pr-poll.sh"; then
+        # The snapshot moved between the due scan and this lane. Drop it, as
+        # the apply phase would: mark the lane finished so the sweep does not
+        # wait out a lane that will never report a verdict.
+        triage_log "PR poll for $id changed before its lane ran; dropping that stale result"
+        : > "$lane_dir/done"
+        exit 0
+      fi
       check_lane_execute pr "$lane_dir" "$id" "$c" \
         "${fields[2]}" "${fields[3]}" "${fields[4]}" "${fields[5]}" "${fields[6]}"
     else
@@ -3518,7 +3568,14 @@ check_sweep_run_lanes() {  # <due-file> <lane-list-var>
   lanes=()
   while IFS= read -r spec; do
     [ -n "$spec" ] || continue
-    case "$spec" in rejected$'\t'*) continue ;; esac
+    case "$spec" in
+      rejected$'\t'*)
+        # Preserve the serial sweep's unauthenticated-check report; the path is
+        # the spec's second field and the caller wakes once after the lanes.
+        rejected_checks="$rejected_checks ${spec#*$'\t'}"
+        continue
+        ;;
+    esac
     since=$(date +%s)
     while :; do
       check_sweep_reap_lanes ${lanes[@]+"${lanes[@]}"}
@@ -3573,9 +3630,11 @@ check_sweep_run_lanes() {  # <due-file> <lane-list-var>
 # way out. Returns 1 only where the sweep must stop the watcher.
 check_sweep_apply_lane() {  # <lane>
   local lane=$1 spec rest c id provider url host path number out is_pr_poll=0
-  local pr_frame=0 contribution_check_line contribution_check_output
+  local pr_frame=0 contribution_check_line
   local contribution_check_diagnostics merge_authority merge_authority_record_identity
   local merge_outcome_rc
+  # contribution_check_output is deliberately NOT local: the caller owns it and
+  # wakes with the contribution rows this function collects.
   spec=$(cat "$lane/spec" 2>/dev/null || true)
   case "$spec" in *$'\t'*$'\t'*$'\t'*$'\t'*$'\t'*$'\t'*$'\t'*)
     triage_log "check spec for $lane holds an unexpected field; nothing delivered for it"
@@ -3586,9 +3645,10 @@ check_sweep_apply_lane() {  # <lane>
   rest=${spec#*$'\t'}
   c=${rest%%$'\t'*}
   if [ "${spec%%$'\t'*}" = pr ]; then
-    IFS=$(printf '\t') read -r _ _ id provider url host path number <<EOF
+    IFS=$(printf '\t') read -r _ _ provider url host path number <<EOF
 $spec
 EOF
+    id=$(basename "$c" .check.sh)
     pr_frame=1
     PR_POLL_CONTROL_LOCK="$STATE/.control-$id.lock"
     fm_lock_acquire_wait "$PR_POLL_CONTROL_LOCK" || return 1
@@ -3680,15 +3740,18 @@ EOF
         return 0
       fi
       fm_check_lane_frame_cleanup "$lane"
-      wake "$reason"
+      # Queue the reason for the sweep's single wake after every lane result is
+      # applied; waking here would end the cycle before later lanes deliver.
+      [ -n "$first_check_reason" ] || first_check_reason=$reason
+      return 0
     fi
     pr_poll_control_release || return 1
     fm_wake_append check "$c" "$reason" || return 1
-    # Stamped here, exactly as the serial sweep always did: wake() ends this
-    # cycle, and every later lane still delivers into the wake queue below.
+    # Stamped here, exactly as the serial sweep always did.
     touch "$STATE/.last-check"
     fm_check_lane_frame_cleanup "$lane"
-    wake "$reason"
+    [ -n "$first_check_reason" ] || first_check_reason=$reason
+    return 0
   fi
   pr_poll_control_release || return 1
   fm_check_lane_frame_cleanup "$lane"
@@ -4144,6 +4207,9 @@ watcher_cleanup() {
   # Quietly: a stop usually lands inside the waited event wait, and bash would
   # report the group it kills here as a "Terminated" job line on stderr.
   fm_active_check_stop 2>/dev/null || cleanup_status=1
+  # A sweep's checks run in lane frames, outside this shell's active-check
+  # slots: stop their groups and remove the private frames too.
+  fm_check_lanes_stop_cleanup || true
   fm_check_output_cleanup
   fm_capture_output_cleanup
   fm_wait_tmp_cleanup

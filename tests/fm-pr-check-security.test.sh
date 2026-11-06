@@ -199,6 +199,8 @@ case " $* " in
   *" state "*)
     [ "${FM_TEST_GH_FAIL:-0}" = 0 ] || exit 1
     [ -z "${FM_TEST_GH_STATE_STARTED:-}" ] || : > "$FM_TEST_GH_STATE_STARTED"
+    [ -z "${FM_TEST_GH_STATE_RELEASE:-}" ] \
+      || while [ ! -e "$FM_TEST_GH_STATE_RELEASE" ]; do sleep 0.01; done
     [ "${FM_TEST_GH_SLEEP:-0}" = 0 ] || sleep "$FM_TEST_GH_SLEEP"
     printf '%s\n' "${FM_TEST_GH_STATE:-OPEN}"
     ;;
@@ -1754,7 +1756,9 @@ SH
     i=$((i + 1))
   done
   [ -s "$child_pid_file" ] || fail "watcher did not start the custom check child"
-  find "$state" -maxdepth 1 -name '.fm-custom-check.*' -print | grep . >/dev/null \
+  # A concurrent sweep runs the custom check in its own lane frame, so the
+  # immutable snapshot lives in that frame rather than the state root.
+  find "$state" -name '.fm-custom-check.*' -print | grep . >/dev/null \
     || fail "watcher did not create the custom check snapshot"
   child_pid=$(cat "$child_pid_file")
   kill -TERM "$pid" 2>/dev/null || fail "could not signal watcher during custom check"
@@ -1772,8 +1776,10 @@ SH
   wait "$pid" || rc=$?
   [ "$rc" -ne 0 ] || fail "signaled watcher exited successfully"
   ! kill -0 "$child_pid" 2>/dev/null || fail "signaled watcher left the custom check child running"
-  ! find "$state" -maxdepth 1 -name '.fm-custom-check.*' -print | grep . >/dev/null \
+  ! find "$state" -name '.fm-custom-check.*' -print | grep . >/dev/null \
     || fail "signaled watcher left a private custom check snapshot"
+  ! find "$state" -name '.fm-check-lane.*' -print | grep . >/dev/null \
+    || fail "signaled watcher left a private check lane frame"
   ! find "$state" -maxdepth 1 -name '.fm-check-output.*' -print | grep . >/dev/null \
     || fail "signaled watcher left a private check output file"
   [ ! -e "$state/.watch.lock/pid" ] || fail "signaled watcher left its singleton lock"
@@ -1798,11 +1804,20 @@ printf '%s\n' "$!" > "$FM_TEST_DESCENDANT_PID"
 while [ ! -s "$FM_TEST_DESCENDANT_READY" ]; do sleep 0.01; done
 : > "$FM_TEST_DIRECT_DONE"
 SH
-    # The watcher runs this check next in the same cycle, only after it has
-    # finished with the returned one, so its wake both records whether the
-    # descendant outlived that drain and stops the watcher.
+    # Lanes run concurrently, so this witness waits for the sibling custom
+    # check to be reaped before judging its descendant: a lane drains the
+    # check's process group before it writes its "done" marker.
     cat > "$state/z-drain-witness.check.sh" <<'SH'
 #!/usr/bin/env bash
+i=0
+while [ "$i" -lt 900 ]; do
+  for lane in "$FM_TEST_STATE_DIR"/.fm-check-lane.*; do
+    grep -q 'custom\.check\.sh' "$lane/spec" 2>/dev/null || continue
+    [ -e "$lane/done" ] && break 2
+  done
+  sleep 0.01
+  i=$((i + 1))
+done
 case "$(ps -o stat= -p "$(cat "$FM_TEST_DESCENDANT_PID")" 2>/dev/null)" in
   ''|Z*) printf 'descendant drained\n' ;;
   *) printf 'descendant alive\n' ;;
@@ -1830,6 +1845,7 @@ SH
     FM_TEST_CHECK_TIMEOUT=10 FM_CHECK_FORCE_FALLBACK="$force_fallback" \
       FM_TEST_DESCENDANT_READY="$ready" FM_TEST_DESCENDANT_HOLD="$dir" \
       FM_TEST_DESCENDANT_PID="$child_pid_file" FM_TEST_DIRECT_DONE="$direct_done" \
+      FM_TEST_STATE_DIR="$state" \
       run_watcher_bounded "$dir/home" "$fakebin" > "$dir/watch.out" 2> "$dir/watch.err" || rc=$?
     child_pid=$(cat "$child_pid_file" 2>/dev/null || true)
     if [ -n "$child_pid" ] && process_is_live_non_zombie "$child_pid"; then
@@ -1842,8 +1858,10 @@ SH
       || fail "$backend watcher did not complete the direct custom check"
     grep -qxF "check: $state/z-drain-witness.check.sh: descendant drained" "$dir/watch.out" \
       || fail "$backend watcher moved past a returned check before draining its descendant: $(cat "$dir/watch.out")"
-    ! find "$state" -maxdepth 1 -name '.fm-custom-check.*' -print | grep . >/dev/null \
+    ! find "$state" -name '.fm-custom-check.*' -print | grep . >/dev/null \
       || fail "$backend watcher left a private custom check snapshot"
+    ! find "$state" -name '.fm-check-lane.*' -print | grep . >/dev/null \
+      || fail "$backend watcher left a private check lane frame"
     ! find "$state" -maxdepth 1 -name '.fm-check-output.*' -print | grep . >/dev/null \
       || fail "$backend watcher left a private check output file"
     [ ! -e "$state/.watch.lock/pid" ] || fail "$backend watcher left its singleton lock"
@@ -3638,7 +3656,7 @@ test_teardown_cannot_race_authority_consumption() {
   queue_merge "$dir" "$url"
   archive_away_record "$dir"
   FM_TEST_GH_STATE_STARTED="$dir/poll-started" FM_TEST_GH_STATE=MERGED \
-    FM_TEST_GH_SLEEP=0.5 FM_TEST_CHECK_TIMEOUT=3 \
+    FM_TEST_GH_STATE_RELEASE="$dir/release-poll" FM_TEST_CHECK_TIMEOUT=10 \
     run_watcher_bounded "$dir/home" "$dir/fakebin" \
       > "$dir/watch.out" 2> "$dir/watch.err" &
   watcher_pid=$!
@@ -3658,8 +3676,14 @@ test_teardown_cannot_race_authority_consumption() {
   rc=$?
   set -e
   [ "$rc" -ne 0 ] || fail "teardown race: cleanup crossed the active poll transaction"
-  [ -f "$state/task-a.merge-authority" ] \
-    || fail "teardown race: refused cleanup removed persisted authority"
+  # The poll is still blocked on this marker, so the authority must still be
+  # there; only then let the poll finish and report the merge.
+  if [ ! -f "$state/task-a.merge-authority" ]; then
+    : > "$dir/release-poll"
+    wait "$watcher_pid" 2>/dev/null || true
+    fail "teardown race: refused cleanup removed persisted authority"
+  fi
+  : > "$dir/release-poll"
   rc=0
   wait "$watcher_pid" || rc=$?
   [ "$rc" -eq 0 ] || fail "teardown race: watcher failed with $rc: $(cat "$dir/watch.err")"
