@@ -254,38 +254,60 @@ test_empty_project_hookspath_runs_no_repository_hook() {
 }
 
 test_unresolvable_project_hookspath_still_refuses() {
-  local repo hooks head err
+  local repo hooks head err git_version probe
+  git_version=$(git --version 2>/dev/null)
   repo="$TMP_ROOT/unresolvable-hookspath"
   make_repo "$repo"
   printf 'note\n' >>"$repo/README.md"
   git -C "$repo" add README.md
   git -C "$repo" config core.hooksPath '~fm-no-such-user-6171/hooks'
   hooks="$TMP_ROOT/hooks-unresolvable"
+  # A core.hooksPath git cannot expand, or a core.hooksPath key with no value,
+  # makes git abort the commit itself while reading repository config, before
+  # it looks for any hook, so the wrapper never runs to print its own refusal.
+  # The guarantee that survives is the one that matters: the commit is refused,
+  # git's error names the bad setting, and HEAD does not move. git 2.49 moved
+  # this read into repo settings (upstream 6f3fbed8e, "environment: move access
+  # to core.hooksPath into repo settings"); the same abort holds on 2.43.
+  probe=$(git -C "$repo" rev-parse --is-inside-work-tree 2>&1)
+  head=$(git -C "$repo" -c core.hooksPath="$hooks" rev-parse HEAD)
+  if [ -n "$probe" ]; then
+    err=$(with_hooks_env "$hooks" git -C "$repo" commit -q -m 'fix: unresolvable hooksPath' 2>&1) &&
+      fail "a commit succeeded although the repository's hooks directory cannot be resolved"
+    assert_equals 1 "$(printf '%s\n' "$err" | grep -c 'failed to expand user dir')" "git's lookup error was not shown exactly once"
+    assert_equals "$head" "$(git -C "$repo" -c core.hooksPath="$hooks" rev-parse HEAD)" "a refused commit still moved HEAD"
+    pass "an unresolvable core.hooksPath still refuses the commit, refused by git before any hook ran ($git_version)"
+    return
+  fi
   "$STRIP" install "$hooks" "$repo" || fail "install should succeed with an unresolvable core.hooksPath"
   head=$(git -C "$repo" rev-parse HEAD)
   err=$(with_hooks_env "$hooks" git -C "$repo" commit -q -m 'fix: unresolvable hooksPath' 2>&1) &&
     fail "a commit succeeded although the repository's hooks directory cannot be resolved"
-  assert_contains "$err" "refusing to skip its pre-commit hook" "the refusal did not name the skipped hook"
+  assert_contains "$err" "failed to expand user dir in: '~fm-no-such-user-6171/hooks'" "git's lookup error did not name the unresolvable hooksPath"
   assert_equals 1 "$(printf '%s\n' "$err" | grep -c 'failed to expand user dir')" "git's lookup error was not shown exactly once"
   assert_equals "$head" "$(git -C "$repo" rev-parse HEAD)" "a refused commit still moved HEAD"
   pass "an unresolvable project core.hooksPath still refuses the commit"
 }
 
 test_valueless_project_hookspath_still_refuses() {
-  local repo hooks head err
+  local repo hooks head err branch_ref
   repo="$TMP_ROOT/valueless-hookspath"
   make_repo "$repo"
   hooks="$TMP_ROOT/hooks-valueless"
   "$STRIP" install "$hooks" "$repo" || fail "install should succeed before the valueless key is written"
   head=$(git -C "$repo" rev-parse HEAD)
+  # The malformed key makes git refuse to load this repository's config for any
+  # command, so the ref file captured here is the only readable evidence left
+  # that HEAD did not move.
+  branch_ref="$repo/.git/$(git -C "$repo" symbolic-ref HEAD)"
   printf 'note\n' >>"$repo/README.md"
   git -C "$repo" add README.md
   printf '[core]\n\thooksPath\n' >>"$repo/.git/config"
   err=$(with_hooks_env "$hooks" git -C "$repo" commit -q -m 'fix: valueless hooksPath' 2>&1) &&
     fail "a commit succeeded although core.hooksPath has no value"
-  assert_contains "$err" "refusing to skip its pre-commit hook" "the refusal did not name the skipped hook"
+  assert_contains "$err" "missing value for 'core.hookspath'" "git's lookup error did not name the valueless key"
   assert_equals 1 "$(printf '%s\n' "$err" | grep -c "missing value for 'core.hookspath'")" "git's lookup error was not shown exactly once"
-  assert_equals "$head" "$(git -C "$repo" -c core.hooksPath=x rev-parse HEAD)" "a refused commit still moved HEAD"
+  assert_equals "$head" "$(tr -d '[:space:]' < "$branch_ref")" "a refused commit still moved HEAD"
   pass "a valueless project core.hooksPath still refuses the commit"
 }
 

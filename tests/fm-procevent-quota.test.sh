@@ -251,6 +251,11 @@ for provider in -- codex-; do
 done
 ok "arm rejects noncanonical provider identities"
 
+# The process-event state root must be private, and mktemp -d follows the
+# host's umask: on a group-writable host (umask 002) the lab itself would be
+# refused before this case could test retire. Create the root under a private
+# umask so the case tests what it names whatever the host's default is.
+(umask 077; mkdir -p "$LAB/retire-state")
 out=$(FM_HOME="$LAB/retire-home" FM_STATE_OVERRIDE="$LAB/retire-state" \
   "$BIN/fm-procevent-quota.sh" retire --provider codex)
 [ "$out" = "retired: quota-codex" ] || fail "provider retire targeted the wrong source: $out"
