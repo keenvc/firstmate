@@ -4490,9 +4490,14 @@ EOF
               wedge_episode_end "$key" 0 1
               clear_write_tracking "$key"
               stale_status="$STATE/$(window_to_task "$w" "$STATE").status"
-              stale_record=$(status_span_first_actionable_record "$stale_status" 0)
+              # Only the captured END POSITION is needed here: the wake is
+              # already going out, so everything in the log is being surfaced.
+              # Asking the span reader for offset 0 instead would re-fold the
+              # log's whole lifetime on the poll that is about to wake - minutes
+              # on a multi-megabyte status log.
+              stale_record=$(status_end_position "$stale_status")
               case $? in
-                0|1) stale_end=${stale_record%%$'\t'*}; stale_rest=${stale_record#*$'\t'}; stale_ident=${stale_rest%%$'\t'*} ;;
+                0) stale_end=${stale_record%%$'\t'*}; stale_rest=${stale_record#*$'\t'}; stale_ident=${stale_rest%%$'\t'*} ;;
                 *) stale_end=''; stale_ident='' ;;
               esac
               mark_surfaced "$stale_status" "$stale_end" "$stale_ident"

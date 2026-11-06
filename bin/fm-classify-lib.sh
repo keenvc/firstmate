@@ -37,7 +37,10 @@
 # open-decisions fold" below) also writes: it persists a per-status-file byte
 # cursor and folded open-set as a side effect, so a per-drain fleet-wide scan
 # stays bounded by new appends instead of re-reading each task's whole lifetime
-# log every time. status_home_appends_record writes the per-task home-owned
+# log every time. The cursor-backed readers layered on it - status_current_line
+# and status_own_open_decisions - inherit that write, which is what keeps their
+# per-lane, per-cycle callers bounded. status_home_appends_record writes the
+# per-task home-owned
 # append ledger (see "home-owned status-append ledger" below) so the wake scan
 # can treat this home's own bookkeeping bytes as already owned.
 # crew_worktree_written_since reads the task's meta file and walks a bounded slice
@@ -1143,9 +1146,23 @@ status_open_decisions() {  # <status-file> [<kind>]
 # fold's most recently opened record supplies it; a standing declared wait, then
 # the latest recognized event, stands when nothing is open.
 # Actual run/pane evidence is still reconciled by fm-crew-state.sh.
-status_current_line() {  # <status-file> <kind>
+#
+# Reads the CURSOR-BACKED fold (status_open_decisions_incremental), not the
+# whole-file one, because this sits on per-lane, per-cycle paths - fm-crew-state
+# once per lane in a check sweep, and the display-only mark syncs once per task
+# per cycle - where a whole-file fold of a multi-megabyte status log costs
+# minutes and starves the watcher's beacon. Both folds call
+# _fm_decision_fold_line, so the open set, and therefore every verdict below, is
+# identical; only the cost differs, now proportional to appends since the
+# previous call. The task kind comes from the log's sibling `.meta`, which is
+# the one place _fm_status_kind derives it, so a single persisted cursor serves
+# every caller. A cursor that cannot be written (a read-only state directory)
+# falls back to the whole-file fold, so the answer never depends on the write
+# succeeding.
+status_current_line() {  # <status-file>
   local open key verb note current=''
-  open=$(status_open_decisions "$1" "$2")
+  open=$(status_open_decisions_incremental "$1") \
+    || open=$(status_open_decisions "$1")
   while IFS=$'\t' read -r key verb note; do
     case "$verb" in ?*) current="$verb [key=$key]: $note" ;; esac
   done <<EOF
@@ -1165,14 +1182,22 @@ EOF
 # it keeps working, so the task is not waiting on any of them. Pending-reply
 # recovery and a fire-and-forget retry ring consult this set and leave a task
 # alone while it is non-empty.
+# Cursor-backed for the same reason status_current_line is: its callers run it
+# per window per cycle (bin/fm-watch.sh's steering-inbox loss check) and per
+# pending reply, so a whole-file fold of a long status log would stall a poll.
 status_own_open_decisions() {  # <status-file>
-  local line prefix
-  status_open_decisions "$1" | while IFS= read -r line || [ -n "$line" ]; do
+  local line prefix open
+  open=$(status_open_decisions_incremental "$1") \
+    || open=$(status_open_decisions "$1")
+  [ -n "$open" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
     for prefix in ${FM_CLASSIFY_RESERVED_KEY_PREFIXES:-$FM_CLASSIFY_RESERVED_KEY_PREFIXES_DEFAULT} remote-reply-continuity- captain-hold-; do
       case "$line" in "$prefix"*) continue 2 ;; esac
     done
     printf '%s\n' "$line"
-  done
+  done <<EOF
+$open
+EOF
 }
 
 # 0 when the fold above still holds at least one decision OPENED by
@@ -1516,6 +1541,29 @@ _fm_status_file_mtime() {  # <status-file>
     LC_ALL=C /usr/bin/stat -f '%m' "$f" 2>/dev/null
   else
     LC_ALL=C stat -c '%Y' "$f" 2>/dev/null
+  fi
+}
+
+# The captured END POSITION of a status log - "<byte-size>\t<file-identity>" -
+# the same pair status_span_first_actionable_record reports as its endpoint, but
+# with nothing folded. A caller that only needs to record "this log is accounted
+# for through here" (mark_surfaced after a wake) used to ask the span reader for
+# offset 0, which re-read and re-folded the log's ENTIRE lifetime: minutes on a
+# multi-megabyte log, on the poll that was already about to wake. One stat
+# answers it. Returns 2 when the file is not readable as a status log (missing,
+# unreadable, symlinked) or its stat fields cannot be trusted, which is the same
+# refusal the span reader reports.
+status_end_position() {  # <status-file> [<out-var>]
+  local f=$1 out=${2-} size
+  [ -f "$f" ] && [ -r "$f" ] && [ ! -L "$f" ] || return 2
+  _fm_status_read_ident_size "$f" || return 2
+  size=${_FM_STAT_SIZE//[[:space:]]/}
+  case "$size" in ''|*[!0-9]*) return 2 ;; esac
+  [ -n "$_FM_STAT_IDENTITY" ] || return 2
+  if [ -n "$out" ]; then
+    printf -v "$out" '%s\t%s' "$size" "$_FM_STAT_IDENTITY"
+  else
+    printf '%s\t%s' "$size" "$_FM_STAT_IDENTITY"
   fi
 }
 

@@ -194,14 +194,14 @@ load_backend() {
   BACKEND_LOADED=1
 }
 
-# plan_mark <task> <kind>: sets P_STATE, P_KIND, and P_MSG.
+# plan_mark <task>: sets P_STATE, P_KIND, and P_MSG.
 plan_mark() {
   local line verb note held
   P_STATE=clear
   P_KIND=
   P_MSG=
   load_status_libs || return 0
-  line=$(status_current_line "$STATE/$1.status" "$2" 2>/dev/null) || line=
+  line=$(status_current_line "$STATE/$1.status" 2>/dev/null) || line=
   verb=$(status_line_verb "$line" 2>/dev/null) || verb=
   note=$(status_line_note "$line" 2>/dev/null) || note=
   note=$(printf '%s' "$note" | tr '\t\r\n' '   ')
@@ -304,7 +304,7 @@ sync_task() {
   IFS=$'\t' read -r task kind target tab <<EOF
 $3
 EOF
-  plan_mark "$task" "$kind"
+  plan_mark "$task"
   sync_mark "$1" "$task" "$target" "${tab:-$task}" || rc=1
   sync_progress "$1" "$task" "$kind" "$target" "${tab:-$task}" || rc=1
   sync_tint "$2" "$task" "$target" || rc=1
@@ -437,7 +437,7 @@ cmd_plan() {
     IFS=$'\t' read -r task kind _ _ <<EOF
 $record
 EOF
-    plan_mark "$task" "$kind"
+    plan_mark "$task"
     printf '%s\t%s\t%s\t%s\n' "$task" "$P_STATE" "$P_KIND" "$P_MSG"
   done
 }

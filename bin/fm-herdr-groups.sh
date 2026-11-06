@@ -204,7 +204,7 @@ load_status_libs() {
   LIBS_LOADED=1
 }
 
-# resolve_state <task> <kind>: sets STATE_LABEL and STATE_RANK from the task's
+# resolve_state <task>: sets STATE_LABEL and STATE_RANK from the task's
 # status log through the shared classifier: an open decision or a captain-held
 # transfer waits on the captain, blocked or failed is a problem, done is done,
 # and everything else is running.
@@ -213,7 +213,7 @@ resolve_state() {
   STATE_LABEL=running
   STATE_RANK=3
   load_status_libs || return 0
-  line=$(status_current_line "$STATE/$1.status" "$2" 2>/dev/null) || line=
+  line=$(status_current_line "$STATE/$1.status" 2>/dev/null) || line=
   verb=$(status_line_verb "$line" 2>/dev/null) || verb=
   case "$verb" in
     needs-decision|"${FM_CLASSIFY_CAPTAIN_HELD_VERB:-$FM_CLASSIFY_CAPTAIN_HELD_VERB_DEFAULT}")
@@ -278,7 +278,7 @@ plan_task() {
 $1
 EOF
   resolve_group "$P_TASK" "$P_PROJECT"
-  resolve_state "$P_TASK" "$P_KIND"
+  resolve_state "$P_TASK"
   P_GROUP=$GROUP
   P_STATE=$STATE_LABEL
   P_ORDER=$(printf '%03d.%s' "$RANK" "$GROUP")
