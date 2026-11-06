@@ -791,9 +791,18 @@ new_case Linux with-herdr no-gui
 rm -f "$CASE_BIN/claude"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$CASE_BIN/omp"
 chmod +x "$CASE_BIN/omp"
+# omp must be the only harness that resolves, and a host that really installs
+# one under /usr/bin (this suite found codex there) satisfies the requirement
+# before omp is ever considered. Hide every verified harness, omp excepted,
+# through the curated-path helper so the case keeps its stated premise; restore
+# the shared BASE_PATH after, since later cases discover a real harness on it.
+OUTER_BASE_PATH=$BASE_PATH
+BASE_PATH=$(fm_test_base_path_sans "$BASE_PATH" \
+  codex claude opencode pi pi-signed grok kimi cursor agy muse gemini rovo devin commandcode polytoken cortex kiro hermes)
 doctor --fix
 expect_code 0 "$DOCTOR_RC" "a host whose only harness is omp was not ready after --fix"
 assert_contains "$DOCTOR_OUT" 'required harness=omp:' "omp did not satisfy the at-least-one-harness requirement"
+BASE_PATH=$OUTER_BASE_PATH
 pass "omp alone satisfies the remote harness requirement"
 
 # --- --fix may add only owned wrappers for version-manager tools -------------
@@ -804,6 +813,11 @@ mkdir -p "$MANAGER_BIN"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MANAGER_BIN/codex"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MANAGER_BIN/grok"
 chmod +x "$MANAGER_BIN/codex" "$MANAGER_BIN/grok"
+# The moved stub keeps reporting a compatible version, so the wrapper the
+# doctor writes is a real repair rather than a rename of the same gap. This is
+# the state that used to fail for the wrong reason: the host's own tasks-axi
+# resolved (so the doctor skipped the wrapper) while the report still called it
+# a missing tool for being older than the floor.
 mv "$CASE_BIN/tasks-axi" "$MANAGER_BIN/tasks-axi"
 doctor
 expect_code 1 "$DOCTOR_RC" "a version-manager-only required tool was reported ready"
@@ -822,11 +836,19 @@ assert_grep "$MANAGER_BIN/tasks-axi" "$CASE_HOME/.local/bin/tasks-axi" \
 assert_absent "$CASE_HOME/.local/bin/codex" "--fix wrapped an alternate harness when claude already satisfied readiness"
 assert_absent "$CASE_HOME/.local/bin/grok" "--fix wrapped an alternate harness when claude already satisfied readiness"
 
+# No harness resolves now, so no version-manager harness is wrapped either. A
+# host that really installs one under /usr/bin (this suite found codex there)
+# keeps readiness satisfied and would wrap nothing; hide every verified harness
+# probe so the case keeps its stated premise, then restore the shared PATH.
 rm -f "$CASE_BIN/claude"
+OUTER_BASE_PATH=$BASE_PATH
+BASE_PATH=$(fm_test_base_path_sans "$BASE_PATH" \
+  codex claude opencode pi pi-signed grok kimi cursor agy muse gemini rovo devin commandcode polytoken cortex kiro hermes)
 doctor --fix
 expect_code 0 "$DOCTOR_RC" "--fix did not wrap one discoverable harness when none resolved"
 assert_present "$CASE_HOME/.local/bin/codex" "--fix did not create the first needed harness wrapper"
 assert_absent "$CASE_HOME/.local/bin/grok" "--fix created more harness wrappers than readiness requires"
+BASE_PATH=$OUTER_BASE_PATH
 
 mv "$CASE_BIN/treehouse" "$MANAGER_BIN/treehouse"
 mkdir -p "$CASE_HOME/.local/bin"

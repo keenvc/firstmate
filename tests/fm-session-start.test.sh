@@ -843,8 +843,11 @@ EOF
   holder_pid=$!
   printf '%s\n' "$holder_pid" > "$home/state/.lock"
 
+  # Hide tasks-axi from the curated path, not just from fakebin: a host that
+  # really installs it under BASE_PATH would still resolve it, and its
+  # absence is what makes the detect-only diagnostic below deterministic.
   status=0
-  out=$(run_session_start "$home" "$root" "$fakebin:$BASE_PATH") || status=$?
+  out=$(run_session_start "$home" "$root" "$fakebin:$(fm_test_base_path_sans "$BASE_PATH" tasks-axi)") || status=$?
   kill "$holder_pid" 2>/dev/null || true
   wait "$holder_pid" 2>/dev/null || true
 
@@ -863,9 +866,10 @@ EOF
   assert_not_contains "$out" "run bin/fm-watch-arm.sh" "read-only guard printed a mutating watcher-arm instruction"
   assert_not_contains "$out" "git -C $root checkout main" "read-only bootstrap printed a state-changing checkout remediation"
 
-  # Detect-only bootstrap diagnostics still ran (the fakebin's PATH excludes
-  # tasks-axi, so bootstrap's own read-only tool-detection line fires
-  # deterministically regardless of what is installed on the test host).
+  # Detect-only bootstrap diagnostics still ran. tests/lib.sh's own comment
+  # warns why this cannot lean on the fakebin alone: a host that really
+  # installs tasks-axi under BASE_PATH still resolves it, so the simulated
+  # absence has to hide it from the curated path.
   assert_contains "$out" "MISSING: tasks-axi (install:" "detect-only bootstrap diagnostics did not run on the read-only path"
 
   # The mutating secondmate sweep must NOT have run: no SECONDMATE_SYNC/

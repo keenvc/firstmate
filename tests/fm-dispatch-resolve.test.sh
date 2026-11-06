@@ -280,6 +280,13 @@ run_on_path() {
 KEY='test-key-9f1c2d3e-never-on-argv'
 code='' out='' err=''
 
+# A provider key inherited from the shell that runs this suite (a harness
+# worker's own credentials, typically) outranks both the fixture's .env and
+# every case's own prefix assignment, by design. Every case names the key it
+# wants, so drop the inherited ones once here rather than let a clean-host
+# assumption decide whether the precedence cases can see what they set.
+unset TYPESAFE_API_KEY OPENROUTER_API_KEY OPENAI_API_KEY
+
 # --- preferred family: public resolution across accounts of one family -----
 test_preferred_provider() (
   local scenario=$1 expected="--harness 'pi' --model 'openai-codex/gpt-6-astra'"

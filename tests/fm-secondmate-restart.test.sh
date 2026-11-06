@@ -785,7 +785,10 @@ test_unpublished_worker_result_is_accounted_for() {
   driver=$!
   result_dir=
   i=0
-  while [ "$i" -lt 200 ]; do
+  # 200 x 0.01s is a 2-second budget for a fake relaunch that sleeps on a host
+  # under heavy load; the loop only makes progress once that relaunch is under
+  # way, so the ceiling is a hang guard, not the assertion. Keep it generous.
+  while [ "$i" -lt 2000 ]; do
     result_dir=$(find "$dir/home/state" -maxdepth 1 -type d -name '.secondmate-restart.*' -print -quit)
     [ -e "$dir/fake/remote-relaunch-start" ] && [ -n "$result_dir" ] && break
     /bin/sleep 0.01

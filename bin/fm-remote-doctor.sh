@@ -556,11 +556,26 @@ wrapper_is_firstmate_owned() { # <path>
   [ "$first" = '#!/usr/bin/env bash' ] && [ "$second" = '# Firstmate remote tool wrapper v1' ]
 }
 
+# A tool that resolves is only satisfied when it also meets the readiness the
+# report applies. tasks-axi additionally has to be compatible with this build:
+# an older install on PATH is reported as a gap (see report_required_tools), so
+# --fix has to be able to close it from a version-manager copy instead of
+# calling the gap already satisfied.
+tool_requirement_met() { # <tool> <resolved-path>
+  local tool=$1 resolved=$2
+  [ -n "$resolved" ] && [ -x "$resolved" ] || return 1
+  if [ "$tool" = tasks-axi ]; then
+    fm_tasks_axi_compatible
+    return
+  fi
+  return 0
+}
+
 repair_tool_wrapper() { # <tool>
   local tool=$1 target wrapper tmp
   local resolved
   resolved=$(command -v "$tool" 2>/dev/null || true)
-  [ -n "$resolved" ] && [ -x "$resolved" ] && return 0
+  tool_requirement_met "$tool" "$resolved" && return 0
   target=$(fm_remote_job_manager_tool "${HOME:-}" "$tool" 2>/dev/null || true)
   [ -n "$target" ] || return 1
   wrapper="${HOME:-}/.local/bin/$tool"
@@ -586,6 +601,11 @@ repair_tool_wrapper() { # <tool>
     fix_report "required-$tool" failed "cannot publish $wrapper"
     return 1
   fi
+  # The re-check below runs in this same process, and the compatibility verdict
+  # is memoized per lifetime, so a verdict reached before the wrapper existed
+  # would otherwise be printed again after a successful repair.
+  # shellcheck disable=SC2034 # bin/fm-tasks-axi-lib.sh reads this memo.
+  [ "$tool" != tasks-axi ] || FM_TASKS_AXI_COMPATIBLE_MEMO=
   fix_report "required-$tool" applied "linked the discoverable version-manager tool at $wrapper"
 }
 

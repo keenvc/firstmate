@@ -366,8 +366,14 @@ SH
 chmod +x "$DOCTOR_BIN/uname"
 # These tool-resolution assertions require Herdr specifically; the unqualified
 # doctor accepts either remote backend, covered by fm-remote-doctor.test.sh.
+# "No harness resolves" is asserted below, and a host that really installs one
+# under /usr/bin satisfies the requirement instead, so hide every verified
+# harness through the curated-path helper rather than trusting /usr/bin to be
+# bare.
+DOCTOR_PATH=$(fm_test_base_path_sans /usr/bin:/bin:/usr/sbin:/sbin \
+  codex claude opencode pi pi-signed grok kimi cursor omp agy muse gemini rovo devin commandcode polytoken cortex kiro hermes)
 set +e
-out=$(HOME="$DOCTOR_HOME" PATH="$DOCTOR_BIN:/usr/bin:/bin:/usr/sbin:/sbin" "$ROOT/bin/fm-remote-doctor.sh" --backend herdr 2>&1)
+out=$(HOME="$DOCTOR_HOME" PATH="$DOCTOR_BIN:$DOCTOR_PATH" "$ROOT/bin/fm-remote-doctor.sh" --backend herdr 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || fail "the remote doctor passed with a missing required tool"

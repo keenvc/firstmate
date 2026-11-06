@@ -1991,7 +1991,12 @@ test_prepublication_failure_keeps_concurrent_durable_metadata() {
     run_control "$dir" rl30 relaunch --harness codex --note "preserve concurrent metadata" \
       > "$dir/control.out" &
   control_pid=$!
-  while [ ! -e "$dir/cwd-race-ready" ] && [ "$i" -lt 200 ]; do
+  # Same 5s reach-the-staged-point budget the other wait points in this file
+  # use. The subject here is the rollback, not how fast a loaded host gets a
+  # relaunch to its endpoint check; a shorter ceiling turns host load into a
+  # false failure. The negative outcome stays asserted: the control process
+  # must still be running (and the marker absent) rather than having raced on.
+  while [ ! -e "$dir/cwd-race-ready" ] && kill -0 "$control_pid" 2>/dev/null && [ "$i" -lt 500 ]; do
     /bin/sleep 0.01
     i=$((i + 1))
   done

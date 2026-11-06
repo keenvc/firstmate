@@ -18,6 +18,14 @@ GUARD="$ROOT/bin/fm-guard.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-wake-tests)
 
+# Pin the primary harness through the seam tests/lib.sh arms. Every drain here
+# runs the supervision-host gate, which asks fm-harness.sh who the primary is;
+# that walks the live process tree at about one `ps` fork per ancestor, so an
+# idle host pays nothing and a loaded one pays seconds per drain - and several
+# cases bound the drain's wall clock as their actual subject. No case in this
+# file tests harness detection, which its own suites cover.
+export FM_TEST_HARNESS=claude
+
 
 test_branch_grant_requires_lock_acquisition() {
   local dir fixture state action outcome rc
