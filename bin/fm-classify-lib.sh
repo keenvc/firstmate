@@ -37,12 +37,11 @@
 # open-decisions fold" below) also writes: it persists a per-status-file byte
 # cursor and folded open-set as a side effect, so a per-drain fleet-wide scan
 # stays bounded by new appends instead of re-reading each task's whole lifetime
-# log every time. The cursor-backed readers layered on it - status_current_line
-# and status_own_open_decisions - inherit that write, which is what keeps their
+# log every time. status_current_line and status_own_open_decisions read through
+# that fold, and so inherit the write - which is precisely what keeps their
 # per-lane, per-cycle callers bounded. status_home_appends_record writes the
-# per-task home-owned
-# append ledger (see "home-owned status-append ledger" below) so the wake scan
-# can treat this home's own bookkeeping bytes as already owned.
+# per-task home-owned append ledger (see "home-owned status-append ledger" below)
+# so the wake scan can treat this home's own bookkeeping bytes as already owned.
 # crew_worktree_written_since reads the task's meta file and walks a bounded slice
 # of its worktree instead of a status file, so callers run it only at the moment
 # they would otherwise escalate.

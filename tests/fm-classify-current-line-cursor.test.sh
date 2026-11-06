@@ -53,7 +53,8 @@ last_probe_bytes() {  # <probe-file> <status-file>
 # The whole-file verdict for the same bytes, computed on a copy in a separate
 # directory so the copy's own cursor cannot mask a divergence.
 whole_file_line() {  # <status-file> <copy-dir>
-  local copy="$2/$(basename "$1")"
+  local copy
+  copy="$2/$(basename "$1")"
   cp "$1" "$copy"
   status_current_line "$copy"
 }
