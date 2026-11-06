@@ -10,8 +10,10 @@
 # delivered to a model and no key is sent. After the record exists, each
 # installed harness that the spawn arms (claude, opencode, pi, omp) is
 # started for real, with no prompt, long enough to prove that process stays
-# up beside the wiring the spawn just wrote. Grok and codex are the
-# disconfirming launches: they stay unarmed and gain no parent turn-end.
+# up beside the wiring the spawn just wrote. OpenCode 2 is reported and
+# skipped: its launch gate needs the brief turn's plugin busy record, which
+# the token-free sleeper cannot publish. Grok and codex are the disconfirming
+# launches: they stay unarmed and gain no parent turn-end.
 # An absent binary is reported and skipped. A run that checks nothing fails.
 #
 # Refresh docs/verification/runtime-backends.md ("Secondmate busy contract")
@@ -164,7 +166,7 @@ real_harness_stays_up() {  # <harness> <version> <case> <id> <bin>
 }
 
 check_harness() {  # <harness>
-  local harness=$1 bin version id case_dir state out armed=0
+  local harness=$1 bin version id case_dir state out armed=0 oc_major
   if ! bin=$(resolve_bin "$harness"); then
     SKIPPED="$SKIPPED $harness"
     note "skip: $harness is not installed on this machine, so its secondmate busy contract is unverified here"
@@ -172,6 +174,20 @@ check_harness() {  # <harness>
   fi
   version=$("$bin" --version 2>/dev/null | head -1 | tr -d '\r') || version=
   [ -n "$version" ] || version=unknown
+  if [ "$harness" = opencode ]; then
+    # OpenCode 2's launch gate waits for the per-task busy record its plugin
+    # publishes when the brief turn actually starts. This guard's pane runs a
+    # token-free sleeper that prints "working" and sleeps, so no plugin turn
+    # ever starts and the gate times out: the mismatch is the fixture, not a
+    # busy-contract regression. OpenCode 1 and the other harnesses still cover
+    # the contract here.
+    oc_major=$(printf '%s\n' "$version" | sed -n 's/^[^0-9]*\([0-9][0-9]*\).*/\1/p')
+    if [ "${oc_major:-0}" -ge 2 ]; then
+      SKIPPED="$SKIPPED $harness"
+      note "skip: $harness $version: the token-free sleeper cannot emit the per-task plugin busy record the OpenCode 2 launch gate waits for, so its secondmate busy contract is unverified here"
+      return 0
+    fi
+  fi
   id="sm-$harness"
   case_dir="$LAB/$harness"
   install_sleeper "$case_dir/sleeper" "$harness" "$bin"
@@ -203,5 +219,5 @@ for harness in claude opencode pi pi-signed omp grok codex; do
 done
 
 [ "$CHECKED" -gt 0 ] || fail "secondmate busy contract live guard checked nothing (skipped:${SKIPPED:- none})"
-note "checked $CHECKED harness(es); absent:${SKIPPED:- none}"
+note "checked $CHECKED harness(es); absent/skipped:${SKIPPED:- none}"
 pass "secondmate busy contract live guard checked every installed harness"

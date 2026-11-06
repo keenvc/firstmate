@@ -33,6 +33,18 @@ set -u
 
 fm_live_gate default-on FM_PI_BRANCH_RESPONSIVENESS_E2E pi tmux node
 
+# A keystroke-latency floor is only meaningful on a host with spare capacity:
+# when every CPU is contended the unloaded floor and the loaded arms drift
+# independently, and the budget derived from the floor stops separating them
+# (observed on this shared host at several runnable tasks per CPU, where the
+# floor arm alone drifted by an order of magnitude between runs). Skip with the
+# reading rather than report a false regression.
+LOAD_PER_CPU=$(node -e 'const os=require("os"); console.log((os.loadavg()[0]/os.cpus().length).toFixed(2));')
+if node -e 'process.exit(Number(process.argv[1]) > 0.35 ? 0 : 1);' "$LOAD_PER_CPU"; then
+  printf 'skip: host is too loaded for a keystroke-latency floor: 1-minute load %s per CPU exceeds 0.35\n' "$LOAD_PER_CPU"
+  exit 0
+fi
+
 PI_VERSION=$(pi --version 2>/dev/null || printf 'unknown')
 TMUX=$(command -v tmux)
 SOCKET="fm-pi-branch-responsiveness-$$"
