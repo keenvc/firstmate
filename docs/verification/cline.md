@@ -113,7 +113,7 @@ Session Summary
 
 So exit is `/exit`; resume-by-id is advertised by cline itself, but no firstmate pane-resume contract is claimed (deterministic relaunch is used instead).
 
-## Composer gap: placeholder luminance above the ghost ceiling
+## Composer placeholder and the named near-gray scope
 
 The idle placeholder renders as a muted truecolor grey, captured live as:
 
@@ -121,26 +121,33 @@ The idle placeholder renders as a muted truecolor grey, captured live as:
 [1m[38;2;121;184;255m❯[0m[38;2;255;255;255m [38;2;131;137;140mWhat can I do for you?[38;2;255;255;255m
 ```
 
-That foreground is `38;2;131;137;140`, perceived luminance `0.299*131 + 0.587*137 + 0.114*140 = 135.5`, just above `bin/fm-composer-lib.sh`'s fleet-wide `FM_COMPOSER_GHOST_LUMA_MAX` default of 128.
-`fm_composer_strip_ghost` therefore leaves it unstripped, and on the styled tmux/herdr captures an idle cline composer classifies `pending`, never `empty` - reproduced live on cline 3.0.62 with both the fresh-session and post-turn placeholders.
+That foreground is `38;2;131;137;140`, perceived luminance `0.299*131 + 0.587*137 + 0.114*140 = 135.5`, above `bin/fm-composer-lib.sh`'s fleet-wide `FM_COMPOSER_GHOST_LUMA_MAX` default of 128.
+Left in place, `fm_composer_strip_ghost` leaves it unstripped and an idle cline composer classifies `pending` on the styled tmux/herdr captures - confirmed live on cline 3.0.62 for both the fresh-session and post-turn placeholders.
+That was not cosmetic: `cline_composer_is_empty` gates every steer doorbell in `bin/fm-spawn.sh`, so a `pending` read skipped the doorbell on an idle pane ("composer visibly holds pending text") and a queued steer waited for a turn that never came.
 
-This is the same class of gap `docs/verification/rovo.md` documents and deliberately did not patch by raising the shared ceiling.
-Raising the ceiling for cline is also not a free fix: `tests/fm-composer-lib.test.sh`'s codex starfield fixture draws truecolor braille furniture at greys 132, 136, and 138 straddling the 128 ceiling, and the fixture proves those survivors are then resolved by the braille stripper.
-A shared ceiling between cline's 135.5 ghost and codex's 136-138 furniture does not exist, so the adapter does not move the shared default.
+Moving the SHARED default is not the fix. `tests/fm-composer-lib.test.sh`'s codex starfield fixture draws truecolor braille furniture at greys 132, 136, and 138 straddling the 128 ceiling, and a shared ceiling between cline's 135.5 ghost and codex's 136-138 furniture does not exist.
 
-Instead, cline's launch-then-send path does not depend on composer-empty:
+The implemented fix is the harness-scoped signal kiro already uses, with no fleet-wide default moved and no new knob: `fm_composer_gray_ghost_scope` names `kiro|cline`, so a NEAR-ACHROMATIC run (channel spread within `FM_COMPOSER_GHOST_GRAY_SPREAD_MAX`, 12 by default) on a pane whose harness was named as cline takes kiro's existing 180 gray ceiling. cline's spread is 9, so it qualifies; a bright typed draft does not.
+Read with the scope named, a live idle cline pane classifies `empty` while the same capture with no harness named still classifies `pending`:
 
-- readiness leads with cline's own `Auto-approve` status row (`cline_wait_for_ready`), exactly as rovo's readiness leads with the `Welcome to Rovo!` banner;
-- the brief pointer is sent once (one literal send plus one Enter) rather than through the shared retrying submit core, and delivery is confirmed from the recorded `busy cline-hook` state the workspace `TaskStart` hook writes (`cline_wait_for_delivery`);
-- steering still rides the shared send path, whose queued-Enter policy converts `pending + busy` to delivered, the same bounded retry rovo and agy already accept on a non-`empty` composer read.
+```
+$ fm_backend_composer_state tmux firstmate:fm-cline-proof-2        # unnamed
+pending
+$ FM_COMPOSER_HARNESS=cline fm_backend_composer_state tmux ...     # cline
+empty
+```
 
-The blast radius is therefore bounded to composer-emptiness consumers, and the fix, if desired, is a harness-scoped signal the shared composer classifier does not carry today - a follow-up, not this change.
+`cline_composer_is_empty` therefore passes `FM_COMPOSER_HARNESS=cline`, and `tests/fm-composer-lib.test.sh` pins both placeholders stripping, the unnamed read staying `pending`, and a bright typed draft surviving.
+
+Readiness still leads with cline's own `Auto-approve` status row (`cline_wait_for_ready`) and delivery is still confirmed from the recorded `busy cline-hook` state the workspace `TaskStart` hook writes (`cline_wait_for_delivery`): both are stronger and earlier signals than composer shape, and the composer is only a second door.
+Named-scope composer reads remain a veto, never proof of delivery, exactly as the shared classifier's contract requires.
 
 ## Still unproven
 
 - The Herdr backend path end to end for cline; only tmux was driven interactively in this pass. The live guard below is the repeatable refresh command.
 - The first-run "Introducing Cline Desktop" splash dismissal on a genuinely fresh profile. The live guard stages a copied `~/.cline` (a fresh profile) and exercises the splash branch, but a genuinely first-run store on a clean host was not observed.
 - A `/abort`-driven cancellation distinct from `Escape`; only `Escape` was exercised.
+- A cline pane with no `COLORTERM`, where the placeholder would draw from the 256-colour grey ramp (`38;5;245` at grey level 138) rather than truecolor. The named near-gray scope covers that index through the same fixed-ramp rule kiro uses, and `tests/fm-composer-lib.test.sh` pins the ramp behaviour, but no such cline capture was taken.
 - Interrupt acknowledgement beyond the `SessionShutdown` hook: cline records the abort through its hooks, but no rendered acknowledgement string is claimed.
 
 ## Refresh command

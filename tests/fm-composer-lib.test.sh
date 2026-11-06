@@ -1549,12 +1549,14 @@ test_selected_content_is_composer_scoped_and_wrap_normalized() {
   pass "fm_composer_extract_selected_content: scopes user content and excludes furniture"
 }
 
-# KIRO-ONLY near-gray ghost text: kiro draws its idle placeholder in a
+# KIRO's half of the near-gray ghost scope: kiro draws its idle placeholder in a
 # NEAR-ACHROMATIC truecolor above the 128 ghost ceiling, so it survived the strip
 # and read as real typed content - a composer that never reports empty, which
 # makes every steer defer forever on the exact `pending` skip. The wider ceiling
 # applies only when the caller names the harness kiro (FM_COMPOSER_HARNESS);
-# test_composer_widening_is_kiro_only below proves every other read is unchanged.
+# test_composer_widening_is_named_harness_only below proves every other read is
+# unchanged; the cline half of that same scope is pinned by
+# test_cline_near_gray_ghost_is_stripped_and_real_text_survives.
 #   kiro ghost      38;2;158;158;158  luma 158.0  spread   0  -> must STRIP
 #   grey real text  38;2;206;207;210  luma 207.0  spread   4  -> must SURVIVE
 #   muse real glyph 38;2;90;160;255   luma 149.9  spread 165  -> must SURVIVE
@@ -1587,6 +1589,57 @@ test_kiro_near_gray_ghost_is_stripped_and_real_text_survives() {
     || fail "a near-gray run at luma 190 must strip under FM_COMPOSER_GHOST_LUMA_MAX=200, got '$out'"
 
   pass "fm_composer_strip_ghost: on kiro, near-gray ghost strips while near-gray real text and a chromatic glyph survive"
+}
+
+# CLINE-SCOPED near-gray ghost text: cline's idle composer draws its placeholder
+# in 38;2;131;137;140 (luma 135.5, spread 9), just above the 128 shared ceiling,
+# so on styled captures an idle cline pane read `pending`, and bin/fm-spawn.sh's
+# cline steer guard (cline_composer_is_empty) skipped every doorbell as
+# "composer holds pending text". fm_composer_gray_ghost_scope names cline
+# alongside kiro, and kiro's existing 180 near-gray ceiling already covers
+# cline's value, so no fleet-wide default moves and no new knob appears.
+#   cline ghost      38;2;131;137;140  luma 135.5  spread   9  -> must STRIP
+#   cline real text  38;2;255;255;255  luma 255.0  spread   0  -> must SURVIVE
+test_cline_near_gray_ghost_is_stripped_and_real_text_survives() {
+  local out screen typed fresh id saved=${FM_COMPOSER_HARNESS-__unset__}
+
+  out=$(printf '%s' "${ESC}[38;2;131;137;140mAsk anything...${ESC}[0m" \
+    | FM_COMPOSER_HARNESS=cline fm_composer_strip_ghost)
+  [ -z "${out//[[:space:]]/}" ] \
+    || fail "cline's post-turn placeholder (luma 135.5, spread 9) must strip as ghost text, got '$out'"
+  out=$(printf '%s' "${ESC}[38;2;131;137;140mWhat can I do for you?${ESC}[0m" \
+    | FM_COMPOSER_HARNESS=cline fm_composer_strip_ghost)
+  [ -z "${out//[[:space:]]/}" ] \
+    || fail "cline's fresh-session placeholder must strip as ghost text, got '$out'"
+
+  # The named scope IS the fix: the same run with no harness named stays above
+  # the shared ceiling, so the cline case above cannot pass vacuously.
+  out=$(printf '%s' "${ESC}[38;2;131;137;140mAsk anything...${ESC}[0m" | fm_composer_strip_ghost)
+  [ "$out" = 'Ask anything...' ] \
+    || fail "the near-gray widening must not reach an unnamed read, got '$out'"
+
+  # NON-REGRESSION: typed text draws bright, so it survives the raised ceiling.
+  out=$(printf '%s' "${ESC}[38;2;255;255;255mfix the login bug${ESC}[0m" \
+    | FM_COMPOSER_HARNESS=cline fm_composer_strip_ghost)
+  [ "$out" = 'fix the login bug' ] \
+    || fail "NON-REGRESSION: typed cline text must survive the strip, got '$out'"
+
+  # Real captured rows (live cline 3.0.62 through tmux, docs/verification/cline.md):
+  # a muted 99;99;99 rule above and below, the prompt glyph in 121;184;255, the
+  # placeholder in 131;137;140, and the cursor parked on the composer row.
+  id=$(printf 'cline\tidle')
+  screen=$'transcript line\n'"${ESC}[38;2;99;99;99m────────────────────────────────────────${ESC}[0m"$'\n'"${ESC}[1m${ESC}[38;2;121;184;255m❯${ESC}[0m${ESC}[38;2;255;255;255m ${ESC}[38;2;131;137;140mAsk anything...${ESC}[0m"$'\n'"${ESC}[38;2;99;99;99m────────────────────────────────────────${ESC}[0m"
+  FM_COMPOSER_HARNESS=cline assert_screen "cline idle after a turn" empty "$CAPS_TMUX" "$screen" 2 "$id"
+  assert_screen "the same cline idle row unnamed" pending "$CAPS_TMUX" "$screen" 2 "$id"
+  fresh=$'Welcome to Cline\n'"${ESC}[38;2;99;99;99m────────────────────────────────────────${ESC}[0m"$'\n'"${ESC}[1m${ESC}[38;2;121;184;255m❯${ESC}[0m${ESC}[38;2;255;255;255m ${ESC}[38;2;131;137;140mWhat can I do for you?${ESC}[0m"$'\n'"${ESC}[38;2;99;99;99m────────────────────────────────────────${ESC}[0m"
+  FM_COMPOSER_HARNESS=cline assert_screen "cline fresh-session idle" empty "$CAPS_TMUX" "$fresh" 2 "$id"
+  # A typed draft in the same shape stays pending: deleting input would be worse
+  # than deferring a steer, which is why the type is never widened to white.
+  typed=$'transcript line\n'"${ESC}[38;2;99;99;99m────────────────────────────────────────${ESC}[0m"$'\n'"${ESC}[1m${ESC}[38;2;121;184;255m❯${ESC}[0m${ESC}[38;2;255;255;255m fix the login bug${ESC}[0m"$'\n'"${ESC}[38;2;99;99;99m────────────────────────────────────────${ESC}[0m"
+  FM_COMPOSER_HARNESS=cline assert_screen "cline typed draft" pending "$CAPS_TMUX" "$typed" 2 "$id"
+
+  [ "$saved" = __unset__ ] || FM_COMPOSER_HARNESS=$saved
+  pass "fm_composer_strip_ghost: on cline, both idle placeholders strip while a typed draft survives"
 }
 
 # A kiro pane with no COLORTERM gets the SAME grey in the 256-colour encoding:
@@ -1628,12 +1681,13 @@ test_kiro_palette_gray_ghost_is_stripped_and_chromatic_indexes_survive() {
   pass "fm_composer_strip_ghost: on kiro, palette greys strip while bright, chromatic and theme-remapped indexes survive"
 }
 
-# The kiro widening must not reach any other harness, nor a read that names no
-# harness: Claude draws a typed slash command in grey 38;2;112;112;112, which the
-# herdr payload proof reads with FM_COMPOSER_GHOST_LUMA_MAX=0, and the wider gray
-# ceiling stripped it, so a typed /exit was judged unsent. Each case is first
-# shown to diverge under the kiro scope, so none of them can pass vacuously.
-test_composer_widening_is_kiro_only() {
+# The near-gray widening (fm_composer_gray_ghost_scope: kiro and cline) must not
+# reach any other harness, nor a read that names no harness: Claude draws a typed
+# slash command in grey 38;2;112;112;112, which the herdr payload proof reads
+# with FM_COMPOSER_GHOST_LUMA_MAX=0, and the wider gray ceiling stripped it, so a
+# typed /exit was judged unsent. Each case is first shown to diverge under the
+# kiro scope, so none of them can pass vacuously.
+test_composer_widening_is_named_harness_only() {
   local out h hinted screen
   local saved=${FM_COMPOSER_HARNESS-__unset__}
   unset FM_COMPOSER_HARNESS
@@ -1649,10 +1703,10 @@ test_composer_widening_is_kiro_only() {
       || fail "harness '${h:-none}': Claude's grey typed /exit must survive with FM_COMPOSER_GHOST_LUMA_MAX=0, got '$out'"
     out=$(printf '%s' "${ESC}[38;2;158;158;158mask a question${ESC}[0m" | FM_COMPOSER_HARNESS=$h fm_composer_strip_ghost)
     [ "$out" = 'ask a question' ] \
-      || fail "harness '${h:-none}': a near-gray run above the shared ceiling must survive outside kiro, got '$out'"
+      || fail "harness '${h:-none}': a near-gray run above the shared ceiling must survive outside the named near-gray scope (kiro, cline), got '$out'"
     out=$(printf '%s' "${ESC}[38;5;240mask a question${ESC}[0m" | FM_COMPOSER_HARNESS=$h fm_composer_strip_ghost)
     [ "$out" = 'ask a question' ] \
-      || fail "harness '${h:-none}': a dark palette grey must stay untested outside kiro, got '$out'"
+      || fail "harness '${h:-none}': a dark palette grey must stay untested outside the named near-gray scope (kiro, cline), got '$out'"
   done
   out=$(printf '%s' "${ESC}[38;5;240mask a question${ESC}[0m" | FM_COMPOSER_HARNESS=kiro fm_composer_strip_ghost)
   [ -z "${out//[[:space:]]/}" ] \
@@ -1670,7 +1724,7 @@ test_composer_widening_is_kiro_only() {
   done
 
   [ "$saved" = __unset__ ] || FM_COMPOSER_HARNESS=$saved
-  pass "composer widening: the near-gray ceiling, palette greys, and hinted idle row apply on kiro only"
+  pass "composer widening: the near-gray ceiling, palette greys, and hinted idle row apply on the named scope (kiro, cline) only"
 }
 
 test_bare_shell_glyphs_are_unknown
@@ -1906,4 +1960,5 @@ test_dialog_note_skips_the_match_when_no_sink_is_set
 test_quoted_exit_picker_text_is_not_a_dialog
 test_kiro_near_gray_ghost_is_stripped_and_real_text_survives
 test_kiro_palette_gray_ghost_is_stripped_and_chromatic_indexes_survive
-test_composer_widening_is_kiro_only
+test_cline_near_gray_ghost_is_stripped_and_real_text_survives
+test_composer_widening_is_named_harness_only

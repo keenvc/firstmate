@@ -83,7 +83,7 @@ fm_control_harness_supported() {  # <harness>
 # `pi-signed` are exact because a `pi*` prefix would swallow the signed adapter,
 # `omp` is exact because an `omp*` prefix would claim unrelated commands, `agy`
 # is exact for the same reason on an even shorter name, `devin` and
-# `commandcode` are exact as well, `kiro` is exact because a `kiro*` prefix has no verified variant to admit, and an unrecognized value returns nonzero rather than being guessed into a family.
+# `commandcode` are exact as well, `kiro` is exact because a `kiro*` prefix has no verified variant to admit, and `cline` is a prefix so a raw `cline*` command records its family, and an unrecognized value returns nonzero rather than being guessed into a family.
 fm_control_harness_family() {  # <recorded-harness>
   case "${1-}" in
     pi) printf 'pi' ;;

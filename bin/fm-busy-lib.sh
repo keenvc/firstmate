@@ -47,12 +47,12 @@
 #   kiro-hook        Kiro V2 agent-config hooks (userPromptSubmit opens; stop
 #                    closes) - kiro's ONLY state source; its per-turn stop hook
 #                    also keeps the turn-ended notification touch
-#   droid-hook       Factory Droid per-task runtime-settings hooks
-#                    (UserPromptSubmit opens; Stop, SessionEnd, and the
-#                    idle_prompt Notification an Escape interrupt emits close)
 #   cline-hook       Cline workspace hook config files (.cline/hooks):
 #                    TaskStart opens a turn; TaskComplete, TaskCancel,
 #                    TaskError, and SessionShutdown all close it
+#   droid-hook       Factory Droid per-task runtime-settings hooks
+#                    (UserPromptSubmit opens; Stop, SessionEnd, and the
+#                    idle_prompt Notification an Escape interrupt emits close)
 #   codex-hook, codex-appserver  reserved: Codex, gated by
 #                    fm_busy_codex_semantic_source
 #   kimi-wire, kimi-hook  reserved: standalone Kimi, gated by fm_busy_kimi_verified

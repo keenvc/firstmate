@@ -251,7 +251,7 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|cortex|kiro|cline)
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin|commandcode|cortex|kiro|droid|cline)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -5994,7 +5994,10 @@ cline_capture() {
 }
 
 cline_composer_is_empty() {
-  [ "$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)" = empty ]
+  # FM_COMPOSER_HARNESS scopes the near-gray ghost ceiling to cline's own
+  # placeholder (bin/fm-composer-lib.sh, fm_composer_gray_ghost_scope), so an
+  # idle pane reads `empty` instead of the `pending` a bare read returns.
+  [ "$(FM_COMPOSER_HARNESS=cline fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)" = empty ]
 }
 
 # cline's one-time splash renders on a fresh profile and eats the first
@@ -6013,14 +6016,13 @@ cline_wait_for_ready() {
         CLINE_SPLASH_DISMISSED=1
       fi
     elif printf '%s\n' "$pane" | grep -Fq 'Auto-approve'; then
-      # cline's own status row proves the TUI is up. Composer-emptiness is NOT
-      # used as the lead readiness signal: cline renders its idle placeholder
-      # (`Ask anything...`, or the fresh-session `What can I do for you?`) as a
-      # muted truecolor grey just ABOVE the fleet-wide ghost-luma ceiling, so the
-      # shared classifier reads an idle cline composer `pending` on the styled
-      # tmux/herdr captures. That is the same known gap rovo documents
-      # (docs/verification/rovo.md). The status row is cline-specific, stable,
-      # and present exactly when the TUI is ready.
+      # cline's own status row proves the TUI is up, and it is the lead signal
+      # because it is cline-specific, stable, and present exactly when the TUI is
+      # ready. Composer-emptiness is a second door: cline's idle placeholder
+      # (`Ask anything...`, or the fresh-session `What can I do for you?`) draws
+      # at luminance 135.5, above the fleet-wide ghost ceiling, so cline names
+      # itself in fm_composer_gray_ghost_scope (bin/fm-composer-lib.sh) to have
+      # that placeholder stripped like kiro's.
       return 0
     elif cline_composer_is_empty; then
       return 0
@@ -8601,12 +8603,13 @@ if [ "$HARNESS" = cline ]; then
   fi
   CLINE_POINTER="Read the brief at $BRIEF_REAL and follow it exactly."
   # Type once and submit once, then confirm delivery from cline's recorded busy
-  # state (cline_wait_for_delivery). The shared fm_backend_send_text_submit
-  # cannot be used here: it expects the composer to leave `pending`, and an idle
-  # cline composer reads `pending` by design (the muted-placeholder gap above),
-  # so it would retry Enter and could queue extra submissions. One literal send
-  # plus one Enter is the whole interaction; the workspace TaskStart hook then
-  # opens the busy record the delivery gate reads.
+  # state (cline_wait_for_delivery). This stays a literal send plus one Enter
+  # rather than the shared fm_backend_send_text_submit: the shared core retries
+  # Enter while the composer still holds text, and readiness here is proved by
+  # cline's own status row rather than by a settled composer, so a pane that has
+  # not redrawn yet could take extra queued submissions. One send plus one Enter
+  # is the whole interaction; the workspace TaskStart hook then opens the busy
+  # record the delivery gate reads.
   if ! spawn_send_literal "$T" "$CLINE_POINTER"; then
     cline_spawn_fail "cline brief pointer could not be submitted into window $T"
     exit 1

@@ -271,6 +271,21 @@ fm_composer_kiro_scope() {
   [ "${FM_COMPOSER_HARNESS:-}" = kiro ]
 }
 
+# fm_composer_gray_ghost_scope: 0 when the named harness draws its idle
+# placeholder as a near-achromatic truecolor run ABOVE the fleet-wide ghost
+# ceiling, so fm_composer_strip_ghost must raise that ceiling for this read.
+# kiro draws 38;2;158;158;158 (luminance 158.0, channel spread 0) and cline
+# draws 38;2;131;137;140 (luminance 135.5, spread 9), both above the 128 default
+# and both near-gray, so the gray ceiling covers each one without a fleet-wide
+# raise. This scope deliberately does NOT carry kiro's hinted idle row: that row
+# is kiro's own shape (fm_composer_kiro_scope above).
+fm_composer_gray_ghost_scope() {
+  case "${FM_COMPOSER_HARNESS:-}" in
+    kiro|cline) return 0 ;;
+  esac
+  return 1
+}
+
 # fm_composer_strip_ghost: the ONE fleet-wide ANSI-aware extractor of "real typed
 # content" from a captured, styled composer row. Reads the styled line on stdin
 # (from `tmux capture-pane -e`, `herdr pane read --format ansi`, or
@@ -303,12 +318,14 @@ fm_composer_kiro_scope() {
 # backend's identity probe attributes to Command Code is read with a fixed
 # ceiling of 160 in its place (fm_composer_classify_screen).
 #
-# KIRO ONLY: when the caller names the pane's harness as kiro
-# (FM_COMPOSER_HARNESS=kiro, see fm_composer_kiro_scope), a NEAR-ACHROMATIC run
-# gets a higher ceiling, because kiro draws its idle placeholder in a grey above
-# the 128 default. Every other harness, and a read with no harness named, keeps
-# exactly the rules above: the wider ceiling read Claude's grey slash-command
-# input (38;2;112;112;112, which the herdr payload proof reads with
+# NAMED-HARNESS NEAR-GRAY GHOST (kiro and cline): when the caller names the
+# pane's harness as kiro or cline (FM_COMPOSER_HARNESS, see
+# fm_composer_gray_ghost_scope), a NEAR-ACHROMATIC run gets a higher ceiling,
+# because both draw their idle placeholder in a grey above the 128 default
+# (kiro 38;2;158;158;158, spread 0; cline 38;2;131;137;140, spread 9). Every
+# other harness, and a read with no harness named, keeps exactly the rules
+# above: the wider ceiling read Claude's grey slash-command input
+# (38;2;112;112;112, which the herdr payload proof reads with
 # FM_COMPOSER_GHOST_LUMA_MAX=0) as a placeholder, so it is not a fleet default.
 #   FM_COMPOSER_GHOST_GRAY_LUMA_MAX (default 180) applies when
 #   FM_COMPOSER_GHOST_GRAY_SPREAD_MAX (default 12) covers the run's channel
@@ -317,6 +334,7 @@ fm_composer_kiro_scope() {
 # the higher of the two, so an operator who raises FM_COMPOSER_GHOST_LUMA_MAX
 # above 180 still gets that wider strip on gray text as the knob documents.
 #   kiro ghost      38;2;158;158;158  luminance 158.0  spread   0  -> stripped
+#   cline ghost     38;2;131;137;140  luminance 135.5  spread   9  -> stripped
 #   grey real text  38;2;206;207;210  luminance 207.0  spread   4  -> kept
 #   muse real glyph 38;2;90;160;255   luminance 149.9  spread 165  -> kept
 # The same scope also luminance-tests a 256-colour foreground, because kiro
@@ -337,7 +355,7 @@ fm_composer_kiro_scope() {
 # runs alike pass through or drop intact without locale-dependent classes.
 fm_composer_strip_ghost() {
   local grayscope=0
-  fm_composer_kiro_scope && grayscope=1
+  fm_composer_gray_ghost_scope && grayscope=1
   LC_ALL=C awk -v lumamax="${FM_COMPOSER_GHOST_LUMA_MAX:-128}" -v grayscope="$grayscope" \
     -v graylumamax="${FM_COMPOSER_GHOST_GRAY_LUMA_MAX:-180}" \
     -v grayspreadmax="${FM_COMPOSER_GHOST_GRAY_SPREAD_MAX:-12}" '
@@ -670,13 +688,13 @@ FM_COMPOSER_SHELL_PROMPT_GLYPHS=$(printf '%s\n' '>' '$' '%' '#')
 # the `>` glyph inside its bordered composer (verified live, droid 0.251.0), and
 # its terminal cursor parks on the first ghost letter, leaving a reverse-video
 # remnant that the plain-row anchors below resolve to `empty`.
-# cline (Cline CLI) renders `Ask anything...` in a session that already has
-# turns and the welcome placeholder `What can I do for you?` in a fresh session
-# (verified live, cline 3.0.62); both are dim/muted placeholders in an
-# otherwise-empty bordered composer and both must read `empty`, or a first cline
-# spawn's readiness gate would time out on a fresh profile. Their truecolor
-# (38;2;131;137;140, luminance 135.5) sits above the shared ghost ceiling, which
-# is why cline names itself in fm_composer_gray_ghost_scope above.
+# cline renders `Ask anything...` in a session that already has turns and the
+# welcome placeholder `What can I do for you?` in a fresh session (verified live,
+# cline 3.0.62); both are dim/muted placeholders in an otherwise-empty bordered
+# composer and both must read `empty`, or a steer guard defers forever on an
+# idle cline pane. Their truecolor (38;2;131;137;140, luminance 135.5) sits above
+# the shared ghost ceiling, which is why cline names itself in
+# fm_composer_gray_ghost_scope above.
 FM_COMPOSER_IDLE_RE_DEFAULT='^Type a message\.\.\.$|^Ask anything(\.\.\.|…)|^Plan, search, build anything$|^Add a follow-up$|^Ask Devin to build features, fix bugs, or work on your code$|^Ask your question\.\.\.$|^Type your message\.\.\.$|^Type to queue message\.\.\.$|^Try ".*"$|^What can I do for you\?$'
 
 # KIRO ONLY (fm_composer_kiro_scope): idle placeholders that carry a submit hint
