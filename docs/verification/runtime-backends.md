@@ -1678,15 +1678,27 @@ The picker is recognised by its recorded structure only: the heading on its own 
 The same strings quoted above a normal composer, as a diff, this note, or a test fixture shows them, are not a picker.
 Submit retries now stop after the Enter that opened the picker and report unknown.
 A typed submit to a pane that already shows the picker types nothing and sends no Enter.
-Exit reports that the worker is blocked on the Claude background-task exit picker and does not type another Enter.
-A submit can return before any read sees the picker, so exit reads the screen once more when its wait for the agent to stop times out, and names the picker there too.
+Exit and relaunch answer the picker themselves with one confirming Enter, because its selected row performs the stop those verbs exist to perform (`bin/fm-control-lib.sh` `fm_control_exit_picker_confirmable`); the result then carries `dialog=background-tasks`.
+That confirmation is gated on the composer reading exactly `empty`: a picker over any other composer verdict (`pending`, `pending-unproven`, `unknown`, or an unreadable read) is refused and named as a prompt the operator must resolve.
+Interrupt never confirms a dialog.
+A submit can return before any read sees the picker, so exit reads the screen once more when its wait for the agent to stop times out, and confirms or names the picker there too.
 Exit does not report a stopped agent whose pane still shows the picker text as blocked on a prompt.
 The watcher reads the picker with the same matcher on the stale-path capture it already takes for a worker.
 A worker pane parked on it keeps the ordinary stale triage and schedule, and its plain stale reason and its final wedge escalation reason name the picker after `blocked-on-prompt:`; the deferral, dead-record, and declared-wait recheck reasons do not.
 A second mate stays off that path, and a finished worker in away mode is handled as before.
 That watcher and away-daemon reporting is covered by fakes in `tests/fm-watch-triage.test.sh` and `tests/fm-daemon.test.sh`, not by a live measurement.
-No recorded screen was available for a model-downgrade confirmation, an MCP approval, or a Claude exit confirmation other than this picker, so those dialogs are not covered.
-Refusing an Enter that would confirm a dialog restores an existing safety path, so it is not gated behind a flag.
+No recorded screen was available for a model-downgrade confirmation, an MCP approval, or a Claude exit confirmation other than this picker, so those dialogs are not covered: every one of them keeps the older refusal.
+Refusing an Enter that would confirm any other dialog stays unconditional, and is not gated behind a flag.
+
+### OpenCode 2 flat composer
+
+Measured 2026-11-07 against opencode 2.0.32 through the named non-default Herdr lab, with the idle and typed screens recorded byte for byte in `tests/fixtures/opencode-2.0.32-flat/` (`.ansi` and `.plain` of each).
+2.x replaces the 1.x rail with one left-bar column closed by a half-block floor row (`╹▀▀…`), draws the mode/model footer inside that column directly above the floor, and puts the cwd/keybinding hints (dots, `shift+tab agents`, `ctrl+p commands`) on the row below it.
+The idle composer reads `empty` and the typed one reads `pending`, both from the styled cursor-anchored read and from a bare plain read of the typed screen the verdict is `unknown`.
+`_fm_composer_leftbar_flat_shape` proves the 2.x layout from the screen alone before any verdict leans on it: the region's last row is the floor, the row above it is the footer, and the row below it is the status row.
+A region that fails any of those three is read by the ordinary left-bar rules, so every 1.x fixture keeps the verdict it had.
+Committing the floor row only when that proof holds is what keeps a 1.x screen (whose floor sits below its footer) on the 1.x geometry.
+`bin/fm-composer-lib.sh` `fm_composer_explain_unknown` names the shapes a refused screen did offer, so an `unknown` refusal distinguishes an unlearned harness from one whose composer moved.
 
 ### Prune and respawn
 

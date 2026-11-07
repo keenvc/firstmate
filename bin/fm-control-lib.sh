@@ -342,6 +342,48 @@ fm_control_relaunch_resume_flag() {  # <harness> <registered-agent>
   return 0
 }
 
+# The one blocking dialog whose selected row performs a stop (`Exit and stop
+# tasks`): Claude's background-task exit picker, named by
+# fm_composer_blocking_dialog (bin/fm-composer-lib.sh).
+# This name is also the value bin/fm-composer-lib.sh's fm_composer_blocking_dialog
+# prints for that picker; the dialog matcher stays its owner.
+# shellcheck disable=SC2034
+FM_CONTROL_EXIT_PICKER='Claude background-task exit picker'
+
+# fm_control_exit_picker_confirmable <dialog-name> <composer-state>: whether
+# exit/relaunch may answer this dialog with one confirming Enter. Both
+# conditions are required and neither is optional:
+#   - the dialog is the recorded exit picker, whose selected row stops the
+#     agent. Any other dialog selects an option the operator must choose.
+#   - the composer reads exactly `empty`, because a confirming Enter cannot
+#     retroactively prove no text was waiting behind the dialog - a
+#     `pending`, `pending-unproven`, or `unknown` read could concatenate onto
+#     text this plane cannot see.
+# This function is screen-free on purpose: the dialog name comes from the
+# existing picker matcher, and callers that have no live backend (the operator
+# interface) judge the same two values without reading a pane. On refusal it
+# sets FM_CONTROL_EXIT_PICKER_WHY to the concrete reason, empty on success; that
+# variable is global because the caller's refusal message is the only reader.
+fm_control_exit_picker_confirmable() {  # <dialog-name> <composer-state>
+  local name=${1-} state=${2-}
+  # Declared non-local because the caller's refusal message is its reader.
+  # shellcheck disable=SC2034
+  FM_CONTROL_EXIT_PICKER_WHY=
+  if [ "$name" != "$FM_CONTROL_EXIT_PICKER" ]; then
+    # Read by the caller's refusal message, never by this file.
+    # shellcheck disable=SC2034
+    FM_CONTROL_EXIT_PICKER_WHY="'${name:-an unnamed prompt}' is not the exit picker, so its selected row is an option only the operator can choose"
+    return 1
+  fi
+  if [ "$state" != empty ]; then
+    # Read by the caller's refusal message, never by this file.
+    # shellcheck disable=SC2034
+    FM_CONTROL_EXIT_PICKER_WHY="its composer state is '${state:-unread}', not proven empty, so a confirming Enter could concatenate onto text this plane cannot see"
+    return 1
+  fi
+  return 0
+}
+
 # Which named keys a backend adapter can deliver. Every session provider
 # normalizes Enter, Ctrl+C, and the Ctrl+U composer clear; Orca's terminal API
 # exposes only an interrupt and an Enter, so it can deliver neither Escape nor

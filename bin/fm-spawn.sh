@@ -65,6 +65,7 @@
 #   steering inbox. This never rewrites a project's instruction files or a
 #   secondmate's charter.
 #        fm-spawn.sh <task-id> --relaunch [--harness <name>] [--model <name>] [--effort <level>] [--account <entry>]
+#                                        [--fresh-session]
 #   --relaunch launches a replacement agent for an EXISTING task into that
 #   task's own recorded worktree, reusing its recorded endpoint when that
 #   endpoint still exists, instead of creating either from scratch. It is
@@ -95,6 +96,12 @@
 #   rebind is a recovery, never a teardown. Only a crewmate or scout rebinds: a
 #   secondmate whose endpoint is gone is respawned by its own owner
 #   (`--secondmate`, driven by the session-start liveness sweep).
+#   --fresh-session asks the replacement for a NEW agent session instead of the
+#   runtime's own resume form, for when the previous agent's conversation is
+#   what broke it. It is refused without --relaunch. The choice is recorded as
+#   session=fresh|resumed in the task record, and only OpenCode 2 needs launch
+#   arguments for it (it resumes the worktree's latest session by default; 1.x
+#   and every other runtime already start fresh - relaunch_fresh_args owns it).
 #   Every fresh ship/scout launch and replacement explicitly enters the recorded
 #   worktree immediately before trust setup and brief delivery, and a pre-launch
 #   cwd check refuses any endpoint that still reports another copy; a Herdr shell
@@ -542,11 +549,16 @@
 #     __PIEXCLUDE__ optional ` --exclude-tools '<comma-joined names>'` from
 #                  config/crew-exclude-tools on Pi/pi-signed ship and scout
 #                  launches (supplies its own leading space, empty otherwise)
-#     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
-#                  Pi replacement on the session the endpoint's runtime already
-#                  reports (relaunch_resume_args below owns it; it supplies its
-#                  own leading space, and is empty on every fresh spawn and for
-#                  every other harness)
+#     __PIRESUME__ optional relaunch-only session argument that keeps a
+#                  replacement on the session its runtime should use. For a Pi
+#                  replacement it is `--session <reference>` naming the session
+#                  the endpoint's runtime already reports (relaunch_resume_args
+#                  below owns it); for a fresh OpenCode 2 replacement it is
+#                  `--session <new id>` naming a session that cannot exist yet,
+#                  so the launch starts from the brief instead of continuing the
+#                  worktree's latest (relaunch_fresh_args below owns it). It
+#                  supplies its own leading space, and is empty on every fresh
+#                  spawn and for every other harness.
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi busy-state extension,
@@ -1021,6 +1033,12 @@ TRACEPARENT_SET=0
 ACCOUNT_ARG=
 ACCOUNT_SET=0
 RELAUNCH=0
+# A relaunch may ask for a genuinely NEW agent session instead of the runtime's
+# own resume form (see relaunch_resume_args); the choice is recorded in the task
+# record as session=fresh|resumed. Refused unless --relaunch is also given,
+# below.
+FRESH_SESSION=0
+FRESH_SESSION_SET=0
 # Opt-in only: exact-resume presentation-order lock waits instead of refusing.
 # Absent/unset keeps upstream refuse-on-contention. See header.
 HERDR_RESUME_LOCK_WAIT=0
@@ -1102,6 +1120,7 @@ for a in "$@"; do
     KIND_SET=1
     ;;
   --relaunch) RELAUNCH=1 ;;
+  --fresh-session) FRESH_SESSION=1; FRESH_SESSION_SET=1 ;;
   --herdr-resume-lock-wait) HERDR_RESUME_LOCK_WAIT=1 ;;
   --harness) want_value=harness ;;
   --harness=*)
@@ -1274,6 +1293,12 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   }
 else
+  # Freshness is a choice about replacing an agent, so it is meaningless on a
+  # first launch and is refused rather than silently ignored.
+  [ "$FRESH_SESSION_SET" -eq 0 ] || {
+    echo "error: --fresh-session applies only to --relaunch, which replaces an existing agent; a first launch always starts a new session" >&2
+    exit 1
+  }
   # Delivery contract (AGENTS.md section 7). A ship task's mode and yolo are
   # firstmate's per-task decision, so they are required and closed-set validated
   # here rather than resolved from the project registry. Scouts deliver a report
@@ -3061,7 +3086,7 @@ launch_template() {
   # carries no such words. OpenCode 2.0.32 has no system-prompt flag, so the
   # doorbell line is self-describing and the worker opens it: verified live
   # that an OpenCode 2.0.32 worker reads the named record and acts on it.
-  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
+  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN____PIRESUME__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIEXCLUDE____PIRESUME__'
     if [ "$kind" = secondmate ]; then
@@ -3892,6 +3917,40 @@ relaunch_resume_args() {  # <harness> <backend> <target>
   flag=$(fm_control_relaunch_resume_flag "$harness" "$agent") || return 0
   [ -n "$flag" ] && [ -n "$ref" ] || return 0
   printf -- ' %s %s' "$flag" "$(shell_quote "$ref")"
+}
+
+# relaunch_fresh_args: the launch arguments that make a RELAUNCH start a
+# genuinely NEW agent session, printed only for a runtime whose launch would
+# otherwise continue the previous conversation on its own.
+#
+# This is the opposite request to relaunch_resume_args, and the two never both
+# apply. It exists because a replacement is sometimes wanted with a clean
+# conversation - the previous agent's context is what broke it - and a runtime
+# that resumes implicitly would otherwise carry that context straight over.
+#
+# OpenCode 2 is the runtime with that implicit resume: it continues the most
+# recent session for the worktree's directory unless `--session <id>` names one
+# (`opencode --help`, 2.0.32: "Session ID to continue, or to create if it does
+# not exist"). So a fresh relaunch passes an id that cannot exist yet, minted
+# here, and OpenCode creates that session from the launch brief instead. 1.x has
+# no such option and no implicit resume, so it needs nothing and its launch
+# stays byte-identical. Every other runtime returns nothing for the same reason:
+# their launch is already a fresh session unless a resume form is passed.
+#
+# Prints the arguments with the single leading space that appends them to the
+# launch line.
+relaunch_fresh_args() {  # <harness> <opencode-version>
+  local harness=${1-} version=${2-} major
+  [ "$harness" = opencode ] || return 0
+  major=${version%%.*}
+  case "$major" in
+  '' | 0 | 1) return 0 ;;
+  esac
+  # A session id must be unique across relaunches of the same task, and readable
+  # in a task record; the timestamp keeps it ordered and the pid plus $RANDOM
+  # keep two relaunches of one task from colliding.
+  printf -- ' --session %s' \
+    "$(shell_quote "fm-fresh-$(date -u +%Y%m%dT%H%M%SZ)-${BASHPID:-$$}-$RANDOM")"
 }
 
 model_flag_for_harness() {
@@ -6797,6 +6856,15 @@ case "$OPENCODE_VERSION" in
 *) OPENCODE_MAJOR=${OPENCODE_VERSION%%.*} ;;
 esac
 
+# Which agent session a relaunch replacement gets: `fresh` when --fresh-session
+# asked for a new one, `resumed` when the runtime's own resume form was used.
+# Empty on a first launch, which records nothing. Computed here because the task
+# record is written below; the launch arguments land further down.
+SESSION_MODE=
+if [ "$RELAUNCH" -eq 1 ]; then
+  if [ "$FRESH_SESSION" -eq 1 ]; then SESSION_MODE=fresh; else SESSION_MODE=resumed; fi
+fi
+
 # Arm the semantic busy-state contract (bin/fm-busy-lib.sh) for every
 # adapter with a verified semantic source, including a --secondmate launch.
 # The parent watcher reads this home's record; skipping the arm left a
@@ -7779,7 +7847,7 @@ SPAWN_META_PATH=$SPAWN_META_TMP
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness hermes_profile hermes_home kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
+      split("window endpoint_task_id worktree project harness hermes_profile hermes_home kind mode yolo branch tasktmp base_branch upstream_consent forge backup_remote backup_prefix model effort opencode_version account account_provider omp_profile busy_gen spawn_gen session approval_mode traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id paseo_terminal_id paseo_workspace_id rex_server rex_session_id rex_window_id rex_block_id t3_thread_id t3_project_id tern_session_id tern_tab_id tern_block_id hc_session hc_terminal home projects control_relaunch_tx polytoken_session polytoken_port polytoken_credential", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -7825,6 +7893,10 @@ preserve_relaunch_meta() {
   [ "$HARNESS" != hermes ] || { echo "hermes_profile=$HERMES_PROFILE"; echo "hermes_home=$HERMES_PROFILE_HOME"; }
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
   echo "spawn_gen=$SPAWN_GEN"
+  # session= records what a replacement agent got: a new session or the resumed
+  # one. Written only on a relaunch, so a first launch's record stays
+  # byte-identical.
+  [ -z "$SESSION_MODE" ] || echo "session=$SESSION_MODE"
   # Default-off writes no traceparent= line.
   # backend= is written only for a non-default (non-tmux) backend, so the
   # default path's meta stays byte-identical (absent backend= means tmux;
@@ -7996,11 +8068,18 @@ EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT" "$MODEL" "$OPENCODE_MA
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
 LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
 # Relaunch session continuity. Computed here, where the adopted endpoint (T) is
-# known, and substituted only into the Pi-family template's `__PIRESUME__`
+# known, and substituted only into the launch templates' `__PIRESUME__`
 # placeholder; an empty value leaves every other launch byte-identical.
 RESUME_ARGS=
 if [ "$RELAUNCH" -eq 1 ]; then
-  RESUME_ARGS=$(relaunch_resume_args "$HARNESS" "$BACKEND" "$T") || RESUME_ARGS=
+  if [ "$FRESH_SESSION" -eq 1 ]; then
+    # --fresh-session: the replacement must NOT inherit the previous agent's
+    # conversation, so its session identity is forced new. Which runtimes
+    # continue a previous session by default is owned by relaunch_fresh_args.
+    RESUME_ARGS=$(relaunch_fresh_args "$HARNESS" "$OPENCODE_VERSION") || RESUME_ARGS=
+  else
+    RESUME_ARGS=$(relaunch_resume_args "$HARNESS" "$BACKEND" "$T") || RESUME_ARGS=
+  fi
 fi
 LAUNCH=${LAUNCH//__PIRESUME__/$RESUME_ARGS}
 LAUNCH=${LAUNCH//__CLAUDEPERMFLAG__/$CLAUDE_PERM_FLAG}

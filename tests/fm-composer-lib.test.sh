@@ -1992,5 +1992,82 @@ test_dialog_note_skips_the_match_when_no_sink_is_set
 test_quoted_exit_picker_text_is_not_a_dialog
 test_kiro_near_gray_ghost_is_stripped_and_real_text_survives
 test_kiro_palette_gray_ghost_is_stripped_and_chromatic_indexes_survive
+test_matrix_opencode_flat_2x() {
+  # Real OpenCode 2.0.32 captured live on 2026-11-07 through the herdr lab
+  # (tests/fixtures/opencode-2.0.32-flat/). 2.x throws away the 1.x rail: the
+  # composer is ONE left-bar column closed by a half-block floor, with the
+  # mode/model footer INSIDE the run directly above that floor and the
+  # cwd/keybinding status row drawn BELOW it:
+  #   ┃
+  #   ┃  Ask anything… "Fix a TODO in the codebase"
+  #   ┃
+  #   ┃  Build · No provider selected Connect a provider
+  #   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  #   …/firstm…/data/fm-control-opencode2-exit  shift+tab agents  ctrl+p commands
+  # Before this fixture existed the classifier answered `unknown` for the idle
+  # pane, because the footer was no longer the run's last row.
+  local dir idle typed composer out missing_nostatus
+  dir="$ROOT/tests/fixtures/opencode-2.0.32-flat"
+  idle=$(<"$dir/opencode-2.0.32-idle.ansi")
+  typed=$(<"$dir/opencode-2.0.32-typed.ansi")
+
+  # Cursor on the hint row (21) and on the cwd/status row one past the floor
+  # (26): 2.x parks its cursor on that row, so it must count as inside the
+  # same composer once the shape is proved.
+  assert_screen "opencode 2.0.32 idle on herdr" empty "$CAPS_STYLED" "$idle"
+  assert_screen "opencode 2.0.32 idle on tmux (cursor in composer)" empty "$CAPS_TMUX" "$idle" 21
+  assert_screen "opencode 2.0.32 idle on tmux (cursor on status row)" empty "$CAPS_TMUX" "$idle" 26
+  assert_screen "opencode 2.0.32 typed on herdr" pending "$CAPS_STYLED" "$typed"
+  assert_screen "opencode 2.0.32 typed on tmux (cursor in composer)" pending "$CAPS_TMUX" "$typed" 21
+  assert_screen "opencode 2.0.32 typed on tmux (cursor on status row)" pending "$CAPS_TMUX" "$typed" 26
+  # Plain backends keep the strict posture on the same bytes: never empty on
+  # real typed text, exactly like opencode 1.19.0's plain reading.
+  assert_screen "opencode 2.0.32 idle on plain backends" empty "$CAPS_PLAIN" "$idle"
+  assert_screen "opencode 2.0.32 typed on plain backends defers" unknown "$CAPS_PLAIN" "$typed"
+
+  # The two furniture rows are excluded from extracted content: the idle pane
+  # yields nothing, and the typed pane yields exactly the typed line.
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$idle")
+  [ -z "$out" ] || fail "opencode 2.0.32 idle extraction must yield nothing, got '$out'"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$typed")
+  [ "$out" = 'hello typed text' ] \
+    || fail "opencode 2.0.32 typed extraction must yield only the typed line, got '$out'"
+
+  # NON-VACUOUSNESS 1: the empty verdict rests on the hint regex, not on
+  # swallowing the hint row. Overriding the idle set away turns the same idle
+  # pane into pending, which is the strict posture (never empty without a
+  # recognised placeholder).
+  out=$(FM_COMPOSER_IDLE_RE='^NEVER-MATCHES$' fm_composer_classify_screen "$CAPS_STYLED" "$idle")
+  [ "$out" = pending ] \
+    || fail "with no idle placeholder the 2.x hint row must read pending, got '$out'"
+
+  # NON-VACUOUSNESS 2: the shape needs its status row. Removing that row leaves
+  # the flat shape unproven and the screen refuses instead of guessing.
+  missing_nostatus=$(printf '%s\n' "$idle" | sed '26d')
+  out=$(fm_composer_classify_screen "$CAPS_STYLED" "$missing_nostatus")
+  [ "$out" = unknown ] \
+    || fail "without the 2.x status row the shape must stay unproven, got '$out'"
+
+  # NON-VACUOUSNESS 3: the footer exemption is what makes the idle pane empty.
+  # With a footer pattern that matches nothing, the footer row reads as real
+  # content and the verdict refuses instead of inventing `empty`.
+  out=$(FM_COMPOSER_LEFTBAR_FOOTER_RE='^NEVER-MATCHES$' fm_composer_classify_screen "$CAPS_STYLED" "$idle")
+  case "$out" in
+    empty) fail "an unrecognised 2.x footer must never read empty" ;;
+    pending|unknown) : ;;
+    *) fail "an unrecognised 2.x footer must refuse (pending or unknown), got '$out'" ;;
+  esac
+
+  # The floor alone never proves 2.x: opencode 1.18.31 draws a floor below its
+  # footer too, and there it stands OUTSIDE the run (see
+  # test_matrix_opencode_leftbar_cwd_furniture).
+  composer=$(printf '%s\n' "$idle" | sed -n '21,26p')
+  [ "$(printf '%s\n' "$composer" | wc -l)" -eq 6 ] \
+    || fail "the 2.x composer must span six rows in this fixture, got '$(printf '%s\n' "$composer" | wc -l)'"
+
+  pass "matrix: opencode 2.0.32's flat composer reads empty/pending and scopes its furniture"
+}
+
 test_cline_near_gray_ghost_is_stripped_and_real_text_survives
 test_composer_widening_is_named_harness_only
+test_matrix_opencode_flat_2x

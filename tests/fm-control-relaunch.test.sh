@@ -54,6 +54,12 @@ trap relaunch_cleanup EXIT
 # The same lifecycle-modelling tmux stub as tests/fm-control.test.sh: the
 # harness's exit command stops the agent, and a launch-brief literal starts the
 # harness named in `becomes`.
+#
+# An OpenCode 2 relaunch also has to satisfy the launch owner's delivery gate,
+# which wants the worker's busy-state plugin to report a started turn. The stub
+# runs the exact apply command fm-spawn generated into the worktree plugin, the
+# way tests/fixtures.sh's spawn tmux does, and only for an OpenCode 2 launch
+# (detected through the launch line and the plugin's presence).
 make_tmux_stub() {  # <dir>
   local fb="$1/fakebin"
   mkdir -p "$fb"
@@ -61,6 +67,18 @@ make_tmux_stub() {  # <dir>
 #!/usr/bin/env bash
 set -u
 D=$FM_FAKE_DIR
+oc_plugin=$D/../wt/.opencode/plugins/fm-busy-state.js
+oc_turn_starts() {
+  local bin state id gen
+  [ -f "$oc_plugin" ] || return 0
+  bin=$(sed -n 's/.*execFile("\([^"]*fm-busy-event\.sh\)".*/\1/p' "$oc_plugin" | head -1)
+  state=$(sed -n 's/.*"apply", "\([^"]*\)", "\([^"]*\)", state,.*/\1/p' "$oc_plugin" | head -1)
+  id=$(sed -n 's/.*"apply", "\([^"]*\)", "\([^"]*\)", state,.*/\2/p' "$oc_plugin" | head -1)
+  gen=$(sed -n 's/.*"--gen", "\([^"]*\)".*/\1/p' "$oc_plugin" | head -1)
+  [ -n "$bin" ] && [ -n "$gen" ] || return 0
+  "$bin" apply "$state" "$id" busy --gen "$gen" --source opencode-plugin \
+    --event session-execution-started >/dev/null 2>&1 || true
+}
 case "${1:-}" in
   send-keys)
     shift
@@ -86,6 +104,16 @@ case "${1:-}" in
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
           cat "$D/becomes" > "$D/command"
           [ -z "${FM_FAKE_LAUNCH_TRANSPORT_FAIL_AFTER_START:-}" ] || exit 1
+          # An OpenCode 2 launch is the one carrying --standalone (the 2.x
+          # template's marker); a --session argument may sit between it and
+          # --prompt, so both are matched independently.
+          case "$payload" in
+            *'--standalone'*)
+              case "$payload" in
+                *'--prompt'*) oc_turn_starts ;;
+              esac
+              ;;
+          esac
           ;;
       esac
     else
@@ -101,6 +129,21 @@ case "${1:-}" in
           [ -z "${FM_FAKE_TRACE_EXPORTED:-}" ] || : > "$FM_FAKE_TRACE_EXPORTED"
           ;;
       esac
+      # An OpenCode 2 agent exits on raw keys, not a typed /exit: Ctrl-U clears
+      # the composer, Ctrl-C interrupts, and a second Ctrl-C on an idle agent
+      # stops it (bin/fm-control-lib.sh owns that table). Modelled so a
+      # relaunch of an OpenCode 2 task can prove its endpoint agent-free.
+      if [ -f "$D/../wt/.opencode/plugins/fm-busy-state.js" ]; then
+        case "$payload" in
+          C-c)
+            if [ -e "$D/oc-ctrl-c" ]; then
+              printf 'zsh' > "$D/command"
+            else
+              : > "$D/oc-ctrl-c"
+            fi
+            ;;
+        esac
+      fi
     fi
     exit 0 ;;
   display-message)
@@ -1707,6 +1750,128 @@ test_spawn_relaunch_without_a_harness_reuses_the_recorded_one() {
   pass "fm-spawn --relaunch: with no explicit harness it reuses the task's recorded one, never the crew default"
 }
 
+# fake_opencode_version <case-dir> <version>: the case's opencode binary reports
+# <version> from `--version`, the probe fm-spawn keys the 2.x launch shapes off.
+fake_opencode_version() {
+  cat > "$1/fakebin/opencode" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = --version ]; then
+  printf '%s\n' '${2}'
+fi
+exit 0
+SH
+  chmod +x "$1/fakebin/opencode"
+}
+
+# OpenCode 2 continues the worktree's latest session by default, so a plain
+# relaunch of one is a resumed conversation and says so. Nothing is passed that
+# would change its launch, so the recorded shape stays what a first launch used.
+test_spawn_relaunch_defaults_to_the_resumed_session() {
+  local dir out launch
+  dir=$(new_case freshresume rl60)
+  add_ship_task "$dir" rl60 opencode
+  printf 'zsh' > "$dir/fake/command"
+  fake_opencode_version "$dir" 2.0.32
+  out=$(run_spawn "$dir" rl60 --relaunch)
+  assert_contains "$out" "spawned rl60" "the relaunch should complete"
+  [ "$(meta_field "$dir" rl60 session)" = resumed ] \
+    || fail "a default relaunch must record session=resumed, got '$(meta_field "$dir" rl60 session)'"
+  launch=$(cat "$dir/fake/literal")
+  case "$launch" in
+  *--session*) fail "a default relaunch must not force a session id, got: $launch" ;;
+  esac
+  pass "fm-spawn --relaunch: a default relaunch of OpenCode 2 records session=resumed and passes no session id"
+}
+
+# --fresh-session is for when the old conversation is what broke the agent: the
+# replacement must start from the launch brief, not from the previous session.
+test_spawn_relaunch_fresh_session_forces_a_new_opencode_session() {
+  local dir out first second
+  dir=$(new_case freshnew rl61)
+  add_ship_task "$dir" rl61 opencode
+  printf 'zsh' > "$dir/fake/command"
+  fake_opencode_version "$dir" 2.0.32
+  out=$(run_spawn "$dir" rl61 --relaunch --fresh-session)
+  assert_contains "$out" "spawned rl61" "the fresh relaunch should complete"
+  [ "$(meta_field "$dir" rl61 session)" = fresh ] \
+    || fail "a --fresh-session relaunch must record session=fresh, got '$(meta_field "$dir" rl61 session)'"
+  first=$(cat "$dir/fake/literal")
+  # The id is shell-quoted on the launch line, as every launch argument is.
+  case "$first" in
+  *--session\ \'fm-fresh-*\'" --prompt "*) : ;;
+  *) fail "a fresh relaunch must name a new session id immediately before --prompt, got: $first" ;;
+  esac
+  # A second fresh relaunch gets a different id, so the replacement can never
+  # rejoin the conversation the first one was told to leave behind. The first
+  # launch left an agent running at the endpoint, and every relaunch requires a
+  # positively agent-free one, so the stub pane reports its shell again.
+  : > "$dir/fake/literal"
+  printf 'zsh' > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl61 --relaunch --fresh-session)
+  assert_contains "$out" "spawned rl61" "the second fresh relaunch should complete"
+  second=$(cat "$dir/fake/literal")
+  [ "$first" != "$second" ] || fail "two fresh relaunches must not share a session id"
+  pass "fm-spawn --relaunch --fresh-session: OpenCode 2 starts a new session from the brief, a distinct one per relaunch"
+}
+
+# A runtime that already starts fresh needs no argument, and its launch must
+# stay byte-identical, so only the record changes.
+test_spawn_relaunch_fresh_session_changes_nothing_for_a_fresh_by_default_runtime() {
+  local dir out launch
+  dir=$(new_case freshclaude rl62)
+  add_ship_task "$dir" rl62 claude
+  printf 'zsh' > "$dir/fake/command"
+  out=$(run_spawn "$dir" rl62 --relaunch --fresh-session)
+  assert_contains "$out" "spawned rl62" "the fresh relaunch should complete"
+  [ "$(meta_field "$dir" rl62 session)" = fresh ] \
+    || fail "the record must still say session=fresh"
+  launch=$(grep -v '^cd ' "$dir/fake/literal" || true)
+  case "$launch" in
+  *--session*) fail "a runtime that already starts fresh must get no session id, got: $launch" ;;
+  esac
+  pass "fm-spawn --relaunch --fresh-session: a runtime that already starts a new session gets no extra argument"
+}
+
+test_spawn_fresh_session_is_refused_on_a_first_launch() {
+  local dir out rc
+  dir=$(new_case freshlaunch rl63)
+  add_ship_task "$dir" rl63 claude
+  out=$(run_spawn "$dir" rl63 --fresh-session); rc=$?
+  expect_code 1 "$rc" "--fresh-session without --relaunch should refuse"
+  assert_contains "$out" "applies only to --relaunch" "the refusal should name the relaunch-only rule"
+  pass "fm-spawn --fresh-session: refused on a first launch rather than silently ignored"
+}
+
+# The control verb carries it end to end, and reports which session the
+# replacement got.
+test_relaunch_fresh_session_is_reported_and_recorded() {
+  local dir out rc
+  dir=$(new_case freshcontrol rl64)
+  add_ship_task "$dir" rl64 opencode
+  printf 'zsh' > "$dir/fake/command"
+  fake_opencode_version "$dir" 2.0.32
+  out=$(run_control "$dir" rl64 relaunch --note "start clean after the crash" --fresh-session); rc=$?
+  expect_code 0 "$rc" "a fresh relaunch should succeed"$'\n'"$out"
+  assert_contains "$out" "session=fresh" "the result should report the new session"
+  [ "$(meta_field "$dir" rl64 session)" = fresh ] || fail "the record must say session=fresh"
+  assert_grep "--session 'fm-fresh-" "$dir/fake/literal" "the replacement must be launched with a new session id"
+  out=$(run_control "$dir" rl64 relaunch --note "carry on"); rc=$?
+  expect_code 0 "$rc" "the default relaunch should succeed"$'\n'"$out"
+  assert_contains "$out" "session=resumed" "a default relaunch should report the resumed session"
+  pass "fm-control relaunch: --fresh-session reaches the launch and both choices report what they got"
+}
+
+test_relaunch_fresh_session_flag_is_refused_on_other_verbs() {
+  local dir out rc
+  dir=$(new_case freshverbs rl65)
+  add_ship_task "$dir" rl65 claude
+  out=$(run_control "$dir" rl65 interrupt --fresh-session); rc=$?
+  expect_code 1 "$rc" "--fresh-session on interrupt should refuse"
+  assert_contains "$out" "apply to 'relaunch' only" "the refusal should name the relaunch-only rule"
+  [ ! -s "$dir/fake/keys" ] || fail "a refused control command must send nothing"
+  pass "fm-control: --fresh-session belongs to relaunch only"
+}
+
 # A promoted scout records kind=ship and a custom ship branch in its meta, but
 # its brief is the scout scaffold: it never gained a Ship branch line, and a
 # relaunch cannot regenerate the brief (--branch-prefix is refused there). The
@@ -3147,6 +3312,12 @@ SH
 }
 
 test_relaunch_off_opencode_removes_tracked_wiring
+test_spawn_relaunch_defaults_to_the_resumed_session
+test_spawn_relaunch_fresh_session_forces_a_new_opencode_session
+test_spawn_relaunch_fresh_session_changes_nothing_for_a_fresh_by_default_runtime
+test_spawn_fresh_session_is_refused_on_a_first_launch
+test_relaunch_fresh_session_is_reported_and_recorded
+test_relaunch_fresh_session_flag_is_refused_on_other_verbs
 test_exit_and_relaunch_remove_the_dialog_file
 test_exit_removes_the_dialog_file_before_releasing_the_lock
 test_same_harness_relaunch_keeps_identity_and_reuses_the_endpoint

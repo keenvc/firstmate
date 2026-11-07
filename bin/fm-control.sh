@@ -7,6 +7,7 @@
 #        fm-control.sh <task-id> relaunch [--harness <name>] [--model <name>]
 #                                         [--effort <level>] [--account <entry>]
 #                                         (--note <text> | --note-file <path>)
+#                                         [--fresh-session]
 #
 # Why this exists, and how it differs from fm-send.sh. bin/fm-send.sh is the
 # DATA plane: conversational text for the agent to read, always routing-marked
@@ -102,6 +103,14 @@
 #              inherits the local copy but none of the conversation; a
 #              secondmate reconciles its own home's records at startup, so its
 #              standing charter is never rewritten.
+#              --fresh-session asks for a replacement with a NEW agent session
+#              rather than the runtime's own resume form, for when the old
+#              conversation is what went wrong; the task record then says
+#              session=fresh and the result line says session=fresh (the
+#              default records and reports session=resumed). Only OpenCode 2
+#              needs a launch argument for it (bin/fm-spawn.sh's
+#              relaunch_fresh_args owns that); every other runtime already
+#              starts a new session on relaunch.
 #              Records a durable checkpoint and that note, exits the old agent,
 #              then delegates the launch to its single owner,
 #              bin/fm-spawn.sh --relaunch. A failure before publication keeps
@@ -278,6 +287,10 @@ EFFORT_SET=0
 ACCOUNT_SET=0
 NOTE=
 NOTE_SET=0
+# Opt-in for a relaunch: a replacement with a new agent session rather than the
+# runtime's own resume form. Default off, so an existing relaunch is unchanged.
+FRESH_SESSION=0
+FRESH_SESSION_SET=0
 control_want_value=
 for control_arg in "$@"; do
   if [ -n "$control_want_value" ]; then
@@ -310,6 +323,7 @@ for control_arg in "$@"; do
     --account=*) NEW_ACCOUNT=${control_arg#--account=}; ACCOUNT_SET=1 ;;
     --note) control_want_value=note ;;
     --note=*) NOTE=${control_arg#--note=}; NOTE_SET=1 ;;
+    --fresh-session) FRESH_SESSION=1; FRESH_SESSION_SET=1 ;;
     --note-file) control_want_value=note_file ;;
     --note-file=*)
       [ -f "${control_arg#--note-file=}" ] || die "--note-file '${control_arg#--note-file=}' is not a readable file"
@@ -325,8 +339,8 @@ if [ -n "$control_want_value" ]; then
 fi
 
 if [ "$VERB" != relaunch ]; then
-  [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$ACCOUNT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] \
-    || die "--harness, --model, --effort, --account, and --note apply to 'relaunch' only"
+  [ "$HARNESS_SET" = 0 ] && [ "$MODEL_SET" = 0 ] && [ "$EFFORT_SET" = 0 ] && [ "$ACCOUNT_SET" = 0 ] && [ "$NOTE_SET" = 0 ] && [ "$FRESH_SESSION_SET" = 0 ] \
+    || die "--harness, --model, --effort, --account, --note, and --fresh-session apply to 'relaunch' only"
 fi
 [ "$ACCOUNT_SET" = 0 ] || [ -n "$NEW_ACCOUNT" ] || die "--account requires a non-empty value"
 [ "$HARNESS_SET" = 0 ] || [ -n "$NEW_HARNESS" ] || die "--harness requires a non-empty value"
@@ -450,11 +464,31 @@ require_state_verified_backend() {  # <verb>
   die "task $ID runs on the $BACKEND backend, which has no recovery-grade agent-state classifier, so '$1' cannot prove the agent actually stopped; refusing rather than reporting an unproven transition as done"
 }
 
-# refuse_blocking_prompt: the screen is a dialog a confirming Enter would
-# answer. Name it and stop. Do not type Escape or an option: both dismiss
-# or choose.
-refuse_blocking_prompt() {  # <dialog-name>
-  die "task $ID is blocked on a prompt: $1. Refusing to type Enter into it."
+# confirm_exit_picker <dialog-name> <composer-state>: exit and relaunch exist to
+# stop an agent, so for the ONE dialog whose selected row stops it - Claude's
+# background-task picker, where the selected row is `Exit and stop tasks` - a
+# confirming Enter performs exactly the stop this verb was asked for, and the
+# ordinary dead-state wait proves it. Every other dialog, and this one over a
+# composer that is not proven empty, refuses: name it and stop, typing neither
+# Escape nor an option, because both dismiss or choose.
+# Typing is impossible by construction on the confirm path: the caller proves
+# the composer is empty before this runs, and the picker owns the screen's
+# keyboard. Sets CONFIRMED_DIALOG so the result names what was confirmed. The
+# ordered conditions themselves live in fm_control_exit_picker_confirmable
+# (bin/fm-control-lib.sh), so the screen scan and the screen-free interface read
+# the same rules.
+confirm_exit_picker() {  # <dialog-name> <composer-state>
+  local name=$1 state=$2
+  fm_control_exit_picker_confirmable "$name" "$state" \
+    || die "task $ID is blocked on a prompt: ${name:-an unnamed prompt}, and exit cannot confirm it: $FM_CONTROL_EXIT_PICKER_WHY. Refusing to press Enter. Clear the composer or dismiss the dialog, then retry '$VERB'"
+  CONFIRMED_DIALOG=background-tasks
+}
+
+# fm_control_dialog_result: the result-field tail naming a dialog this action
+# confirmed, empty when none was. A stop that confirmed the picker is not the
+# same event as one that merely confirmed the agent stopped.
+fm_control_dialog_result() {
+  [ -z "${CONFIRMED_DIALOG:-}" ] || printf ' %s' "dialog=$CONFIRMED_DIALOG"
 }
 
 # rendered_matches <ere>: whether any row of the visible viewport matches.
@@ -463,6 +497,59 @@ rendered_matches() {  # <ere>
   local screen
   screen=$(fm_backend_visible_capture "$BACKEND" "$T" "$LABEL" 2>/dev/null) || return 1
   printf '%s\n' "$screen" | grep -Eq -- "$1"
+}
+
+# fm_control_explain_unknown_composer: the WHY behind a composer verdict that is
+# neither `empty` nor `pending`, read from the same viewport under the same rules
+# the classifier just refused with (bin/fm-composer-lib.sh
+# fm_composer_explain_unknown). It never decides a verdict; it only names the
+# shapes the screen did offer, so a refusal can tell an unlearned harness from
+# one whose composer moved.
+# It re-reads the screen because the verdict alone carries no rows, so it must
+# reproduce the per-backend capture the verdict used, caps included: a
+# cursor-less backend's caps (styled/identity/rows) are what select its
+# classifier path, and describing a screen under other caps would name shapes
+# that classifier never saw. A backend whose capture cannot be reproduced here
+# declines rather than explaining from a screen it cannot vouch for.
+fm_control_explain_unknown_composer() {
+  local cap caps cy=''
+  fm_backend_visible_capture_supported "$BACKEND" || return 1
+  case "$BACKEND" in
+    tmux)
+      # Explain the same read that produced the verdict: tmux classifies a
+      # styled, cursor-anchored capture (bin/fm-tmux-lib.sh, already sourced
+      # through bin/fm-backend.sh).
+      fm_backend_source tmux || return 1
+      cap=$(fm_tmux_composer_capture "$T" 2>/dev/null) || return 1
+      [ -n "$cap" ] || return 1
+      caps=$(fm_tmux_composer_caps)
+      cy=$(fm_tmux_composer_cursor_row "$T" 2>/dev/null) || cy=''
+      ;;
+    herdr)
+      # Herdr prefers its styled viewport and degrades to plain, and classifies
+      # with identity on (it may re-run the identity probe).
+      if cap=$(fm_backend_herdr_visible_capture_ansi "$T" 2>/dev/null) && [ -n "$cap" ]; then
+        caps=$(printf 'styled=1\ncursor=0\nidentity=1')
+      else
+        cap=$(fm_backend_visible_capture "$BACKEND" "$T" "$LABEL" 2>/dev/null) || return 1
+        [ -n "$cap" ] || return 1
+        caps=$(printf 'styled=0\ncursor=0\nidentity=1')
+      fi
+      ;;
+    *)
+      # Every other viewport-bounded backend classifies cursor-less, unstyled,
+      # with identity on. Its rows cap only bounds a scan, which reads no
+      # further than the screen it is handed, so it is safe to omit: the
+      # explanation can only under-report shapes this screen lacks.
+      cap=$(fm_backend_visible_capture "$BACKEND" "$T" "$LABEL" 2>/dev/null) || return 1
+      [ -n "$cap" ] || return 1
+      caps=$(printf 'styled=0\ncursor=0\nidentity=0')
+      ;;
+  esac
+  # FM_COMPOSER_HARNESS is already set for this shell (see the assignment above
+  # the composers), so the explanation is read under the same per-harness rules
+  # as the verdict it explains.
+  fm_composer_explain_unknown "$caps" "$cap" "$cy"
 }
 
 # wait_rendered <ere> <timeout>: poll the viewport until a row matches.
@@ -715,7 +802,8 @@ retire_busy_incarnation() {
 # do_exit: stop the running agent, preserving endpoint and worktree. Prints
 # `already-stopped`, `endpoint-gone`, or `stopped`.
 do_exit() {
-  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog
+  local state cmd hazard verdict composer_state cancel absence interrupt_result=not-needed dialog confirmed_already
+  CONFIRMED_DIALOG=
   require_state_verified_backend exit
   fm_control_backend_exit_supported "$BACKEND" \
     || die "task $ID runs on the $BACKEND backend, whose T3 Orchestrator V2 tools have no session stop, so 'exit' cannot stop its agent; 'interrupt' ends the running turn and teardown archives the thread"
@@ -797,7 +885,11 @@ do_exit() {
   # rather than a function that subshell sourced.
   if [ -s "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
     dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
-    refuse_blocking_prompt "$dialog"
+    # A picker already on screen: exit is the verb that stops this agent, and
+    # fm_control_exit_picker_confirmable decides whether one Enter may confirm
+    # it (the exit picker over a proven-empty composer) or whether it must
+    # refuse.
+    confirm_exit_picker "$dialog" "$composer_state"
   fi
   case "$composer_state" in
     empty) ;;
@@ -805,7 +897,15 @@ do_exit() {
       die "task $ID's composer visibly holds pending text; refusing to type the $cmd exit command because it would concatenate onto that text. Clear or submit the pending text, then retry '$VERB'"
       ;;
     *)
-      die "task $ID's composer state is '$composer_state', not proven empty; refusing to type the $cmd exit command because it could concatenate onto existing text. Clear the composer, then retry '$VERB'"
+      # An unknown verdict says nothing about WHY, and the two causes need
+      # different fixes: a harness whose composer the classifier has never
+      # learned, or a known harness whose composer moved. Name the shapes the
+      # screen actually offered so the refusal carries that evidence.
+      why=$(fm_control_explain_unknown_composer) || why=''
+      # Explanation is optional evidence; read under `set -u`, an unset value is
+      # just an absent explanation rather than a crash on the refusal path.
+      [ -n "${why:-}" ] || why=
+      die "task $ID's composer state is '$composer_state', not proven empty${why:+ ($why)}; refusing to type the $cmd exit command because it could concatenate onto existing text. Clear the composer, then retry '$VERB'"
       ;;
   esac
   # The submit verdict is NOT the postcondition here: a successful exit command
@@ -831,36 +931,70 @@ do_exit() {
       fi
       ;;
     *)
-      verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
-        || die "the exit command could not be sent to task $ID on $BACKEND"
-      [ "$verdict" != send-failed ] \
-        || die "the exit command could not be sent to task $ID on $BACKEND"
+      # A picker this plane has already decided to confirm is answered here,
+      # with the one Enter that selects its stop row, instead of typing the
+      # exit command into its keyboard.
+      if [ -z "$CONFIRMED_DIALOG" ]; then
+        verdict=$(fm_backend_send_text_submit "$BACKEND" "$T" "$cmd" "$EXIT_RETRIES" "$POLL" 1.2 "$LABEL") \
+          || die "the exit command could not be sent to task $ID on $BACKEND"
+        [ "$verdict" != send-failed ] \
+          || die "the exit command could not be sent to task $ID on $BACKEND"
+      fi
       # The submitting Enter can open the picker. The agent is still alive, and
-      # another Enter would confirm the selected row. A dead agent may leave the
-      # same text behind; that is not a prompt still waiting.
+      # another Enter would confirm the selected row - which, for the exit
+      # picker, is exactly the stop this verb was asked for. A dead agent may
+      # leave the same text behind; that is not a prompt still waiting.
       if [ -s "${FM_COMPOSER_DIALOG_SINK:-}" ]; then
         dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
         if [ "$(agent_state)" != dead ]; then
-          refuse_blocking_prompt "$dialog"
+          confirm_exit_picker "$dialog" "$composer_state"
         fi
+      fi
+      if [ -n "$CONFIRMED_DIALOG" ]; then
+        # The composer under a picker is not readable as text, so the pending
+        # guard above ran before the submit and still holds; the confirming
+        # Enter is the only key this branch sends.
+        fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" \
+          || die "task $ID shows the $dialog and the confirming Enter could not be delivered on $BACKEND; the agent is still running"
       fi
       ;;
   esac
   state=$(wait_agent_state "$EXIT_WAIT" dead) || {
     # A submit can return before any read sees the picker: a native busy
     # verdict needs no composer read, and a cleared composer can be read
-    # before the picker renders. Read the screen once more here.
+    # before the picker renders. Read the screen again here, and confirm an
+    # exit picker the same way the earlier reads would have. The read runs
+    # whether or not a picker was already confirmed: a dead picker can leave
+    # rows that resemble one, and only an unconfirmed dialog is confirmed.
+    confirmed_already=${CONFIRMED_DIALOG:-none}
+    # Cleared so this late read can confirm a picker itself, and set again by
+    # confirm_exit_picker when it does; the saved value is restored below so a
+    # failure still reports that a confirming Enter WAS sent earlier.
+    CONFIRMED_DIALOG=
     : > "$FM_COMPOSER_DIALOG_SINK" || true
     fm_backend_composer_state "$BACKEND" "$T" "$LABEL" >/dev/null 2>&1 || true
-    if [ -s "$FM_COMPOSER_DIALOG_SINK" ]; then
-      refuse_blocking_prompt "$(cat "$FM_COMPOSER_DIALOG_SINK")"
+    if [ -s "$FM_COMPOSER_DIALOG_SINK" ] && [ "$confirmed_already" = none ]; then
+      dialog=$(cat "$FM_COMPOSER_DIALOG_SINK")
+      confirm_exit_picker "$dialog" "$composer_state"
+      fm_backend_send_key "$BACKEND" "$T" Enter "$LABEL" \
+        || die "task $ID shows the $dialog and the confirming Enter could not be delivered on $BACKEND; the agent is still running"
+      if state=$(wait_agent_state "$EXIT_WAIT" dead); then
+        retire_busy_incarnation
+        printf 'stopped%s' "$(fm_control_dialog_result)"
+        return 0
+      fi
+      confirmed_already=$CONFIRMED_DIALOG
     fi
-    die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed; the agent did not stop within ${EXIT_WAIT}s"
+    # A confirming Enter WAS sent in either path, so the failure names the
+    # dialog it answered.
+    CONFIRMED_DIALOG=$confirmed_already
+    [ "$CONFIRMED_DIALOG" != none ] || CONFIRMED_DIALOG=
+    die "exit-delivered $ID interrupt=$interrupt_result exit-command=delivered agent-state=$state exit=unconfirmed$(fm_control_dialog_result); the agent did not stop within ${EXIT_WAIT}s"
   }
   # The incarnation is over: retire its busy wiring so no stale record or
   # orphaned generation survives the agent that produced it.
   retire_busy_incarnation
-  printf 'stopped'
+  printf 'stopped%s' "$(fm_control_dialog_result)"
 }
 
 # --- transactional relaunch -------------------------------------------------
@@ -1275,6 +1409,7 @@ do_relaunch() {
   [ "$TARGET_MODEL" = default ] || spawn_args+=(--model "$TARGET_MODEL")
   [ "$TARGET_EFFORT" = default ] || spawn_args+=(--effort "$TARGET_EFFORT")
   [ -z "$TARGET_ACCOUNT" ] || spawn_args+=(--account "$TARGET_ACCOUNT")
+  [ "$FRESH_SESSION" = 1 ] && spawn_args+=(--fresh-session)
   if FM_CONTROL_RELAUNCH_TX="$RELAUNCH_TX" \
       "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" >/dev/null; then
     RELAUNCH_META_PUBLISHED=1
@@ -1308,7 +1443,7 @@ do_relaunch() {
 
   journal_write complete "${CHECKPOINT_LINES[@]}" "$note_line" "exit_result=$exit_result"
   RELAUNCH_ACTIVE=0
-  echo "relaunched $ID harness=$TARGET_HARNESS from=$PRIOR_RECORDED_HARNESS model=$TARGET_MODEL effort=$TARGET_EFFORT backend=$BACKEND endpoint=$T worktree=$WT"
+  echo "relaunched $ID harness=$TARGET_HARNESS from=$PRIOR_RECORDED_HARNESS model=$TARGET_MODEL effort=$TARGET_EFFORT backend=$BACKEND endpoint=$T worktree=$WT session=$(fm_meta_get "$META" session)"
 }
 
 # --- verbs ------------------------------------------------------------------

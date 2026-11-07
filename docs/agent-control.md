@@ -55,7 +55,11 @@ muse is the one verified adapter that restores the cancelled prompt back into it
 The clear is refused before anything is sent when the recorded backend cannot deliver it.
 
 For a typed exit, `exit` reads the composer's state before typing the exit command and requires the exact `empty` verdict; a `pending` verdict refuses by naming the pending text, and any other verdict (`unknown`, `pending-unproven`, or an unreadable read) refuses as not proven empty, matching the fail-safe contract every other consumer that can overwrite composer input follows.
-`exit` also refuses, naming the dialog as `blocked on a prompt`, when the screen shows a recognised dialog that a further Enter would answer, whether the dialog was open before the exit command was typed or the submitting Enter opened it; it sends no Escape and chooses no option, so closing the dialog is left to the operator.
+An `unknown` refusal also names what the read could not match, so an idle screen on a runtime the classifier does not yet recognise is actionable rather than a bare verdict.
+`exit` also refuses, naming the dialog as `blocked on a prompt`, when the screen shows a recognised dialog that a further Enter would answer and the composer is not proven empty, whether the dialog was open before the exit command was typed or the submitting Enter opened it; it sends no Escape and chooses no option, so closing the dialog is left to the operator.
+The one dialog `exit` answers itself is Claude's background-task exit picker while its selected row is `Exit and stop tasks` and the composer reads exactly `empty`: it sends one confirming Enter, carries on to the ordinary dead-state wait, and reports `dialog=background-tasks` in the result.
+Interrupt never confirms a dialog.
+[`fm_control_exit_picker_confirmable`](../bin/fm-control-lib.sh) owns that two-part rule without reading a screen, so the control plane and an offline operator interface reach the same answer from the same two values.
 A stopped agent whose pane still shows the dialog text is not refused.
 [`fm_composer_blocking_dialog`](../bin/fm-composer-lib.sh) owns the recognised set, which today is only Claude's background-task exit picker; [its verification record](verification/runtime-backends.md#claude-background-task-exit-picker) lists the dialogs that are not covered.
 T3 Code has no composer and its `/mcp` tools offer no session stop, so `exit` refuses there before sending anything ([`t3code-backend.md`](t3code-backend.md#current-lifecycle-and-safety)).
@@ -93,10 +97,12 @@ A relaunch does take one session reference when the endpoint's own runtime recor
    A secondmate relaunch does not require one and never rewrites its standing charter.
 4. **Stop the old agent** through the `exit` verb, with its postcondition.
 5. **Launch the replacement** through its single owner, `bin/fm-spawn.sh --relaunch`, which reuses the recorded worktree instead of creating one, adopts the recorded endpoint when it still exists, clears the previous harness's per-task wiring, and arms a fresh busy generation.
+   `--fresh-session` asks for a replacement with a new agent session instead of the runtime's own resume form, for when the old conversation is what broke the agent; only OpenCode 2 needs a launch argument for that, because it otherwise continues the worktree's most recent session, while every other runtime already starts a new one.
+   The task record says which happened in `session=fresh|resumed`, and the verb's result line repeats it.
    When the recorded endpoint is proven gone rather than merely idle or unreachable - which only Herdr and Rex can establish - the launch owner creates one fresh endpoint in that same worktree and the republished record rebinds the task to it - see [Reclaiming a task whose endpoint is gone](#reclaiming-a-task-whose-endpoint-is-gone).
 6. **Preserve runtime-bound status authority where supported.**
    The endpoint's runtime may bind pane status to one session identity; the launch owner preserves it only when that runtime records a reference the replacement adapter can consume, and otherwise launches the ordinary fresh session.
-   This reference is a launch input, never authority to send, close, or act on the pane.
+   This reference is a launch input, never authority to send, close, or act on the pane, and `--fresh-session` overrides it on purpose.
    [`docs/herdr-backend.md`](herdr-backend.md#agent-status-authority-and-relaunch) owns the mechanism and measured behavior.
 
 Switching harness is therefore one ordinary relaunch rather than a separate mechanism.

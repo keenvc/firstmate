@@ -150,6 +150,16 @@ case "${1:-}" in
          && { [ "$payload" = Escape ] || [ "$payload" = C-c ]; }; then
         printf 'zsh' > "$D/command"
       fi
+      # A dialog's confirming Enter stops the agent when the case says the
+      # picker's selected row does (`enter-stops-agent`).
+      if [ "$payload" = Enter ] && [ -n "${FM_FAKE_ENTER_STOPS_AGENT:-}" ]; then
+        printf 'zsh' > "$D/command"
+      fi
+      # OpenCode 2's exit key opens the picker: the pane then hosts it instead
+      # of the composer, so the next read must see the dialog.
+      if [ "$payload" = C-c ] && [ -n "${FM_FAKE_KEY_OPENS_PICKER:-}" ]; then
+        : > "$D/key-opened-picker"
+      fi
       if [ -n "${FM_FAKE_SECOND_CTRL_C_STOPS_AGENT:-}" ] && [ "$payload" = C-c ]; then
         if [ -e "$D/first-ctrl-c" ]; then
           printf 'zsh' > "$D/command"
@@ -170,8 +180,12 @@ case "${1:-}" in
     for a in "$@"; do
       case "$a" in
         *cursor_y*)
-          # A modelled Devin screen parks the cursor on its composer row.
-          if [ -f "$D/devin" ]; then
+          # A modelled Devin screen parks the cursor on its composer row, an
+          # OpenCode 2.x capture parks it on the bare bar row its flat composer
+          # starts from, and an explicit fake/cursor-y wins for both.
+          if [ -f "$D/cursor-y" ]; then
+            cat "$D/cursor-y"
+          elif [ -f "$D/devin" ]; then
             devin_screen "$(cat "$D/devin")" | awk '/^❭ /{ print NR - 1; exit }'
           else
             printf '1\n'
@@ -195,7 +209,8 @@ case "${1:-}" in
         exit 0
       fi
     fi
-    if [ -f "$D/devin" ]; then devin_screen "$(cat "$D/devin")"; elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
+    if [ -f "$D/devin" ]; then devin_screen "$(cat "$D/devin")"; elif [ -e "$D/key-opened-picker" ]; then cat "$D/after-key"
+    elif [ -f "$D/pane" ]; then cat "$D/pane"; else printf '╭────╮\n│    │\n╰────╯\n'; fi
     exit 0 ;;
   list-windows)
     if [ -f "$D/windows" ]; then cat "$D/windows"; fi
@@ -268,6 +283,8 @@ run_control() {
     FM_FAKE_MUSE_LOG="${FM_FAKE_MUSE_LOG:-}" \
     FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK="${FM_FAKE_MUSE_DISAPPEAR_BEFORE_ACK:-}" \
     FM_FAKE_INTERRUPT_STOPS_AGENT="${FM_FAKE_INTERRUPT_STOPS_AGENT:-}" \
+    FM_FAKE_ENTER_STOPS_AGENT="${FM_FAKE_ENTER_STOPS_AGENT:-}" \
+    FM_FAKE_KEY_OPENS_PICKER="${FM_FAKE_KEY_OPENS_PICKER:-}" \
     FM_FAKE_SECOND_CTRL_C_STOPS_AGENT="${FM_FAKE_SECOND_CTRL_C_STOPS_AGENT:-}" \
     FM_FAKE_DEVIN_PICKER_STUCK="${FM_FAKE_DEVIN_PICKER_STUCK:-}" \
     "$CONTROL" "$@" 2>&1
@@ -1032,33 +1049,82 @@ test_exit_refuses_an_open_background_picker() {
   add_task "$dir" t1 claude
   alive_as "$dir" claude
   exit_picker_screen > "$dir/fake/pane"
+  # An unmodelled screen's composer box reads pending, which is not the
+  # proven-empty composer this dialog is answered over.
   out=$(run_control "$dir" t1 exit); rc=$?
-  expect_code 1 "$rc" "an open exit picker should refuse"$'\n'"$out"
+  expect_code 1 "$rc" "an open exit picker over an unproven composer should refuse"$'\n'"$out"
   assert_contains "$out" "blocked on a prompt: Claude background-task exit picker" \
     "the refusal should name the dialog"
-  assert_not_contains "$out" "Esc" "the refusal must not name a dismissal key"
+  assert_contains "$out" "not proven empty" "the refusal should name the proof it lacks"
   [ ! -s "$dir/fake/literal" ] || fail "an open picker must not be typed into"
-  [ ! -s "$dir/fake/keys" ] || fail "an open picker must receive no keys"
-  pass "fm-control exit: an already-open background-task picker is not typed into"
+  [ ! -s "$dir/fake/keys" ] || fail "an open picker over an unproven composer must receive no keys"
+  pass "fm-control exit: an already-open background-task picker over an unproven composer is never typed into or confirmed"
 }
 
-test_exit_refuses_the_confirming_enter() {
+# A real OpenCode 2.0.32 pane (live capture, tests/fixtures/opencode-2.0.32-flat)
+# whose composer is idle: the cursor sits on the bare bar row the flat shape
+# starts from, row 21. The typed sibling is the fixture's own typed state.
+OPENCODE2_FIXTURE="$ROOT/tests/fixtures/opencode-2.0.32-flat"
+
+# exit_picker_capture <plain|ansi>: the OpenCode 2.0.32 idle pane with the
+# recorded Claude exit picker pasted at its bottom, the shape a picker renders
+# at the end of a screen.
+exit_picker_capture() {  # <plain|ansi>
+  local fixture=$OPENCODE2_FIXTURE/opencode-2.0.32-idle.$1
+  [ -s "$fixture" ] || fail "the OpenCode 2.0.32 $1 fixture is missing"
+  cat "$fixture"
+  exit_picker_screen
+}
+
+test_exit_confirms_the_exit_picker_over_an_empty_composer() {
   local dir out rc enters
-  dir=$(new_case confirm-picker)
+  dir=$(new_case picker-confirm)
+  add_task "$dir" t1 opencode
+  printf 'opencode_version=2.0.32\n' >> "$dir/home/state/t1.meta"
+  alive_as "$dir" opencode
+  printf '21' > "$dir/fake/cursor-y"
+  # The pane before the exit command: the idle 2.0.32 composer, proven empty.
+  cp "$OPENCODE2_FIXTURE/opencode-2.0.32-idle.plain" "$dir/fake/pane"
+  # Once the exit key lands, the picker replaces the composer on screen; its
+  # confirming Enter (the `Exit and stop tasks` row) stops the agent.
+  exit_picker_capture plain > "$dir/fake/after-key"
+  out=$(env FM_FAKE_KEY_OPENS_PICKER=1 FM_FAKE_ENTER_STOPS_AGENT=1 \
+    PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.2 \
+    "$CONTROL" t1 exit 2>&1); rc=$?
+  expect_code 0 "$rc" "the exit picker over an empty composer should be confirmed"$'\n'"$out"
+  assert_contains "$out" "stopped" "exit should report the stopped postcondition"
+  assert_contains "$out" "dialog=background-tasks" "the result should name the confirmed dialog"
+  [ ! -s "$dir/fake/literal" ] \
+    || fail "OpenCode 2 exits on keys, so no text should be typed, got '$(cat "$dir/fake/literal")'"
+  [ "$(grep -c '^C-c$' "$dir/fake/keys" || true)" -ge 1 ] \
+    || fail "the exit key should still be sent, got: $(cat "$dir/fake/keys")"
+  enters=$(grep -c '^Enter$' "$dir/fake/keys" || true)
+  [ "$enters" -eq 1 ] || fail "the picker takes exactly one confirming Enter, got $enters"
+  pass "fm-control exit: the background-task picker over an empty composer is confirmed once and the stop is proven"
+}
+
+# The picker's stop row is only reachable when nothing else is in the composer.
+# The composer box the stub renders for an unmodelled screen has no proven idle
+# shape, so this is the strict posture: a dialog whose composer cannot be proven
+# empty is refused rather than confirmed.
+test_exit_refuses_a_picker_over_an_unproven_composer() {
+  local dir out rc
+  dir=$(new_case picker-unproven)
   add_task "$dir" t1 claude
   alive_as "$dir" claude
-  exit_picker_screen > "$dir/fake/after-enter"
-  out=$(env FM_FAKE_NEVER_DIES=1 PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" \
-    FM_FAKE_DIR="$dir/fake" FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 \
+  printf '7' > "$dir/fake/cursor-y"
+  exit_picker_screen > "$dir/fake/pane"
+  out=$(env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_FAKE_DIR="$dir/fake" \
+    FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 \
     "$CONTROL" t1 exit 2>&1); rc=$?
-  expect_code 1 "$rc" "the confirming Enter should refuse"$'\n'"$out"
-  assert_contains "$out" "blocked on a prompt: Claude background-task exit picker" \
-    "the refusal should name the dialog"
+  expect_code 1 "$rc" "a dialog over an unproven composer must refuse"$'\n'"$out"
+  assert_contains "$out" "Claude background-task exit picker" "the refusal should name the dialog"
+  assert_contains "$out" "not proven empty" "the refusal should name the proof it lacks"
   assert_not_contains "$out" "Esc" "the refusal must not name a dismissal key"
-  [ "$(literals "$dir")" = /exit ] || fail "the exit command should still be typed, got '$(literals "$dir")'"
-  enters=$(grep -c '^Enter$' "$dir/fake/keys" || true)
-  [ "$enters" -eq 1 ] || fail "only the submitting Enter should be sent, got $enters"
-  pass "fm-control exit: the Enter that opens the background-task picker is not followed by a confirming Enter"
+  [ ! -s "$dir/fake/keys" ] || fail "a refused picker must receive no keys"
+  [ ! -s "$dir/fake/literal" ] || fail "a refused picker must not be typed into"
+  pass "fm-control exit: the exit picker is confirmed only over a proven-empty composer"
 }
 
 # The submit reads a cleared composer before the picker renders, so it reports
@@ -1071,19 +1137,23 @@ test_exit_names_a_picker_that_renders_after_the_submit() {
   alive_as "$dir" claude
   exit_picker_screen > "$dir/fake/after-enter"
   printf '1' > "$dir/fake/after-enter-late"
+  # The composer is proven empty before the submit, so the picker this plane
+  # then finds is confirmed once; an Enter that does not stop the agent still
+  # reports the unconfirmed stop rather than claiming one.
   out=$(env FM_FAKE_NEVER_DIES=1 PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" \
     FM_FAKE_DIR="$dir/fake" FM_CONTROL_POLL=0.01 FM_CONTROL_EXIT_WAIT=0.05 \
     "$CONTROL" t1 exit 2>&1); rc=$?
-  expect_code 1 "$rc" "a picker that renders after the submit should refuse"$'\n'"$out"
+  expect_code 1 "$rc" "an Enter that does not stop the agent reports an unconfirmed exit"$'\n'"$out"
   [ "$(cat "$dir/fake/after-enter-late")" = 0 ] \
     || fail "the submit should have read the ordinary pane once after Enter"
-  assert_contains "$out" "blocked on a prompt: Claude background-task exit picker" \
-    "the refusal should name the dialog"
-  assert_not_contains "$out" "did not stop within" \
-    "a recognised picker must not fall back to the generic timeout message"
+  assert_not_contains "$out" "blocked on a prompt" \
+    "a picker this plane may confirm is never reported as a refusal"
+  assert_contains "$out" "exit=unconfirmed" "an unstopped agent is reported as unconfirmed"
+  assert_contains "$out" "dialog=background-tasks" \
+    "a confirming Enter that was actually sent is named even when the agent did not stop"
   enters=$(grep -c '^Enter$' "$dir/fake/keys" || true)
-  [ "$enters" -eq 1 ] || fail "only the submitting Enter should be sent, got $enters"
-  pass "fm-control exit: a picker that renders after the submit returned is named when the stop wait times out"
+  [ "$enters" -eq 2 ] || fail "one submitting Enter plus one confirming Enter, got $enters"
+  pass "fm-control exit: a picker that renders after the submit is confirmed once, and an Enter that does not stop the agent is reported unconfirmed"
 }
 
 test_idle_agent_is_not_interrupted() {
@@ -1337,6 +1407,52 @@ EOF
   pass "fm-control-lib: only a runtime's own recorded session has a relaunch resume form"
 }
 
+# The confirmation rule is screen-free, so it is pinned directly: exactly the
+# recorded exit picker over a proven-empty composer may be answered, and every
+# other pair refuses with a named reason.
+test_exit_picker_confirmation_rule() {
+  local got why
+  fm_control_exit_picker_confirmable 'Claude background-task exit picker' empty \
+    || fail "the exit picker over an empty composer must be confirmable"
+  [ -z "$FM_CONTROL_EXIT_PICKER_WHY" ] || fail "an allowed confirmation must carry no reason"
+  for state in pending pending-unproven unknown ''; do
+    got=allowed
+    fm_control_exit_picker_confirmable 'Claude background-task exit picker' "$state" || got=refused
+    [ "$got" = refused ] || fail "a picker over a '${state:-unread}' composer must refuse"
+    why=$FM_CONTROL_EXIT_PICKER_WHY
+    case "$why" in
+      *"not proven empty"*) : ;;
+      *) fail "the refusal for a '${state:-unread}' composer should name the missing proof, got '$why'" ;;
+    esac
+  done
+  for dialog in 'MCP approval' 'model downgrade' ''; do
+    got=allowed
+    fm_control_exit_picker_confirmable "$dialog" empty || got=refused
+    [ "$got" = refused ] || fail "dialog '${dialog:-unnamed}' must never be confirmed"
+    case "$FM_CONTROL_EXIT_PICKER_WHY" in
+      *"only the operator can choose"*) : ;;
+      *) fail "a non-picker dialog refusal should say the choice is the operator's, got '$FM_CONTROL_EXIT_PICKER_WHY'" ;;
+    esac
+  done
+  pass "fm-control-lib: only the exit picker over a proven-empty composer is confirmable, with a named reason otherwise"
+}
+
+test_exit_unknown_composer_refusal_names_what_it_could_not_match() {
+  local dir out rc
+  dir=$(new_case unknown-explained)
+  add_task "$dir" t1 claude
+  alive_as "$dir" claude
+  # A pane with no composer shape at all: the refusal must say so rather than
+  # only reporting the verdict.
+  printf 'plain output with no composer anywhere\n' > "$dir/fake/pane"
+  out=$(run_control "$dir" t1 exit); rc=$?
+  expect_code 1 "$rc" "an unknown composer should refuse"$'\n'"$out"
+  assert_contains "$out" "not proven empty" "the refusal should keep the proven-empty wording"
+  assert_contains "$out" "no composer shape" "the refusal should name what it could not match"
+  [ ! -s "$dir/fake/literal" ] || fail "a refused composer must not be typed into"
+  pass "fm-control exit: an unknown composer refusal names the shapes it could not match"
+}
+
 test_exit_types_each_harness_verified_command
 test_opencode_exit_matches_recorded_major
 test_opencode2_exit_retries_ctrl_c_once
@@ -1376,8 +1492,11 @@ test_busy_agent_is_interrupted_before_the_exit_command
 test_idle_agent_is_not_interrupted
 test_exit_drops_meta_busy_gen_with_the_sidecar
 test_exit_refuses_an_open_background_picker
-test_exit_refuses_the_confirming_enter
 test_exit_names_a_picker_that_renders_after_the_submit
+test_exit_confirms_the_exit_picker_over_an_empty_composer
+test_exit_refuses_a_picker_over_an_unproven_composer
+test_exit_unknown_composer_refusal_names_what_it_could_not_match
+test_exit_picker_confirmation_rule
 test_interrupt_without_acknowledgement_preserves_busy_state
 test_muse_interrupt_confirms_adapter_acknowledgement
 test_interrupt_revalidates_agent_after_acknowledgement_wait

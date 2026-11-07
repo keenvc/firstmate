@@ -719,6 +719,33 @@ FM_COMPOSER_HINTED_IDLE_RE_DEFAULT='^ask a question or describe a task ↵$'
 # dimmed mode cell) belongs with a fresh live capture in
 # docs/verification/runtime-backends.md, not with a regex edit.
 FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)[[:space:]]+·[[:space:]]+'
+# OpenCode 2.0.32 throws the 1.x rail away and draws its composer as ONE
+# left-bar column closed by a half-block FLOOR, with the cwd and keybinding
+# hints on the rows BELOW that floor (`FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT`
+# below). Verified live on opencode 2.0.32 through the herdr lab, 2026-11-07
+# (tests/fixtures/opencode-2.0.32-flat/):
+#   ┃
+#   ┃  Ask anything… "Fix a TODO in the codebase"
+#   ┃
+#   ┃  Build · No provider selected Connect a provider
+#   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+#   …/firstm…/data/example  shift+tab agents  ctrl+p commands
+# Every row of the run opens with the bar, the LAST row is still the mode/model
+# footer, and the floor closes the run instead of an invisible end. The status
+# row below it carries `shift+tab` and `ctrl+p` cells, so a cwd:branch rail that
+# wraps into those rows still reads as furniture.
+# opencode draws the footer INSIDE the composer and RIGHT-ALIGNS the cwd:branch
+# rail on the rows directly above it. That rail is furniture, not typed text,
+# and recognising it is what keeps an idle pane from reading `pending` (task
+# firstmate-doorbell-vals-pending-p1). Proving it is what turns a `pending`
+# verdict into `empty`, so the safety rule is the same one the footer uses:
+# a row is furniture only when the ghost-stripped row still fails the pattern,
+# so its identifying cells were deleted as de-emphasised furniture and nothing
+# opencode draws de-emphasises a typed row's own leading cells.
+# A missing, empty, or unreadable status row proves nothing: the recognised
+# composer stays `unknown` rather than reading `empty` on a shape it cannot
+# see whole.
+FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT='shift\+tab.*ctrl\+p'
 # Claude draws its permission-mode hint on its own row directly below the
 # composer (` ⏵⏵ bypass permissions on (shift+tab to cycle)`, ` ⏵⏵ accept edits
 # on`, ` ⏸ plan mode on`; verified live through Herdr on claude 2.1.236). The
@@ -1189,8 +1216,15 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
     fi
     # Left-bar rows (opencode): a heavy left bar `┃` opening the row with no
     # closing side border. A `┃…┃` row is a bordered box row, not a left bar.
+    # A half-block FLOOR row (`╹▀▀…`) immediately below an OPEN run belongs to
+    # that composer too: OpenCode 2.x closes its bar there, so the floor marks
+    # where the composer ends instead of the blank rows above it ending it
+    # early (_fm_composer_leftbar_flat_shape owns the 2.x layout). A floor with
+    # no bar directly above it never starts a run.
     case "$trimmed" in
-      '┃'*'┃') leftbar_start=-1 ;;
+      '┃'*'┃')
+        leftbar_start=-1
+        ;;
       '┃'*)
         if [ "$leftbar_start" -lt 0 ]; then
           leftbar_start=$row
@@ -1202,6 +1236,18 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap] 
         if [ "$FM_COMPOSER_SCAN_LEFTBAR_GLYPH_ROW" -lt 0 ] && [ "$row_glyph_row" -ge 0 ]; then
           FM_COMPOSER_SCAN_LEFTBAR_GLYPH_ROW=$row_glyph_row
           FM_COMPOSER_SCAN_LEFTBAR_GLYPH=$row_glyph
+        fi
+        ;;
+      '╹▀'*)
+        # The floor joins the run ONLY when the run plus this floor proves
+        # OpenCode 2.x's flat shape; otherwise it stays outside the run, which
+        # is exactly where opencode 1.x draws it.
+        if [ "$leftbar_start" -ge 0 ] && [ "$FM_COMPOSER_SCAN_LEFTBAR_END" -eq $((row - 1)) ] \
+           && _fm_composer_leftbar_floor_row "$trimmed" \
+           && _fm_composer_leftbar_flat_shape "$plain" "$leftbar_start" "$row"; then
+          FM_COMPOSER_SCAN_LEFTBAR_END=$row
+        else
+          leftbar_start=-1
         fi
         ;;
       *) leftbar_start=-1 ;;
@@ -1910,7 +1956,15 @@ _fm_composer_leftbar_plain_content() {  # <raw-row> -> plain content on stdout
 _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
   local screen=$1 styled=$2 first=$3 last=$4
   local row raw content pending_seen=0 footer_re leading_blank=1 placeholder_position=0 cwd_start
+  local content_last=$4 flat_re_scope=0
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
+  # A PROVEN 2.x region carries its closing floor row and the footer above it
+  # INSIDE the run, so the footer is no longer the run's last row there. Until
+  # that whole shape is proved the 1.x reading applies byte for byte.
+  if _fm_composer_leftbar_flat_shape "$screen" "$first" "$last"; then
+    content_last=$((last - 2))
+    flat_re_scope=1
+  fi
   cwd_start=$(_fm_composer_leftbar_cwd_start "$screen" "$first" "$last") || cwd_start=-1
   row=$first
   while [ "$row" -le "$last" ]; do
@@ -1924,6 +1978,11 @@ _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
     esac
     fm_composer_normalize_trim_var content
     if [ -z "$content" ]; then row=$((row + 1)); continue; fi
+    if [ "$flat_re_scope" = 1 ]; then
+      # The 2.x footer and floor are furniture, never typed text, so content
+      # above them ends the run; the footer arm below is the 1.x reading only.
+      if [ "$row" -gt "$content_last" ]; then row=$((row + 1)); continue; fi
+    fi
     if [ "$leading_blank" = 1 ] && [ "$row" -gt "$first" ]; then
       placeholder_position=1
     else
@@ -1934,10 +1993,11 @@ _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
        && fm_composer_idle_matches "$content" "${FM_COMPOSER_IDLE_RE:-$FM_COMPOSER_IDLE_RE_DEFAULT}" insensitive; then
       row=$((row + 1)); continue
     fi
-    if [ "$row" -eq "$last" ] \
-       && _fm_composer_row_is_leftbar_footer "$content" \
-              "$(_fm_composer_leftbar_plain_content "$raw")" "$footer_re"; then
-      row=$((row + 1)); continue
+    if [ "$flat_re_scope" = 0 ] && [ "$row" -eq "$last" ]; then
+      if _fm_composer_row_is_leftbar_footer "$content" \
+           "$(_fm_composer_leftbar_plain_content "$raw")" "$footer_re"; then
+        row=$((row + 1)); continue
+      fi
     fi
     pending_seen=1
     row=$((row + 1))
@@ -1947,6 +2007,69 @@ _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
   else
     printf 'empty'
   fi
+}
+
+# _fm_composer_row_is_leftbar_status: 0 when the trimmed row is OpenCode 2.x's
+# cwd/keybinding status row drawn DIRECTLY BELOW its composer floor
+# (FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT above). Consulted only as evidence
+# that the run's closing floor belongs to a 2.x composer; never as composer
+# content.
+_fm_composer_row_is_leftbar_status() {  # <trimmed-row>
+  fm_composer_idle_matches "$1" "${FM_COMPOSER_LEFTBAR_STATUS_RE:-$FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT}" sensitive
+}
+
+# _fm_composer_leftbar_flat_shape: 0 when a left-bar region is OpenCode 2.x's
+# FLAT composer (the layout the constant above draws), which differs from the
+# 1.x rail in exactly two ways that matter to a verdict:
+#   - the run CLOSES on a half-block floor row (`╹▀▀…`) rather than on a blank
+#     row, so the floor row ends the content rows;
+#   - the mode/model footer is drawn INSIDE the run on the row directly above
+#     that floor, so that row is furniture rather than typed text.
+# Both halves are proved from the screen, never assumed: the region's last row
+# must be the floor, the row above it must match the footer pattern in either
+# its ghost-stripped or its plain form, and the row below the floor must be
+# 2.x's cwd/keybinding status row. A region that fails any of them is left to
+# the ordinary left-bar read, so the 1.x shape keeps its verdict byte for byte.
+# The floor-row half alone is what the 1.x fixtures already draw (`╹▀▀…` below
+# the footer); requiring the status row below it is what keeps the two
+# versions apart, and an absent or unreadable status row proves nothing.
+_fm_composer_leftbar_flat_shape() {  # <screen> <first-row> <last-row>
+  local screen=$1 first=$2 last=$3 plain raw trimmed stripped plain_content
+  local footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
+  [ "$last" -gt "$first" ] || return 1
+  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  raw=$(_fm_composer_screen_row "$last" "$plain")
+  trimmed=$raw
+  fm_composer_normalize_trim_var trimmed
+  # <last-row> is either the bar's own last row or its closing floor: the scan
+  # absorbs a floor directly under an open run, so callers hand over whichever
+  # boundary their own record names, and both prove the same shape. A lone `┃`
+  # row is opencode's blank composer row, never a footer, so it can only be a
+  # bar-end whose floor sits directly below it.
+  if ! _fm_composer_leftbar_floor_row "$trimmed"; then
+    case "$trimmed" in
+      '┃'|'┃'[[:space:]]*) return 1 ;;
+      '┃'*) last=$((last + 1)) ;;
+      *) return 1 ;;
+    esac
+    raw=$(_fm_composer_screen_row "$last" "$plain")
+    trimmed=$raw
+    fm_composer_normalize_trim_var trimmed
+    _fm_composer_leftbar_floor_row "$trimmed" || return 1
+  fi
+  raw=$(_fm_composer_screen_row "$((last - 1))" "$plain")
+  trimmed=$raw
+  fm_composer_normalize_trim_var trimmed
+  case "$trimmed" in '┃'*) ;; *) return 1 ;; esac
+  stripped=$(_fm_composer_row_content "$(_fm_composer_screen_row "$((last - 1))" "$screen")" 1)
+  case "$stripped" in '┃'*) stripped=${stripped#┃} ;; esac
+  fm_composer_normalize_trim_var stripped
+  plain_content=$(_fm_composer_leftbar_plain_content "$raw")
+  _fm_composer_row_is_leftbar_footer "$stripped" "$plain_content" "$footer_re" || return 1
+  raw=$(_fm_composer_screen_row "$((last + 1))" "$plain")
+  trimmed=$raw
+  fm_composer_normalize_trim_var trimmed
+  _fm_composer_row_is_leftbar_status "$trimmed"
 }
 
 _fm_composer_leftbar_floor_row() {  # <trimmed-row>
@@ -2262,6 +2385,25 @@ _fm_composer_select_cursorless() {  # <plain-screen> <screen> <styled>
       # that row is furniture, not a lower live shape.
       if [ "$FM_COMPOSER_SCAN_DROID_PROVEN" = 1 ] && _fm_composer_row_is_droid_status "$trimmed"; then
         :
+      elif [ "$FM_COMPOSER_SELECTED_KIND" = leftbar ] \
+         && [ "$next" -eq "$((boundary + 1))" ] \
+         && _fm_composer_leftbar_flat_shape "$plain" \
+              "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"; then
+        # OpenCode 2.x draws its cwd/keybinding status row directly below the
+        # composer's closing floor, and that row carries no edge glyph of its
+        # own. A region that proved the 2.x shape owns exactly that one row as
+        # its own furniture, so the envelope is still live rather than stale;
+        # only then does the probe resume past it. The proof is the whole 2.x
+        # shape, never the row's text alone, and any further non-edge row still
+        # makes the envelope stale.
+        next=$((next + 1))
+        raw=$(_fm_composer_screen_row "$next" "$plain")
+        trimmed=$raw
+        fm_composer_normalize_trim_var trimmed
+        if [ -n "$trimmed" ] && ! fm_composer_row_has_edge "$trimmed"; then
+          FM_COMPOSER_SELECTED_KIND=
+          return 1
+        fi
       else
         FM_COMPOSER_SELECTED_KIND=
         return 1
@@ -2273,7 +2415,7 @@ _fm_composer_select_cursorless() {  # <plain-screen> <screen> <styled>
 
 fm_composer_extract_selected_content() {  # <caps> <screen>
   local caps=$1 screen=$2 styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
-  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 cwd_start
+  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 cwd_start content_last flat_re_scope=0
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
     [ "$kv" = styled=1 ] && styled=1
@@ -2284,12 +2426,22 @@ EOF
   _fm_composer_scan_screen "$plain" '' 1
   _fm_composer_select_cursorless "$plain" "$screen" "$styled" || return 1
   row=$FM_COMPOSER_SELECTED_FIRST
+  content_last=$FM_COMPOSER_SELECTED_LAST
+  flat_re_scope=0
   cwd_start=-1
   if [ "$FM_COMPOSER_SELECTED_KIND" = leftbar ]; then
+    # OpenCode 2.x keeps its footer INSIDE the run, directly above the floor
+    # row, so a proved flat region ends its content above those two furniture
+    # rows exactly as the verdict does (see _fm_composer_classify_leftbar).
+    if _fm_composer_leftbar_flat_shape "$screen" \
+         "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"; then
+      content_last=$((FM_COMPOSER_SELECTED_LAST - 2))
+      flat_re_scope=1
+    fi
     cwd_start=$(_fm_composer_leftbar_cwd_start "$screen" \
-      "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST") || cwd_start=-1
+      "$FM_COMPOSER_SELECTED_FIRST" "$content_last") || cwd_start=-1
   fi
-  while [ "$row" -le "$FM_COMPOSER_SELECTED_LAST" ]; do
+  while [ "$row" -le "$content_last" ]; do
     raw=$(_fm_composer_screen_row "$row" "$screen")
     content=$(_fm_composer_row_content "$raw" "$styled")
     placeholder_position=0
@@ -2345,6 +2497,7 @@ EOF
             && [ "$placeholder_position" = 1 ] \
             && fm_composer_idle_matches "$content" "${FM_COMPOSER_IDLE_RE:-$FM_COMPOSER_IDLE_RE_DEFAULT}" insensitive; } \
        || { [ "$FM_COMPOSER_SELECTED_KIND" = leftbar ] \
+            && [ "$flat_re_scope" = 0 ] \
             && [ "$row" -eq "$FM_COMPOSER_SELECTED_LAST" ] \
             && _fm_composer_row_is_leftbar_footer "$content" \
                    "$(_fm_composer_leftbar_plain_content "$raw")" "$footer_re"; }; then
@@ -2519,8 +2672,14 @@ EOF
       return 0
     fi
     if [ "$FM_COMPOSER_SCAN_LEFTBAR_START" -ge 0 ] \
-       && [ "$cy" -ge "$FM_COMPOSER_SCAN_LEFTBAR_START" ] \
-       && [ "$cy" -le "$FM_COMPOSER_SCAN_LEFTBAR_END" ]; then
+       && { { [ "$cy" -ge "$FM_COMPOSER_SCAN_LEFTBAR_START" ] \
+              && [ "$cy" -le "$FM_COMPOSER_SCAN_LEFTBAR_END" ]; } \
+            || { [ "$cy" -eq "$((FM_COMPOSER_SCAN_LEFTBAR_END + 1))" ] \
+                 && _fm_composer_leftbar_flat_shape "$screen" \
+                      "$FM_COMPOSER_SCAN_LEFTBAR_START" "$FM_COMPOSER_SCAN_LEFTBAR_END"; }; }; then
+      # OpenCode 2.x parks its cursor on the cwd/status row directly below its
+      # floor, one row past the run, so that landing counts as inside the same
+      # composer when the region proves the 2.x shape.
       _fm_composer_classify_leftbar "$screen" "$styled" \
         "$FM_COMPOSER_SCAN_LEFTBAR_START" "$FM_COMPOSER_SCAN_LEFTBAR_END"
       return 0
@@ -2595,6 +2754,52 @@ EOF
         "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"
       ;;
   esac
+}
+
+# fm_composer_explain_unknown: one line naming WHY a screen refused, for the
+# refusal messages that would otherwise say only `unknown`. It never decides a
+# verdict - the caller has already read one - so it cannot widen or narrow
+# anything; it re-reads the same rows under the same rules to find which
+# shapes the screen DID offer (box, left bar, bare glyph, shell prompt) and
+# which one, if any, the verdict rejected. That is exactly the evidence a
+# human or an agent needs to tell "unknown harness" from "known harness whose
+# composer moved". An unreadable screen says so rather than claiming a shape.
+fm_composer_explain_unknown() {  # <caps> <screen> [cursor-row]
+  # <caps> names the classifier settings the verdict was read under. The scan
+  # below reads row structure, which is the same under every cap, so the value
+  # is accepted for the caller's symmetry with fm_composer_classify and is not
+  # otherwise consulted.
+  # shellcheck disable=SC2034
+  local caps=$1 screen=$2 cy=${3:-} plain shapes=''
+  plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+  _fm_composer_scan_screen "$plain" "$cy" '' 0
+  if [ "$FM_COMPOSER_SCAN_BOX_BOTTOM" -ge 0 ]; then
+    shapes="$shapes box(rows $FM_COMPOSER_SCAN_BOX_TOP-$FM_COMPOSER_SCAN_BOX_BOTTOM)"
+  fi
+  if [ "$FM_COMPOSER_SCAN_LEFTBAR_END" -ge 0 ]; then
+    shapes="$shapes left-bar(rows $FM_COMPOSER_SCAN_LEFTBAR_START-$FM_COMPOSER_SCAN_LEFTBAR_END)"
+  fi
+  if [ "$FM_COMPOSER_SCAN_BARE_ROW" -ge 0 ]; then
+    shapes="$shapes bare-glyph(row $FM_COMPOSER_SCAN_BARE_ROW)"
+  fi
+  if [ "$FM_COMPOSER_SCAN_SHELL_ROW" -ge 0 ]; then
+    shapes="$shapes shell-prompt(row $FM_COMPOSER_SCAN_SHELL_ROW)"
+  fi
+  if [ "$FM_COMPOSER_SCAN_UNSAFE" = 1 ]; then
+    printf 'cursor sits on a structural or ambiguous row'
+    return 0
+  fi
+  if [ "$FM_COMPOSER_SCAN_PI_LAST_SEPARATOR" -ge 0 ] \
+     && [ "$FM_COMPOSER_SCAN_PI_PAIR_FOUND" = 0 ]; then
+    printf 'a pi-style rule at row %s has no closing rule below it' \
+      "$FM_COMPOSER_SCAN_PI_LAST_SEPARATOR"
+    return 0
+  fi
+  if [ -z "$shapes" ]; then
+    printf 'no composer shape (no box, left bar, agent glyph, or shell prompt row)'
+    return 0
+  fi
+  printf 'candidate shapes:%s, none proven as the live composer' "$shapes"
 }
 
 # fm_composer_submit_retry_core: the ONE verify-and-retry-Enter submit loop
