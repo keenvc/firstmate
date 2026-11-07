@@ -663,6 +663,11 @@ test_reserved_pending_reply_key_closes_through_resolve_key() {
   fm_write_meta "$home/state/mate.meta" "window=sess:fm-mate" "kind=ship"
   printf 'blocked [key=%s]: pending-reply-missed: task=mate pending-reply-id=%s request=ship it\n' \
     "$key" "$corr" > "$home/state/mate.status"
+  mkdir -p "$home/state/pending-replies"
+  {
+    printf 'schema=fm-pending-reply.v1\ncorr_id=%s\ntask_id=mate\nphase=escalated\nescalated_epoch=1\n' "$corr"
+    printf 'parent_status=%s\nrequest_summary=ship it\n' "$home/state/mate.status"
+  } > "$home/state/pending-replies/$corr"
 
   out=$(drain_out "$home")
   printf '%s' "$out" | grep -F "[key=$key]" >/dev/null \
@@ -681,6 +686,11 @@ test_reserved_pending_reply_key_closes_through_resolve_key() {
   if printf '%s' "$out" | grep -F 'OPEN DECISIONS' >/dev/null; then
     fail "the reserved pending-reply decision still lists as open after --resolve-key: $out"
   fi
+  # The correlation's own record settles with its decision (the request store
+  # keeps that record observable), so a later loss of the same correlation is a
+  # new episode rather than a silent retry of a decision nobody will close.
+  grep -q '^escalation_closed_epoch=.' "$home/state/pending-replies/$corr" \
+    || fail "the answered correlation's episode was left open: $(cat "$home/state/pending-replies/$corr")"
   pass "fm-send --resolve-key: a reserved pending-reply key actually closes through the operator path"
 }
 

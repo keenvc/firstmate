@@ -38,6 +38,10 @@
 #      the decision; a retry while that decision is still open appends nothing
 #  19. A request summary keeps accented letters, drops control characters, and
 #      caps at 120 characters without splitting one under any caller locale
+#  20. A pure rendered idle never completes a turn that wrote after delivery (a
+#      long turn's between-call idle is not turn completion); a silent mate still
+#      completes on that path, and fm-send --resolve-key settles this home's own
+#      record for the answered correlation
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -1210,6 +1214,81 @@ test_fm_send_marked_secondmate_creates_pending_and_embeds_corr() {
   pass "fm-send marked secondmate path creates pending and embeds corr"
 }
 
+# The 2026-11-07 false-miss class: a mate composing one long turn renders idle
+# between its tool calls, and a pure rendered idle past the grace used to be
+# accepted as turn completion while that turn was still running - 43 false
+# pending-reply-missed lines in one day. A channel write after delivery proves
+# the mate was working at that moment, so only a busy->idle transition may
+# complete such a turn. A silent mate still escalates on the pure-idle path.
+test_pure_idle_cannot_complete_a_turn_that_wrote() {
+  local home state corr rec status
+  home=$(setup_parent pure-idle)
+  state="$home/state"
+  status="$state/hibit.status"
+  export FM_PENDING_REPLY_NOW=9300
+  corr=$(fm_pending_reply_create "$home" "$state" "hibit" "long turn")
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  fm_pending_reply_set "$rec" grace_secs 30 || fail "fixture grace should be set"
+
+  # Mid-turn write, observed idle afterwards (between tool calls).
+  printf 'working: applying the second patch\n' >> "$status"
+  export FM_PENDING_REPLY_NOW=9330
+  fm_pending_reply_tick "$state"
+  [ -z "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" ] \
+    || fail "pure idle after a mid-turn write must not complete the request turn"
+  [ "$(phase_of "$state" "$corr")" = awaiting_report ] || fail "a working mate must not enter recovery"
+
+  # The same observation without the write still proves a silent turn over.
+  export FM_PENDING_REPLY_NOW=9400
+  corr=$(fm_pending_reply_create "$home" "$state" "hibit" "silent turn")
+  fm_pending_reply_mark_delivered "$state" "$corr"
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  fm_pending_reply_set "$rec" grace_secs 30 || fail "fixture grace should be set"
+  : > "$status"
+  export FM_PENDING_REPLY_NOW=9430
+  fm_pending_reply_observe_busy "$state" "$corr" idle
+  [ "$(fm_pending_reply_get "$rec" request_turn_completed_epoch)" = 9430 ] \
+    || fail "a genuinely idle-and-silent mate must still complete its turn"
+  pass "a pure rendered idle never completes a turn that wrote after delivery"
+}
+
+# Answering a pending-reply key with fm-send --resolve-key closes the ledger
+# decision, and this home's own record for that correlation must settle its
+# escalation episode with it. An episode left open makes every later loss of the
+# same correlation read as a retry of a decision nobody will close, so the key
+# lingers in OPEN DECISIONS forever instead of being announced again.
+test_operator_resolve_settles_the_record() {
+  local dir fb log home rc corr key rec
+  dir="$TMP_ROOT/operator-settles"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); log="$dir/send.log"
+  home=$(setup_parent operator-settles)
+  fm_write_secondmate_meta "$home/state/hibit.meta" "$home/sm" "sess:fm-hibit"
+  export FM_PENDING_REPLY_NOW=9500
+  corr=$(fm_pending_reply_create "$home" "$home/state" "hibit" "ship it")
+  fm_pending_reply_mark_delivered "$home/state" "$corr"
+  key="pending-reply-$corr"
+  rec=$(fm_pending_reply_path "$home/state" "$corr")
+  fm_pending_reply_set "$rec" phase escalated || fail "fixture phase should be escalated"
+  fm_pending_reply_set "$rec" escalated_epoch 9500 || fail "fixture escalation should be stamped"
+  printf 'blocked [key=%s]: pending-reply-missed: task=hibit pending-reply-id=%s request=ship it\n' \
+    "$key" "$corr" > "$home/state/hibit.status"
+  export FM_PENDING_REPLY_NOW=9501
+  run_send "$fb" "$home" "$log" hibit --resolve-key "$key" "ack, false escalation"; rc=$?
+  expect_code 0 "$rc" "answering a pending-reply key should succeed"
+  [ "$(fm_pending_reply_get "$rec" escalation_closed_epoch)" = 9501 ] \
+    || fail "the answered escalation episode must be recorded closed"
+  if status_open_decisions "$home/state/hibit.status" | cut -f1 | grep -qx "$key"; then
+    fail "the answered key still folds as open"
+  fi
+  # The settled episode makes the next loss of this correlation a new one that
+  # is announced again, rather than a silent retry of the old decision.
+  if fm_pending_reply_tick_one "$home/state" "$corr" unknown; then :; fi
+  grep -cF "blocked [key=$key]" "$home/state/hibit.status" >/dev/null \
+    || fail "fixture status should keep the announcement"
+  pass "fm-send --resolve-key settles the correlation's escalation episode"
+}
+
 test_document_pointer_resolves() {
   local home state corr
   home=$(setup_parent doc-pointer)
@@ -2211,6 +2290,8 @@ test_restart_preserves_expectation_and_parent_destination
 test_wrong_home_detected_not_acknowledged
 test_unmarked_captain_input_creates_no_expectation
 test_fm_send_marked_secondmate_creates_pending_and_embeds_corr
+test_pure_idle_cannot_complete_a_turn_that_wrote
+test_operator_resolve_settles_the_record
 test_document_pointer_resolves
 test_helper_report_resolves
 test_busy_idle_observation_via_backend_abstraction

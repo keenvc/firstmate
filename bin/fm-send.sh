@@ -859,6 +859,41 @@ fm_send_close_resolved_keys() { # <answer-text>
   done
 }
 
+# Settle this home's OWN record for each answered pending-reply correlation: its
+# escalation episode is recorded closed, so a later loss of the same correlation
+# is a new episode that is announced again instead of a silent retry of a
+# decision nobody will close. The ledger close above settles the decision; this
+# runs only after that close is durably appended, and a failed record write
+# never turns the delivered answer into a resend.
+fm_send_settle_resolved_records() {
+  local k
+  for k in $RESOLVE_STATUS_KEYS; do
+    case "$k" in
+    pending-reply-*) ;;
+    *) continue ;;
+    esac
+    fm_pending_reply_mark_operator_resolved "$STATE" "${k#pending-reply-}" ||
+      echo "error: the answer was delivered and decision key '$k' closed, but its pending-reply record could not be settled in $STATE; inspect it manually." >&2
+  done
+  return 0
+}
+
+# An inbox-enqueued answer is durably delivered even when its doorbell could not
+# be rung, including the doorbell-failure exit below, so it settles the same way.
+fm_send_settle_enqueued_resolved_records() {
+  [ -n "${INBOX_RECORD:-}" ] || return 0
+  local k
+  for k in ${RESOLVE_KEYS:-}; do
+    case "$k" in
+    pending-reply-*) ;;
+    *) continue ;;
+    esac
+    fm_pending_reply_mark_operator_resolved "$STATE" "${k#pending-reply-}" ||
+      echo "error: the answer is durably recorded at $INBOX_RECORD, but its pending-reply record could not be settled in $STATE; inspect it manually." >&2
+  done
+  return 0
+}
+
 # Feed the answered captain-held tasks to the ONE keyed-answer intake, as keyed
 # lines, exactly the way every other channel does. fm-send decides nothing here:
 # it does not build a decision record or choose a close path; the keys were
@@ -1130,6 +1165,7 @@ else
     fi
     if [ -n "$RESOLVE_KEYS" ]; then
       fm_send_close_resolved_keys "$RESOLVE_ANSWER_TEXT" || exit 1
+      fm_send_settle_resolved_records
       fm_send_feed_resolved_holds "$RESOLVE_ANSWER_TEXT" || exit 1
     fi
     exit 0
@@ -1207,6 +1243,7 @@ else
     # (answerer-closes; see the header contract).
     if [ -n "$RESOLVE_KEYS" ]; then
       fm_send_close_resolved_keys "$RESOLVE_ANSWER_TEXT" || exit 1
+      fm_send_settle_resolved_records
       fm_send_feed_resolved_holds "$RESOLVE_ANSWER_TEXT" || exit 1
     fi
     # Ring the doorbell, best-effort: no ring outcome changes the exit status,
@@ -1232,6 +1269,7 @@ else
     2) echo "fm-send: doorbell did not reach $T; the steer is durably recorded at $INBOX_RECORD and $ring_retry" >&2 ;;
     3) echo "fm-send: doorbell not typed because the agent in $T has exited; the steer is durably recorded at $INBOX_RECORD for recovery (stuck-crewmate-recovery), and the watcher will not re-ring a dead pane" >&2 ;;
     esac
+    fm_send_settle_enqueued_resolved_records
     exit 0
   fi
   # Slash commands open a completion popup in some TUIs (verified on codex);
@@ -1349,6 +1387,7 @@ else
   # ledger (answerer-closes; see the header contract).
   if [ -n "$RESOLVE_KEYS" ]; then
     fm_send_close_resolved_keys "$RESOLVE_ANSWER_TEXT" || exit 1
+    fm_send_settle_resolved_records
     fm_send_feed_resolved_holds "$RESOLVE_ANSWER_TEXT" || exit 1
   fi
   # Submit landed with exact empty. Confirmation only proves the text was

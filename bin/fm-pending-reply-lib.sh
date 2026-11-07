@@ -803,7 +803,7 @@ fm_pending_reply_observe_busy() {  # <state-dir> <corr_id> <busy_state>
 }
 
 fm_pending_reply_fallback_idle_eligible() {  # <record-path>
-  local rec=$1 phase start seen grace now age
+  local rec=$1 phase start seen grace now age signature
   phase=$(fm_pending_reply_get "$rec" phase)
   case "$phase" in
     awaiting_report)
@@ -822,7 +822,16 @@ fm_pending_reply_fallback_idle_eligible() {  # <record-path>
   case "$grace" in ''|*[!0-9]*) grace=$(fm_pending_reply_grace_secs) ;; esac
   now=$(fm_pending_reply_now)
   age=$((now - start))
-  [ "$age" -ge "$grace" ]
+  [ "$age" -ge "$grace" ] || return 1
+  # The pure-idle path exists only for a turn whose busy window this observation
+  # missed entirely (a fast turn). A mate that wrote to its channel after the
+  # observed turn started has proven it was WORKING at that moment, so a rendered
+  # idle there is the gap between its tool calls, not the end of the turn: with
+  # one long turn running past the grace, this is what turned 43 legitimate
+  # replies into pending-reply-missed. Only the busy->idle transition closes a
+  # turn that wrote anything; a genuinely idle-and-silent mate still escalates.
+  signature=$(fm_pending_reply_file_signature "$(fm_pending_reply_get "$rec" parent_status)")
+  [ "$signature" = "$(fm_pending_reply_get "$rec" parent_status_scan_signature)" ]
 }
 
 # fm_pending_reply_backend_observation: one busy/idle observation of a
@@ -1155,6 +1164,35 @@ fm_pending_reply_close_note_for_key() {  # <key> <task-id> <via> [extra]
       ;;
     *) return 1 ;;
   esac
+}
+
+# Settle the bookkeeping of this home's own record for a correlation an operator
+# answered with fm-send --resolve-key. The escalation's DECISION is closed by
+# that send's own ledger append; what is left to this record is the episode that
+# decision stood for, and without this a later loss of the same correlation
+# reads as the already-open earlier episode and is never announced again. The
+# phase and delivery path are deliberately untouched: an undelivered request
+# the operator settled must still be resendable (that path's own record of the
+# closed episode is exactly what makes the resend a new episode). Call only
+# once the answer is durably delivered.
+fm_pending_reply_mark_operator_resolved() {  # <state-dir> <corr_id>
+  local state=$1 corr=$2 rec escalated closed lock rc=0
+  local STATE FM_WAKE_QUEUE FM_WAKE_QUEUE_LOCK
+  [ -n "$state" ] && [ -n "$corr" ] || return 2
+  rec=$(fm_pending_reply_path "$state" "$corr")
+  [ -f "$rec" ] || return 0
+  STATE=$state
+  lock="$state/.pending-reply-$corr.lock"
+  # shellcheck source=bin/fm-wake-lib.sh
+  . "$_FM_PENDING_REPLY_LIB_DIR/fm-wake-lib.sh"
+  fm_lock_acquire_wait "$lock" || return 1
+  escalated=$(fm_pending_reply_get "$rec" escalated_epoch)
+  closed=$(fm_pending_reply_get "$rec" escalation_closed_epoch)
+  if [ -n "$escalated" ] && [ -z "$closed" ]; then
+    fm_pending_reply_set "$rec" escalation_closed_epoch "$(fm_pending_reply_now)" || rc=1
+  fi
+  fm_lock_release "$lock"
+  return "$rc"
 }
 
 fm_pending_reply_escalation_payload() {  # <record-path> <kind>
