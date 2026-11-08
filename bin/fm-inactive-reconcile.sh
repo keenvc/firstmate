@@ -23,7 +23,9 @@
 # while a CI-ready or direct-PR/local-only done whose head lives only in the
 # disposable copy reads blocked and is not a terminal inactive outcome.
 # A line still being appended (no trailing newline yet)
-# is left for the next poll. This is what keeps a mate's PR-ready, finding,
+# is left for the next poll. One ledger line is one event: a relaunched child
+# whose ledger still ends in a line already delivered under its previous
+# incarnation owes no second publication. This is what keeps a mate's PR-ready, finding,
 # and failure outcomes from depending on the mate model appending them
 # (docs/secondmate-parent-channel.md). A main home has no parent channel and
 # skips this path: its watcher already signals every child status line.
@@ -512,6 +514,26 @@ claim_inactive_report_for_ledger() { # <task> <incarnation> <state> <ledger-fing
   return 1
 }
 
+# 0 when this exact ledger line was already delivered for <task> under another
+# incarnation. A relaunched child keeps its status log, so until it appends
+# anything its ledger still ends in the previous incarnation's terminal line;
+# the per-incarnation fingerprint alone would publish that old outcome again
+# under a new key, which the parent reads as a fresh report (a held captain
+# call re-posted after the answer that relaunched the child). Each receipt
+# records its own incarnation, so its fingerprint is recomputed for this line.
+ledger_line_reported_by_other_incarnation() { # <task> <incarnation> <state> <line>
+  local task=$1 incarnation=$2 state=$3 line=$4 record other
+  for record in "$OUTCOME_DIR"/*.reported "$OUTCOME_DIR"/*.presented; do
+    [ -f "$record" ] && [ ! -L "$record" ] || continue
+    [ "$(record_value "$record" task_id)" = "$task" ] || continue
+    [ "$(record_value "$record" state)" = "$state" ] || continue
+    other=$(record_value "$record" incarnation)
+    [ -n "$other" ] && [ "$other" != "$incarnation" ] || continue
+    [ "$(record_value "$record" fingerprint)" = "$(sha256_text "$other|$task|$state|ledger|$line")" ] && return 0
+  done
+  return 1
+}
+
 # The ledger-first parent delivery for one direct child, for a caller holding
 # the child's meta lock. Returns 0 when the line is delivered, already
 # delivered, or nothing is owed, and 1 when it is owed but the parent channel
@@ -524,6 +546,10 @@ report_child_ledger_locked() { # <id> <meta>
   pr=$(pr_for_task "$meta" "$last")
   incarnation=$(meta_incarnation "$meta")
   fingerprint=$(sha256_text "$incarnation|$id|$state|ledger|$last")
+  if [ ! -f "$(record_path "$fingerprint" reported)" ] && [ ! -f "$(record_path "$fingerprint" presented)" ] \
+    && ledger_line_reported_by_other_incarnation "$id" "$incarnation" "$state" "$last"; then
+    return 0
+  fi
   if [ "$state" = "done" ] && [ ! -f "$(record_path "$fingerprint" reported)" ] \
     && [ ! -f "$(record_path "$fingerprint" pending)" ] \
     && ! fm_dod_accept_ship_done "$(meta_field "$meta" kind)" "$(meta_field "$meta" mode)" \

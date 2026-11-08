@@ -495,6 +495,34 @@ test_busy_child_does_not_starve_later_ledger_outcomes() {
     || fail "the skipped busy child was not retried on the next poll"
   pass "busy child locks do not starve later ledger outcomes"
 }
+# Relaunching a child (for example after the answer to its held captain call)
+# writes a new incarnation while its status log still ends in the old terminal
+# line. That line was already delivered, so the relaunch must not publish it
+# again under a new key; the new incarnation's own next terminal line still is.
+test_relaunched_child_does_not_redeliver_old_ledger_line() {
+  local meta tmp
+  make_world relaunch-ledger; bind_secondmate local
+  write_child "$MATE" child 'done [at=1700000000]: report written; captain call held as child-call' spawn-one
+  FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
+  [ "$(grep -c 'child-outcome-child-done' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "first incarnation's terminal line was not delivered: $(cat "$MAIN/state/mate.status")"
+  meta="$MATE/state/child.meta"
+  tmp="$MATE/state/.child.meta.relaunch"
+  sed 's/^spawn_gen=.*/spawn_gen=spawn-two/' "$meta" > "$tmp"
+  mv "$tmp" "$meta"
+  age "$meta"
+  FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
+  FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
+  [ "$(grep -c 'child-outcome-child-done' "$MAIN/state/mate.status")" = 1 ] \
+    || fail "relaunch re-delivered the previous incarnation's terminal line: $(cat "$MAIN/state/mate.status")"
+  printf 'done [at=1700000500]: superseded by child-two\n' >> "$MATE/state/child.status"
+  FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
+  [ "$(grep -c 'child-outcome-child-done' "$MAIN/state/mate.status")" = 2 ] \
+    || fail "the relaunched incarnation's own terminal line was not delivered: $(cat "$MAIN/state/mate.status")"
+  grep -Fq 'child child done: superseded by child-two' "$MAIN/state/mate.status" \
+    || fail "the new terminal line was not the one delivered: $(cat "$MAIN/state/mate.status")"
+  pass "a relaunched child does not re-deliver its previous incarnation's terminal line"
+}
 
 # A scout's done line carries its report pointer, a failed line is delivered
 # under the failed verb, and a later terminal line after recovery is a new
@@ -1437,6 +1465,7 @@ test_secondmate_ledger_delivery_carries_report_and_failure
 test_pr_field_requires_recorded_pr_or_ready_signal_line
 test_terminal_line_during_state_read_yields_to_ledger_delivery
 test_terminal_line_after_inactive_delivery_is_not_reported_twice
+test_relaunched_child_does_not_redeliver_old_ledger_line
 test_progress_after_inactive_delivery_starts_a_new_event
 test_long_terminal_lines_have_distinct_receipts
 test_secondmate_partial_ledger_line_waits_for_newline
