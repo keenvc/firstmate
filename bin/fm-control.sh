@@ -780,7 +780,11 @@ do_exit() {
       esac
       ;;
   esac
-  cmd=$(fm_control_exit_command "$HARNESS" "$OPENCODE_MAJOR")
+  # A harness with no exit command must refuse here: do_exit runs where set -e
+  # is suspended, so an empty command would otherwise be "delivered" as a bare
+  # Enter and the agent would simply keep running.
+  cmd=$(fm_control_exit_command "$HARNESS" "$OPENCODE_MAJOR") && [ -n "$cmd" ] \
+    || die "task $ID's harness '$HARNESS' has no verified exit command; refusing to submit an empty exit command"
   hazard=$(fm_control_interrupt_hazard_signal "$HARNESS")
   if [ -n "$hazard" ] && rendered_matches "$hazard"; then
     die "task $ID shows the $HARNESS revert picker, where typed text becomes a search and Enter reverts file changes; refusing to type the $cmd exit command. Close it with $(fm_control_interrupt_key "$HARNESS"), never Enter, then retry '$VERB'"

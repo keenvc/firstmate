@@ -561,6 +561,20 @@ test_opencode_interrupts_twice_and_others_once() {
   pass "fm-control interrupt: opencode needs a double Escape, claude a single one"
 }
 
+# Every harness the control plane accepts must also name an exit command: a
+# table row lost while adding another adapter left droid's exit as an empty
+# submit that never stopped the agent, so the two lists are pinned together.
+test_every_controlled_harness_has_an_exit_command() {
+  local harness cmd
+  while IFS= read -r harness; do
+    cmd=$(fm_control_exit_command "$harness" 2>/dev/null) \
+      || fail "$harness is controllable but has no exit command"
+    [ -n "$cmd" ] || fail "$harness is controllable but its exit command is empty"
+  done < <(fm_control_harnesses)
+  [ "$(fm_control_exit_command droid)" = /quit ] || fail "droid must exit on /quit"
+  pass "fm-control: every controllable harness, droid included, names an exit command"
+}
+
 test_unverified_harness_is_refused() {
   local dir out rc
   dir=$(new_case unverified)
@@ -1333,6 +1347,7 @@ test_devin_exit_after_turn_ended_types_quit_once
 test_devin_interrupt_dismisses_revert_picker
 test_devin_stuck_picker_refuses_and_exit_types_nothing
 test_opencode_interrupts_twice_and_others_once
+test_every_controlled_harness_has_an_exit_command
 test_unverified_harness_is_refused
 test_harness_family_resolution
 test_relaunch_resume_flag_is_per_adapter_and_reference_owner
