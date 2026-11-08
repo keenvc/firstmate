@@ -893,7 +893,7 @@ test_watcher_rerings_idle_pane_quietly() {
 busy_steer_check() {  # <case-dir> [capture] [busy-max]
   PATH="$1/fakebin:$PATH" FM_STATE_OVERRIDE="$1/state" FM_SEND_LOG="$1/send.log" \
     FM_FAKE_TMUX_CAPTURE="${2:-$1/busy.capture}" FM_BUSY_REGEX=BUSYTOKEN \
-    FM_TASK_INBOX_GRACE_SECS=0 FM_TASK_INBOX_BUSY_MAX="${3-2}" \
+    FM_TASK_INBOX_GRACE_SECS="${BUSY_GRACE:-0}" FM_TASK_INBOX_BUSY_MAX="${3-2}" \
     bash -c '. "$1" && inbox_steer_check sess:fm-t1 t1' _ "$WATCH" > "$1/check.out" 2>&1
 }
 
@@ -920,6 +920,55 @@ test_watcher_waits_on_busy_pane() {
   [ "$(wc -l < "$dir/state/.wake-queue")" = "$wakes" ] || fail "busy escalation repeated"
   [ -f "$dir/state/t1.inbox/001.msg" ] || fail "busy escalation lost the steer"
   pass "watcher: busy deferrals survive restart, escalate once at the bound, and never type"
+}
+
+# A worker busy in a long tool call keeps changing its pane (spinner, streamed
+# output) or its busy record; that visible progress must never wake firstmate,
+# while a busy worker whose pane and busy record stay frozen still escalates.
+test_watcher_busy_progress_does_not_escalate() {
+  local dir i
+  dir=$(busy_case busy-progress)
+  for i in 1 2 3 4 5; do
+    printf 'tool output line %s\nBUSYTOKEN active\n' "$i" > "$dir/busy.capture"
+    busy_steer_check "$dir"
+    [ ! -s "$dir/state/.wake-queue" ] \
+      || fail "a busy worker whose pane advanced escalated on check $i:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  done
+  # Same pane, but the worker's busy record advances (a new tool event). The
+  # record decides busy only for a harness that trusts its source.
+  fm_write_meta "$dir/state/t1.meta" "window=sess:fm-t1" "kind=ship" "harness=opencode"
+  printf 'g1\n' > "$dir/state/t1.busy-gen"
+  for i in 6 7 8; do
+    printf 'v1 gen=g1 seq=%s state=busy source=opencode-plugin event=tool ts=%s\n' "$i" "$i" > "$dir/state/t1.busy-state"
+    busy_steer_check "$dir"
+    [ ! -s "$dir/state/.wake-queue" ] \
+      || fail "a busy worker whose busy record advanced escalated on check $i"
+  done
+  # Frozen: nothing changes across a full period, so the worker is wedged.
+  busy_steer_check "$dir"
+  busy_steer_check "$dir"
+  grep -q 'stuck-busy' "$dir/state/.wake-queue" || fail "a frozen busy worker did not escalate"
+  [ ! -s "$dir/send.log" ] || fail "busy progress checks typed into the pane"
+  [ -f "$dir/state/t1.inbox/001.msg" ] || fail "busy progress checks lost the steer"
+  pass "watcher: visible busy progress never escalates; a frozen busy worker still does"
+}
+
+# Polls seconds apart inside one grace period count as one busy deferral, so a
+# fast watcher cadence cannot turn a short busy stretch into stuck-busy; the
+# doorbell still lands once the worker goes idle.
+test_watcher_busy_deferral_counts_once_per_period() {
+  local dir i
+  dir=$(busy_case busy-period)
+  for i in 1 2 3 4; do
+    BUSY_GRACE=3600 busy_steer_check "$dir"
+  done
+  [ ! -s "$dir/state/.wake-queue" ] \
+    || fail "rapid busy polls in one period escalated:"$'\n'"$(cat "$dir/state/.wake-queue")"
+  [ "$(cut -f2 "$dir/state/t1.inbox/.busy-state")" = 1 ] \
+    || fail "rapid busy polls in one period must count once, got: $(cat "$dir/state/t1.inbox/.busy-state")"
+  BUSY_GRACE=3600 busy_steer_check "$dir" "$(idle_capture "$dir")"
+  grep -q 'Firstmate instruction waiting' "$dir/send.log" || fail "the doorbell did not ring once the worker went idle"
+  pass "watcher: busy deferrals count once per grace period and the doorbell lands on idle"
 }
 
 test_watcher_busy_budget_resets_on_ring_and_ack() {
@@ -1393,6 +1442,8 @@ test_fire_and_forget_retry_is_quiet_without_the_flag
 test_ring_ladder_policy
 test_watcher_rerings_idle_pane_quietly
 test_watcher_waits_on_busy_pane
+test_watcher_busy_progress_does_not_escalate
+test_watcher_busy_deferral_counts_once_per_period
 test_watcher_busy_budget_resets_on_ring_and_ack
 test_watcher_busy_bookkeeping_failure_surfaces
 test_watcher_successor_busy_reset_failure_surfaces idle
