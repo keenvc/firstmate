@@ -42,6 +42,10 @@
 #      long turn's between-call idle is not turn completion); a silent mate still
 #      completes on that path, and fm-send --resolve-key settles this home's own
 #      record for the answered correlation
+#  21. A reply keyed with the correlation ([key=pending-reply-<corr>] or
+#      [key=<corr>]) instead of carrying corr= resolves the escalated record and
+#      closes its decision; another correlation's key, a blocked line, and this
+#      library's own vocabulary under that key never do
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -2238,6 +2242,53 @@ EOF
   pass "the resolve scan matches the whole correlation token only"
 }
 
+# Mates answering an escalation reply under the key it showed them. That keyed
+# reply is the answer, so the escalated record resolves and the library closes
+# the decision it opened; nothing else keyed in that namespace counts.
+test_keyed_reply_resolves_escalated_record() {
+  local home state corr other status key form rec
+  for form in prefixed bare; do
+    home=$(setup_parent "keyed-reply-$form")
+    state="$home/state"
+    export FM_PENDING_REPLY_SEND_HOOK='true'
+    export FM_PENDING_REPLY_NOW=9700
+    corr=$(fm_pending_reply_create "$home" "$state" "hibit" "queue 2458 now")
+    fm_pending_reply_mark_delivered "$state" "$corr"
+    fm_pending_reply_mark_turn_completed "$state" "$corr" request
+    fm_pending_reply_send_recovery "$state" "$corr" || fail "recovery send failed"
+    fm_pending_reply_mark_turn_completed "$state" "$corr" recovery
+    fm_pending_reply_maybe_escalate "$state" "$corr" || fail "escalation should fire"
+    [ "$(phase_of "$state" "$corr")" = escalated ] || fail "fixture should be escalated"
+    status="$state/hibit.status"
+    other=$(fm_pending_reply_new_id)
+    key=$corr
+    [ "$form" = bare ] || key="pending-reply-$corr"
+    {
+      printf 'done [key=pending-reply-%s] [at=9701]: a different request answered\n' "$other"
+      printf 'blocked [key=%s] [at=9702]: still stuck on 2458\n' "$key"
+    } >> "$status"
+    if fm_pending_reply_line_resolves "resolved [key=pending-reply-$corr] [at=9703]: pending-reply-resolved: task=hibit pending-reply-id=$corr via=operator-resolve-key" "$corr"; then
+      fail "$form: an operator close note must not read as the mate's reply"
+    fi
+    if fm_pending_reply_try_resolve "$state" "$corr"; then
+      fail "$form: another key, a blocked line, or library vocabulary must not resolve"
+    fi
+    [ "$(phase_of "$state" "$corr")" = escalated ] || fail "$form: record must stay escalated"
+    printf 'done [key=%s] [at=9704]: 2458 queued and merged\n' "$key" >> "$status"
+    fm_pending_reply_try_resolve "$state" "$corr" || fail "$form: keyed reply should resolve"
+    [ "$(phase_of "$state" "$corr")" = resolved ] || fail "$form: phase should be resolved"
+    rec=$(fm_pending_reply_path "$state" "$corr")
+    [ -n "$(fm_pending_reply_get "$rec" escalation_closed_epoch)" ] \
+      || fail "$form: the escalation episode must be recorded closed"
+    grep -Fq "resolved [key=pending-reply-$corr]" "$status" \
+      || fail "$form: the library did not close the escalation decision: $(cat "$status")"
+    if status_open_decisions "$status" | cut -f1 | grep -qx "pending-reply-$corr"; then
+      fail "$form: the escalation decision still folds as open: $(cat "$status")"
+    fi
+  done
+  pass "a reply keyed with the correlation resolves the escalated record and closes its decision"
+}
+
 # The resolve scan over a large, token-free status file must stay cheap and
 # fork-free: it is on the watcher's per-poll path, and a per-line command
 # substitution there turns a multi-megabyte file into seconds of forking.
@@ -2314,6 +2365,7 @@ test_escalated_undelivered_correlation_stays_retryable
 test_same_kind_escalation_reopens_after_operator_close
 test_summary_keeps_accents_and_caps_by_character
 test_resolve_scan_matches_whole_token_only
+test_keyed_reply_resolves_escalated_record
 test_resolve_scan_stays_cheap_on_large_status
 
 printf 'ok - all pending-reply tests passed\n'

@@ -610,6 +610,8 @@ fm_pending_reply_discard_undelivered() {  # <state-dir> <corr_id>
 # Unrelated verbs without the token never match. Stale/wrong corr never match.
 # The parent's own pending-reply-missed escalation line must not self-resolve:
 # it names the request with pending-reply-id= rather than corr=.
+# A reply keyed with the correlation itself instead of carrying its corr= token
+# also correlates (fm_pending_reply_line_keyed_reply).
 fm_pending_reply_line_resolves() {  # <line> <corr_id> [<re>]
   local line=$1 corr=$2 re=${3-}
   [ -n "$line" ] && [ -n "$corr" ] || return 1
@@ -617,26 +619,55 @@ fm_pending_reply_line_resolves() {  # <line> <corr_id> [<re>]
     *pending-reply-missed*) return 1 ;;
   esac
   [ -n "$re" ] || re=$(fm_pending_reply_corr_re "$corr")
-  fm_pending_reply_text_has_corr "$line" "$corr" "$re"
+  fm_pending_reply_text_has_corr "$line" "$corr" "$re" && return 0
+  fm_pending_reply_line_keyed_reply "$line" "$corr"
+}
+
+# 0 if <line> is a reply keyed with the correlation rather than carrying its
+# corr= token: `[key=pending-reply-<corr>]`, the key the escalation for it
+# names, or `[key=<corr>]`. Mates answering an escalation reply under the key
+# they were shown, and the per-request 64-bit id makes that key as exact as the
+# token. A blocked line, or any note in this library's own pending-reply-
+# vocabulary (its escalations and the record or operator close notes), is never
+# a reply, so an operator close keeps its own semantics.
+fm_pending_reply_line_keyed_reply() {  # <line> <corr_id>
+  local line=$1 corr=$2 key note
+  case "$line" in
+    *"[key=pending-reply-$corr]"*|*"[key=$corr]"*) ;;
+    *) return 1 ;;
+  esac
+  key=$(_fm_decision_key "$line" '') || return 1
+  case "$key" in
+    "pending-reply-$corr"|"$corr") ;;
+    *) return 1 ;;
+  esac
+  [ "$(status_line_verb "$line")" != blocked ] || return 1
+  note=$(status_line_note "$line")
+  case "$note" in
+    pending-reply-*) return 1 ;;
+  esac
+  return 0
 }
 
 # Scan a status file for a correlated resolve. Prints the matching line or empty.
-# The literal token is pre-filtered with one C-speed pass first: a status file
-# carrying no token at all (the overwhelmingly common case, and these files reach
-# megabytes) costs no regex work, while the whole-word pattern still decides
-# every line the literal does reach.
+# Candidate lines are pre-selected with one C-speed literal pass: a status file
+# carrying neither the token nor a key for it (the overwhelmingly common case,
+# and these files reach megabytes) costs no regex work, while the whole-word
+# pattern and the keyed-reply rule still decide every line the literal reaches.
 fm_pending_reply_find_resolve_line() {  # <status-file> <corr_id>
-  local status_file=$1 corr=$2 line re
+  local status_file=$1 corr=$2 line re candidates
   [ -f "$status_file" ] || return 0
-  LC_ALL=C grep -F -q -- "corr=$corr" "$status_file" 2>/dev/null || return 0
+  candidates=$(LC_ALL=C grep -F -e "corr=$corr" -e "[key=pending-reply-$corr]" -e "[key=$corr]" -- "$status_file" 2>/dev/null) || return 0
   re=$(fm_pending_reply_corr_re "$corr")
-  while IFS= read -r line || [ -n "$line" ]; do
+  while IFS= read -r line; do
     [ -n "$line" ] || continue
     if fm_pending_reply_line_resolves "$line" "$corr" "$re"; then
       printf '%s' "$line"
       return 0
     fi
-  done < "$status_file"
+  done <<EOF
+$candidates
+EOF
   return 0
 }
 
