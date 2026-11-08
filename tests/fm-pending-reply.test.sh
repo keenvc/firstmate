@@ -2122,6 +2122,7 @@ test_same_kind_escalation_reopens_after_operator_close() {
     home=$(setup_parent same-kind)
     state="$home/state"
     fm_write_secondmate_meta "$state/mate.meta" "$home/sm" "sess:fm-mate"
+    # shellcheck disable=SC2030
     export FM_PENDING_REPLY_NOW=10000
     corr=$(fm_pending_reply_create "$home" "$state" mate "wake after lost transport")
     status="$state/mate.status"
@@ -2251,6 +2252,8 @@ test_keyed_reply_resolves_escalated_record() {
     home=$(setup_parent "keyed-reply-$form")
     state="$home/state"
     export FM_PENDING_REPLY_SEND_HOOK='true'
+    # Reset the fixture clock after isolated subshell tests.
+    # shellcheck disable=SC2031
     export FM_PENDING_REPLY_NOW=9700
     corr=$(fm_pending_reply_create "$home" "$state" "hibit" "queue 2458 now")
     fm_pending_reply_mark_delivered "$state" "$corr"
