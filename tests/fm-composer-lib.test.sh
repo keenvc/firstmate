@@ -1446,6 +1446,37 @@ test_cursorless_bare_wrap_region_classifies() {
   pass "fm_composer_classify_screen: cursorless bare wrap regions participate in verdicts"
 }
 
+test_opencode2_status_rail_below_floor_is_furniture() {
+  # Real OpenCode 2.0.32 panes captured live on tmux 2026-11-08 (paths and
+  # provider names sanitized; fixtures/opencode-2.0.32/). OpenCode 2 draws one
+  # status rail directly under the composer floor - `<cwd>:<branch> ... ctrl+p
+  # commands` in a session, `<cwd>  shift+tab agents  ctrl+p commands` on the
+  # landing screen. Read cursorless, that rail used to count as a lower live
+  # shape, so every idle OpenCode 2 pane on herdr read `unknown`: relaunch
+  # refused to type its exit keys and doorbells deferred.
+  local dir idle typed landing rail_path rail_hint
+  dir="$ROOT/tests/fixtures/opencode-2.0.32"
+  idle=$(<"$dir/opencode-2.0.32-session-idle.ansi")
+  typed=$(<"$dir/opencode-2.0.32-session-typed.ansi")
+  landing=$(<"$dir/opencode-2.0.32-landing-idle.ansi")
+  assert_screen "opencode 2.0.32 idle session on herdr" empty "$CAPS_STYLED" "$idle"
+  assert_screen "opencode 2.0.32 idle session on zellij" empty "$CAPS_STYLED_NOID" "$idle"
+  assert_screen "opencode 2.0.32 idle session on cmux/orca" empty "$CAPS_PLAIN" "$idle"
+  assert_screen "opencode 2.0.32 idle landing on herdr" empty "$CAPS_STYLED" "$landing"
+  # Typed text still refuses: the rail never hides a real draft.
+  assert_screen "opencode 2.0.32 typed draft on herdr" pending "$CAPS_STYLED" "$typed"
+  assert_screen "opencode 2.0.32 typed draft on cmux/orca" unknown "$CAPS_PLAIN" "$typed"
+  # Either signal alone carries the rail, so neither vendor string is
+  # load-bearing; each variant really differs from the captured rail.
+  rail_path=$'┃\n┃  Ask anything...\n┃\n┃  Build · Model Provider\n╹▀▀▀▀▀▀▀▀\n  ~/src/app:main   12.0K (6%)'
+  rail_hint=$'┃\n┃  Ask anything...\n┃\n┃  Build · Model Provider\n╹▀▀▀▀▀▀▀▀\n  12.0K (6%)  ctrl+p commands'
+  case "$rail_path" in *'ctrl+p commands'*) fail "the path-only rail must not carry the hint" ;; esac
+  case "${rail_hint##*$'\n'}" in *'~/'*|*' /'*) fail "the hint-only rail must not carry a path" ;; esac
+  assert_screen "opencode rail by cwd path alone" empty "$CAPS_STYLED" "$rail_path"
+  assert_screen "opencode rail by keybind hint alone" empty "$CAPS_STYLED" "$rail_hint"
+  pass "fm_composer_classify_screen: the opencode 2 status rail under the floor is composer furniture"
+}
+
 test_cursorless_container_rejects_contiguous_lower_activity() {
   local box leftbar grok kimi opencode
   box=$'╭────────────────────────╮\n│ ❯                      │\n╰────────────────────────╯\nWorking on request...'
@@ -1766,6 +1797,7 @@ test_bare_wrap_region_classifies
 test_contiguous_transcript_reanchors_on_live_prompt
 test_lower_dead_shell_invalidates_cursorless_candidate
 test_cursorless_bare_wrap_region_classifies
+test_opencode2_status_rail_below_floor_is_furniture
 test_cursorless_container_rejects_contiguous_lower_activity
 test_bottom_most_candidate_wins
 test_incomplete_lower_box_invalidates_stale_candidate

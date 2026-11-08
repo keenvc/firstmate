@@ -168,13 +168,24 @@ check_harness_idle_cursorless() {  # <name> <version> <target>
 }
 
 # --- 1. Every installed verified harness must reach a proven-empty composer --
-for h in claude codex opencode pi grok kimi muse; do
+for h in claude codex pi grok kimi muse; do
   if command -v "$h" >/dev/null 2>&1; then
     check_harness_idle_empty "$h" "$h"
   else
     note "harness absent, not verified here: $h"
   fi
 done
+# OpenCode's left-bar composer must prove itself cursorless too: herdr reads it
+# that way, and an `unknown` there refuses relaunch's exit keys. OpenCode 2 runs
+# with --standalone so the guard never starts the shared background service.
+if command -v opencode >/dev/null 2>&1; then
+  case "$(harness_version opencode)" in
+    *v1.*|1.*) CMX_REQUIRE_CURSORLESS_EMPTY=1 check_harness_idle_empty opencode opencode ;;
+    *) CMX_REQUIRE_CURSORLESS_EMPTY=1 check_harness_idle_empty opencode opencode --standalone ;;
+  esac
+else
+  note "harness absent, not verified here: opencode"
+fi
 # A named claude session (`claude -n <name>`) right-aligns that name in the
 # rule above its composer; the cursorless read must still prove it empty, or
 # away-mode delivery to a named primary on a cursorless backend defers forever.

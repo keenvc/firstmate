@@ -1958,6 +1958,26 @@ _fm_composer_leftbar_floor_row() {  # <trimmed-row>
   [ -z "${blocks//▀/}" ]
 }
 
+# _fm_composer_leftbar_status_row: 0 when <trimmed-row>, the row directly below
+# the left-bar floor, is OpenCode's own status rail rather than a lower live
+# shape. OpenCode draws exactly one such row under the floor: the pane's cwd
+# (`/Users/...` on 1.18.31; `~/<cwd>:<branch>  48.4K (27%)  ctrl+p commands`
+# in a session and `/…/<cwd>  shift+tab agents  ctrl+p commands` on the landing
+# screen on 2.0.32, verified live on tmux 2026-11-08). Two independent signals,
+# either one sufficient so no single vendor string is load-bearing: the row
+# opens with a cwd path token (`~/`, `/<name>`, or a truncated `/…`/`…/`), or
+# it carries OpenCode's `ctrl+p commands` keybind hint. Unclaimed activity such
+# as `Working on request...` matches neither and keeps the envelope stale.
+_fm_composer_leftbar_status_row() {  # <trimmed-row>
+  local row=$1 tilde
+  tilde=$(printf '~')
+  case "$row" in
+    "$tilde/"[![:space:]]*|/[!/[:space:]]*|…/*) return 0 ;;
+    *'ctrl+p commands'*) return 0 ;;
+  esac
+  return 1
+}
+
 # _fm_composer_row_is_composer_furniture: 0 when <trimmed-row> is DEMONSTRABLY
 # a harness's own furniture drawn below its composer, given <proof-glyph> - the
 # agent glyph that proved the envelope above it. Exactly four things qualify,
@@ -2219,6 +2239,12 @@ _fm_composer_select_cursorless() {  # <plain-screen> <screen> <styled>
       fm_composer_normalize_trim_var trimmed
       if _fm_composer_leftbar_floor_row "$trimmed"; then
         boundary=$next
+        raw=$(_fm_composer_screen_row "$((next + 1))" "$plain")
+        trimmed=$raw
+        fm_composer_normalize_trim_var trimmed
+        if _fm_composer_leftbar_status_row "$trimmed"; then
+          boundary=$((next + 1))
+        fi
       fi
     fi
     # The same footer zone, read from the other side: rows this envelope's own

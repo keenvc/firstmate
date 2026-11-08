@@ -918,6 +918,26 @@ The portable half lives in `test_matrix_opencode_leftbar_signals` in `tests/fm-c
 The same bytes on a plain backend read `unknown` in both states, because opencode 1.19.0 also draws a de-emphasised `~/.treehouse/fm001-b8697d/1/fm001:fm/` row inside the box that survives an unstyled capture, so the strict posture keeps deferring rather than reading `empty` there.
 Overriding `FM_COMPOSER_LEFTBAR_FOOTER_RE` to a pattern that cannot match puts the false `pending` straight back on the captured idle pane, which pins the exemption as the load-bearing signal rather than an incidental pass.
 `fm_composer_extract_selected_content` applies the same rule to the same run, so the classified-empty pane hands back no composer text and the typed pane hands back only `fix the doorbell skip`; zellij's append proof (`fm_backend_zellij_composer_observed_append` in `bin/backends/zellij.sh`) requires the extracted text to equal the prior content plus the typed text, so a footer leaking into that read fails the send instead of confirming one.
+### 2026-11-08 opencode 2.0.32 status rail below the left-bar floor
+
+Verified on 2026-11-08 on Linux x86_64 against an installed opencode 2.0.32 in a tmux pane, on its landing screen and in a session after one submitted prompt, read with the cursorless styled (Herdr), styled no-identity (Zellij), and plain (cmux, orca) capability descriptors.
+OpenCode 2 draws one status rail directly under the composer's `╹▀` floor row: `<cwd>:<branch>  <tokens> (<pct>)  ctrl+p commands` in a session and `<cwd>  shift+tab agents  ctrl+p commands` on the landing screen.
+The cursorless "bottom-most shape wins" rule read that rail as a newer live shape below the composer, so an idle opencode 2 composer on Herdr always classified `unknown`, and `bin/fm-control.sh` relaunch and exit refused to type opencode 2's exit keys.
+`_fm_composer_leftbar_status_row` in `bin/fm-composer-lib.sh` now treats the single row under the floor as composer furniture when it opens with a cwd path token or carries the `ctrl+p commands` hint, either signal alone being sufficient; unclaimed activity such as `Working on request...` still keeps the envelope stale.
+The live guard now requires the opencode arm's cursorless read to be `empty` and launches opencode 2 with `--standalone`:
+
+```sh
+FM_COMPOSER_MATRIX_LIVE=1 tests/fm-composer-matrix-live-e2e.test.sh
+```
+
+```text
+before: ok - opencode (opencode v2.0.32): the same idle pane read cursorless is not pending (verdict: unknown)
+after:  ok - opencode (opencode v2.0.32): real idle composer classifies empty
+        ok - opencode (opencode v2.0.32): the same idle pane read cursorless is not pending (verdict: empty)
+```
+
+The portable half is `test_opencode2_status_rail_below_floor_is_furniture` in `tests/fm-composer-lib.test.sh`, over sanitized captures in `tests/fixtures/opencode-2.0.32/`: idle session and landing screens read `empty` on every cursorless profile, an unsent draft above the same rail still reads `pending` styled and `unknown` plain, and each rail signal is asserted alone.
+
 ### Grok approval-titled bottom border
 
 Recorded 2026-10-01; the shape was first observed on Grok 1.0.44 on 2026-09-29, on an idle composer the classifier then read as `unknown`. The classifier update was exercised again on 2026-10-15 against Grok 1.0.62; see the live-validation evidence below.
