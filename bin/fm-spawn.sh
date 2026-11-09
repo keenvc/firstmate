@@ -6190,12 +6190,60 @@ opencode2_turn_started() {
   [ "${2:-}" = opencode-plugin ]
 }
 
+# opencode2_capture_exit: keep why a launch died next to the task's own state.
+# The window a failed launch leaves behind is cleaned up moments later, so the
+# only surviving evidence is whatever this writes: the version and target, the
+# pane's last rows, and - best effort, because the CLI logs to its own file
+# rather than to the pane - the newest client-process failure line, which is
+# where OpenCode 2 records the server error that killed a launch.
+opencode2_capture_exit() {
+  local out="$STATE/$ID.opencode-exit" log
+  {
+    printf 'task=%s harness=opencode version=%s target=%s backend=%s at=%s\n' \
+      "$ID" "$OPENCODE_VERSION" "$T" "$BACKEND" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf -- '--- pane tail ---\n'
+    fm_backend_capture "$BACKEND" "$T" 60 "$W" 2>/dev/null | tail -40
+    log="$HOME/.local/share/opencode/log/opencode.log"
+    if [ -r "$log" ]; then
+      printf -- '--- opencode log (newest client failures) ---\n'
+      tail -n 4000 "$log" 2>/dev/null | grep -a 'cli process failed' | tail -n 2 | cut -c1-1200
+    fi
+  } >"$out" 2>/dev/null || true
+  printf 'error: opencode %s exited before it started the brief turn; what the pane last showed is at %s\n' \
+    "$OPENCODE_VERSION" "$out" >&2
+}
+
 opencode2_wait_for_delivery() {
   local i=0 max=${FM_OPENCODE_DELIVERY_POLLS:-120} interval=${FM_OPENCODE_POLL_INTERVAL:-0.5}
   local settle=${FM_OPENCODE_SUBMIT_SETTLE_POLLS:-20} deadline=${FM_OPENCODE_SUBMIT_DEADLINE_POLLS:-80}
-  local sent=0 composer
+  local sent=0 composer gone=0 probe_after=${FM_OPENCODE_GONE_POLLS:-30}
   while [ "$i" -lt "$max" ]; do
     opencode2_turn_started && return 0
+    # An OpenCode 2 CLI can exit on its own a few seconds after the pane opens:
+    # it submits the launch input to its own local server, that server refuses a
+    # database write (`effect/sql/SqlError/LockTimeoutError` on the shared
+    # opencode.db, answered as HTTP 500 when many 2.x panes write at once), and
+    # the CLI dies with the pane left holding no agent at all. No turn can start
+    # there, so the delivery budget must not be spent on it: once the pane has
+    # had its startup window and the backend can PROVE the agent is gone, fail
+    # immediately and keep what the pane still shows. The probe needs two
+    # consecutive dead reads and never fires while the composer holds the launch
+    # input, because a pane showing that text is alive by definition. Backends
+    # that cannot answer (unknown) keep the ordinary timeout below.
+    if [ "$i" -ge "$probe_after" ] && [ "$sent" -eq 0 ]; then
+      if [ "$(fm_backend_agent_alive "$BACKEND" "$T" 2>/dev/null)" = dead ]; then
+        gone=$((gone + 1))
+        if [ "$gone" -ge 2 ]; then
+          composer=$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)
+          if [ "$composer" != pending ] && [ "$composer" != pending-unproven ]; then
+            opencode2_capture_exit
+            return 2
+          fi
+        fi
+      else
+        gone=0
+      fi
+    fi
     if [ "$sent" -eq 0 ] && [ "$i" -ge "$settle" ]; then
       composer=$(fm_backend_composer_state "$BACKEND" "$T" "$W" 2>/dev/null)
       if [ "$composer" != unknown ] || [ "$i" -ge "$deadline" ]; then
@@ -8741,7 +8789,19 @@ if [ "$HARNESS" = cline ]; then
   fi
 fi
 if [ "$HARNESS" = opencode ] && [ "$OPENCODE_MAJOR" -ge 2 ]; then
-  if ! opencode2_wait_for_delivery; then
+  # 0 delivered, 2 proved dead before any turn could start, other failed. The
+  # two get different records because they need different next moves: a dead
+  # CLI means the pane never had a chance (relaunch elsewhere or after the
+  # opencode server recovers), while a timeout means the input was offered and
+  # the turn did not take it.
+  oc2_gate=0
+  opencode2_wait_for_delivery || oc2_gate=$?
+  if [ "$oc2_gate" -eq 2 ]; then
+    printf '%s\n' "$(status_stamp_line "failed: opencode $OPENCODE_VERSION's CLI exited before starting the brief turn in window $T; pane and log kept at state/$ID.opencode-exit")" >>"$STATE/$ID.status"
+    rovo_endpoint_cleanup
+    exit 1
+  fi
+  if [ "$oc2_gate" -ne 0 ]; then
     printf '%s\n' "$(status_stamp_line "failed: opencode $OPENCODE_VERSION did not start the brief turn in window $T")" >>"$STATE/$ID.status"
     echo "error: opencode $OPENCODE_VERSION did not start the brief turn; inspect window $T" >&2
     rovo_endpoint_cleanup

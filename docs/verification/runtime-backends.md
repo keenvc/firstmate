@@ -3608,6 +3608,35 @@ On 2.0.22 the brief is submitted on its own, yet the composer still reads pendin
 `opencode debug config` on 2.0.11 normalized the launch's legacy `{"permission":{"*":"allow"}}` into an allow-all `permissions` rule; the same command printed no configuration on 2.0.22, so on 2.0.22 the legacy shape rests on the earlier 2.0.21 verification recorded in the OpenCode harness reference.
 `tests/fm-spawn-dispatch-profile.test.sh` pins the gate's outcomes portably: an auto-submitted brief gets no extra Enter, a prefilled brief gets exactly one, a composer that reads unknown before it draws gets its one Enter only once it reads pending, a composer that only reads unknown gets its one Enter at the submit deadline, and a turn that never starts fails the spawn.
 
+### 2026-11-09 opencode 2.2.6 CLI dies on a locked database before its first turn
+
+Two consecutive `fm-control relaunch --fresh-session` attempts into the same worktree created a window and then failed with `opencode 2.2.6 did not start the brief turn in window <target>`; the third attempt succeeded only because it changed harness.
+OpenCode's own log at `~/.local/share/opencode/log/opencode.log` records what actually happened, 17 and 18 seconds after each launch:
+
+```text
+level=ERROR message="cli process failed" cause="ClientError: UnexpectedStatus: 500 (cause: {\"status\":500})"
+  args=["--standalone","--prompt",": Firstmate operational input waiting: read '...msg' ..."] role=cli
+level=INFO message="shutdown started" signal=SIGTERM role=cli
+```
+
+and immediately before it, inside the same client's prompt path:
+
+```text
+effect/sql/SqlError/LockTimeoutError: Failed to execute statement
+  at SessionInbox.admit ... at Session.prompt ... at ServerProcess.start
+EffectDrizzleQueryError: Failed query: insert into "project" (...) values (...)
+```
+
+So the brief WAS submitted: the CLI handed it to its own local server, that server could not write `~/.local/share/opencode/opencode.db` because another writer held the SQLite lock past its timeout, it answered HTTP 500, and the CLI exited with SIGTERM, leaving a pane with no agent in it.
+The database is one shared file per `HOME` and this host runs a dozen concurrent 2.x panes, so the failure is a contention class rather than a per-launch defect: the same log carries every subsequent `database is locked` line from neighbouring panes.
+The pane is gone by the time anyone looks (the failed launch cleans its own window up), which is why the recorded failure said "delivery" and read like a Firstmate bug.
+
+`opencode2_wait_for_delivery` now notices the exit instead of spending its delivery budget on a husk.
+Once the pane has had its startup window (`FM_OPENCODE_GONE_POLLS`, 30 polls), it asks the backend whether the agent is still there (`fm_backend_agent_alive`), needs two consecutive `dead` answers, and never fires while the composer holds the launch input, because a pane showing that text is alive by definition.
+Backends that cannot prove an exit answer `unknown` and keep the ordinary timeout.
+On proof it returns 2, `fm-spawn` records `failed: opencode <version>'s CLI exited before starting the brief turn in window <target>; pane and log kept at state/<id>.opencode-exit`, and `opencode2_capture_exit` writes that file: the version, the target, the pane's last 40 rows, and the newest `cli process failed` lines from OpenCode's own log.
+`test_opencode2_delivery_gate_fails_fast_when_the_cli_exits` in `tests/fm-spawn-dispatch-profile.test.sh` drives a pane whose agent is provably gone (an empty tty plus a shell as `pane_current_command`) and pins the exit record, no gate Enter, and the capture file; a control spawn whose agent the backend cannot prove gone must still report the delivery timeout and spend its deadline Enter, so the fast path is not a spawn that fails this way regardless.
+
 ## Pi repeated-read containment
 
 Verified on 2026-10-27 UTC on Linux x86_64 with Node 24.22.1 and npm 11.19.1.

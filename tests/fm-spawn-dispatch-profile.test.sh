@@ -157,6 +157,7 @@ run_spawn() {
   # A test opts in to the set case via FM_TEST_CLAUDE_CONFIG_DIR.
   CLAUDE_CONFIG_DIR="${FM_TEST_CLAUDE_CONFIG_DIR:-}" \
     FM_FAKE_LAUNCH_LOG="$launchlog" FM_FAKE_PANE_LOG="${FM_TEST_PANE_LOG:-}" \
+    FM_FAKE_PANE_COMMAND="${FM_TEST_PANE_COMMAND:-}" \
     FM_FAKE_PI_VERSION="${FM_TEST_PI_VERSION:-0.84.0}" \
     FM_FAKE_OPENCODE_VERSION="${FM_TEST_OPENCODE_VERSION:-2.0.21}" \
     FM_FAKE_OPENCODE_PROBE_LOG="${FM_TEST_OPENCODE_PROBE_LOG:-}" \
@@ -1458,6 +1459,66 @@ test_opencode2_delivery_gate_fails_when_turn_never_starts() {
   assert_grep "opencode 2.0.21 did not start the brief turn" "$HOME_DIR/state/$id.status" \
     "a never-started opencode 2 turn must record a failed status"
   pass "opencode 2 delivery gate fails the spawn when the brief turn never starts"
+}
+
+test_opencode2_delivery_gate_fails_fast_when_the_cli_exits() {
+  # A real OpenCode 2.2.6 launch died ~18s after its pane opened: the CLI sent
+  # the launch input to its own local server, that server answered HTTP 500
+  # because the shared opencode.db was locked, and the CLI exited, leaving a
+  # window with no agent in it. The gate used to spend its whole delivery budget
+  # on that husk and then report a delivery timeout, which reads like a delivery
+  # problem and hides the exit. It now proves the agent is gone and fails early,
+  # keeping the pane and the CLI's own failure line beside the task state.
+  local rec id out status enters exitfile ctrl_id ctrl_enters
+  id=profile-opencode-gate-dead-z8f
+  rec=$(make_spawn_case profile-opencode-gate-dead opencode "$id")
+  read_case_record "$rec"
+  : > "$CASE_DIR/enter.log"
+  OUT=$(FM_TEST_OPENCODE_TURN=never FM_TEST_ENTER_LOG="$CASE_DIR/enter.log" \
+    FM_TEST_PANE_COMMAND=bash \
+    FM_OPENCODE_DELIVERY_POLLS=400 FM_OPENCODE_GONE_POLLS=1 \
+    FM_OPENCODE_SUBMIT_SETTLE_POLLS=40 FM_OPENCODE_SUBMIT_DEADLINE_POLLS=300 \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model anthropic/claude-sonnet-4-5)
+  STATUS=$?
+  ENTERS=$(wc -l < "$CASE_DIR/enter.log" | tr -d ' ')
+  [ "$STATUS" -ne 0 ] || fail "opencode 2 spawn whose CLI exited must fail: $OUT"
+  assert_grep "CLI exited before starting the brief turn" "$HOME_DIR/state/$id.status" \
+    "the failure record must name the CLI exit rather than a delivery timeout"
+  assert_grep "opencode 2.0.21" "$HOME_DIR/state/$id.status" \
+    "the failure record must name the version that died"
+  # Every spawn in this fixture records one baseline bare Enter; the gate must
+  # not add a second one to a pane whose agent it proved gone. (The auto case
+  # above records 1, the prefilled case 2, so this pins "no gate Enter".)
+  [ "$ENTERS" = 1 ] || fail "a dead CLI proved before the settle window must get no gate Enter (bare Enters: $ENTERS, baseline 1)"
+  exitfile="$HOME_DIR/state/$id.opencode-exit"
+  [ -s "$exitfile" ] || fail "the exit must leave its pane capture at $exitfile"
+  assert_grep "task=$id" "$exitfile" "the exit capture must name its task"
+  assert_grep "--- pane tail ---" "$exitfile" "the exit capture must keep what the pane last showed"
+
+  # CONTROL: the same budgets on a pane whose agent the backend cannot prove
+  # gone, because the exit probe only fires on proof. That spawn must still
+  # spend the delivery budget and report the ordinary timeout record, so the
+  # assertions above pin the exit path rather than a spawn that always fails
+  # this way.
+  ctrl_id=profile-opencode-gate-alive-z8g
+  rec=$(make_spawn_case profile-opencode-gate-alive opencode "$ctrl_id")
+  read_case_record "$rec"
+  : > "$CASE_DIR/enter.log"
+  out=$(FM_TEST_OPENCODE_TURN=never FM_TEST_ENTER_LOG="$CASE_DIR/enter.log" \
+    FM_OPENCODE_DELIVERY_POLLS=400 FM_OPENCODE_GONE_POLLS=1 \
+    FM_OPENCODE_SUBMIT_SETTLE_POLLS=40 FM_OPENCODE_SUBMIT_DEADLINE_POLLS=300 \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$ctrl_id" "$PROJ_DIR" \
+    --model anthropic/claude-sonnet-4-5)
+  status=$?
+  ctrl_enters=$(wc -l < "$CASE_DIR/enter.log" | tr -d ' ')
+  [ "$status" -ne 0 ] || fail "an unprovable agent must still fail the spawn: $out"
+  assert_grep "did not start the brief turn" "$HOME_DIR/state/$ctrl_id.status" \
+    "an unprovable agent must keep the ordinary delivery-timeout record"
+  assert_no_grep "CLI exited before starting the brief turn" "$HOME_DIR/state/$ctrl_id.status" \
+    "an unprovable agent must never be recorded as an exit"
+  [ "$ctrl_enters" = 2 ] || fail "an unprovable agent must still spend its deadline Enter (bare Enters: $ctrl_enters)"
+  pass "opencode 2 delivery gate fails fast and keeps the evidence when the CLI exits"
 }
 
 test_opencode1_launch_has_no_delivery_gate() {
@@ -3128,6 +3189,7 @@ test_opencode2_delivery_gate_submits_prefilled_brief_once
 test_opencode2_delivery_gate_waits_out_unknown_composer_for_pending
 test_opencode2_delivery_gate_sends_enter_at_deadline_when_unknown
 test_opencode2_delivery_gate_fails_when_turn_never_starts
+test_opencode2_delivery_gate_fails_fast_when_the_cli_exits
 test_opencode1_launch_has_no_delivery_gate
 test_opencode_busy_plugin_provisioned_for_every_major
 test_native_effort_validator_keeps_axes_separate

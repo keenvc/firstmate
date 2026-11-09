@@ -177,6 +177,13 @@ window_file="$(dirname "$0")/.spawn-window"
 case "${1:-}" in
   display-message)
     case "$*" in
+      # A test that needs a pane whose agent is GONE answers these two: an
+      # empty tty leaves no readable foreground group, and a shell as the
+      # current command then reaches fm_backend_tmux_agent_state's negative
+      # verdict ("dead") exactly as it would for a real pane whose agent
+      # exited. Defaults keep the historical answers.
+      *"#{pane_tty}"*) printf '%s\n' "${FM_FAKE_PANE_TTY:-}"; exit 0 ;;
+      *"#{pane_current_command}"*) printf '%s\n' "${FM_FAKE_PANE_COMMAND:-firstmate}"; exit 0 ;;
       *"#{cursor_y}"*)
         if [ -f "$(fake_opencode_plugin)" ]; then
           reads=$(cat "$(fake_opencode_plugin).fake-composer-reads" 2>/dev/null) || reads=0
