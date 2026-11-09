@@ -1695,10 +1695,24 @@ Refusing an Enter that would confirm any other dialog stays unconditional, and i
 Measured 2026-11-07 against opencode 2.0.32 through the named non-default Herdr lab, with the idle and typed screens recorded byte for byte in `tests/fixtures/opencode-2.0.32-flat/` (`.ansi` and `.plain` of each).
 2.x replaces the 1.x rail with one left-bar column closed by a half-block floor row (`╹▀▀…`), draws the mode/model footer inside that column directly above the floor, and puts the cwd/keybinding hints (dots, `shift+tab agents`, `ctrl+p commands`) on the row below it.
 The idle composer reads `empty` and the typed one reads `pending`, both from the styled cursor-anchored read and from a bare plain read of the typed screen the verdict is `unknown`.
-`_fm_composer_leftbar_flat_shape` proves the 2.x layout from the screen alone before any verdict leans on it: the region's last row is the floor, the row above it is the footer, and the row below it is the status row.
+`_fm_composer_leftbar_flat_shape` proves the 2.x layout from the screen alone before any verdict leans on it: the region's last row is the floor, the footer is above it under nothing but empty left-bar spacer rows, and the row below it is the status row.
 A region that fails any of those three is read by the ordinary left-bar rules, so every 1.x fixture keeps the verdict it had.
 Committing the floor row only when that proof holds is what keeps a 1.x screen (whose floor sits below its footer) on the 1.x geometry.
 `bin/fm-composer-lib.sh` `fm_composer_explain_unknown` names the shapes a refused screen did offer, so an `unknown` refusal distinguishes an unlearned harness from one whose composer moved.
+
+### 2026-11-09 opencode 2 session composer with an empty spacer row
+
+A real OpenCode 2 session pane captured from a secondmate drew one EMPTY left-bar row between the mode footer and the closing floor (footer, bare `┃`, floor, then the `~/<cwd>:<branch>  <tokens> (<pct>)  ctrl+p commands` session rail).
+`_fm_composer_leftbar_flat_shape` required the footer directly above the floor, so that screen fell back to the 1.x reading, where the footer was no longer the run's last row: an idle composer read `pending` on every styled backend and `bin/fm-control.sh` relaunch and exit refused to type their keys.
+`_fm_composer_leftbar_flat_footer_row` now finds the footer under empty spacer rows only (a spacer carrying any content fails the proof), and the session rail is accepted where a spacer row already proves the session layout, because opencode 1.x also draws a `ctrl+p commands` rail under its own floor.
+The fixture is `tests/fixtures/opencode-2.0.32-copper-session/` (layout from the captured screen, SGR triples from the live 2.0.32 captures), pinned by `test_matrix_opencode_flat_2x_spacer_row` in `tests/fm-composer-lib.test.sh`: idle `empty` on styled, styled no-identity, and plain profiles, typed `pending` styled and `unknown` plain, and a draft on the spacer row `pending`.
+The live proof used the installed opencode 2.2.6 in the named non-default Herdr lab (`bin/fm-herdr-lab.sh`), capturing the pane idle, typed, and in a session:
+
+```text
+IDLE VERDICT: empty
+TYPED VERDICT: pending
+SESSION-PANE VERDICT: empty
+```
 
 ### Prune and respawn
 

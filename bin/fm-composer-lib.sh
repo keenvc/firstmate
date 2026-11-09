@@ -734,6 +734,13 @@ FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)[[:space:]]+·[[:space:]]+'
 # footer, and the floor closes the run instead of an invisible end. The status
 # row below it carries `shift+tab` and `ctrl+p` cells, so a cwd:branch rail that
 # wraps into those rows still reads as furniture.
+# In a live session 2.0.32 draws the same flat composer with one EMPTY left-bar
+# row between that footer and the floor, and an empty composer there read
+# `pending` on every styled backend because the footer was no longer the row
+# directly above the floor (captured 2026-11-09 from a real session pane:
+# footer, bare `┃`, floor, then `~/<cwd>:<branch>  <tokens> (<pct>)  ctrl+p
+# commands`). Empty spacer rows are therefore part of the proved 2.x layout;
+# the footer, floor, and status row remain required exactly as above.
 # opencode draws the footer INSIDE the composer and RIGHT-ALIGNS the cwd:branch
 # rail on the rows directly above it. That rail is furniture, not typed text,
 # and recognising it is what keeps an idle pane from reading `pending` (task
@@ -745,6 +752,11 @@ FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)[[:space:]]+·[[:space:]]+'
 # A missing, empty, or unreadable status row proves nothing: the recognised
 # composer stays `unknown` rather than reading `empty` on a shape it cannot
 # see whole.
+# This pattern is the landing screen's rail (`shift+tab agents  ctrl+p
+# commands`). A session rail is `<cwd>:<branch>  <tokens> (<pct>)  ctrl+p
+# commands` with no `shift+tab` cell; it is accepted only where a spacer row
+# already proves the session layout (see _fm_composer_leftbar_flat_shape),
+# because opencode 1.x draws a `ctrl+p commands` rail under its own floor too.
 FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT='shift\+tab.*ctrl\+p'
 # Claude draws its permission-mode hint on its own row directly below the
 # composer (` ⏵⏵ bypass permissions on (shift+tab to cycle)`, ` ⏵⏵ accept edits
@@ -1956,13 +1968,16 @@ _fm_composer_leftbar_plain_content() {  # <raw-row> -> plain content on stdout
 _fm_composer_classify_leftbar() {  # <screen> <styled> <first-row> <last-row>
   local screen=$1 styled=$2 first=$3 last=$4
   local row raw content pending_seen=0 footer_re leading_blank=1 placeholder_position=0 cwd_start
-  local content_last=$4 flat_re_scope=0
+  local content_last=$4 flat_re_scope=0 plain flat_footer
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   # A PROVEN 2.x region carries its closing floor row and the footer above it
   # INSIDE the run, so the footer is no longer the run's last row there. Until
-  # that whole shape is proved the 1.x reading applies byte for byte.
+  # that whole shape is proved the 1.x reading applies byte for byte. The
+  # content ends above the footer, wherever empty spacer rows place it.
   if _fm_composer_leftbar_flat_shape "$screen" "$first" "$last"; then
-    content_last=$((last - 2))
+    plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
+    flat_footer=$(_fm_composer_leftbar_flat_footer_row "$screen" "$plain" "$first" "$last")
+    content_last=$((flat_footer - 1))
     flat_re_scope=1
   fi
   cwd_start=$(_fm_composer_leftbar_cwd_start "$screen" "$first" "$last") || cwd_start=-1
@@ -2018,24 +2033,59 @@ _fm_composer_row_is_leftbar_status() {  # <trimmed-row>
   fm_composer_idle_matches "$1" "${FM_COMPOSER_LEFTBAR_STATUS_RE:-$FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT}" sensitive
 }
 
+# _fm_composer_leftbar_flat_footer_row: prints the row index of OpenCode 2.x's
+# mode/model footer inside a left-bar region whose LAST row is the closing floor
+# row, or fails when the region carries no such footer. On the landing screen the
+# footer sits DIRECTLY above the floor; a live session draws one or more EMPTY
+# left-bar rows between them (verified live on opencode 2.0.32, 2026-11-09, in a
+# real session pane: footer, bare `┃`, floor). Empty spacer rows are tolerated
+# and nothing else is: a spacer is accepted only when it is EMPTY after
+# trimming - a bar row carrying any content, a draft above all, ends the walk
+# and fails the proof - and the first non-empty row above the blanks must match
+# the footer pattern in either its ghost-stripped or its plain form.
+_fm_composer_leftbar_flat_footer_row() {  # <screen> <plain> <first-row> <floor-row>
+  local screen=$1 plain=$2 first=$3 row=$4 raw trimmed stripped plain_content
+  local footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
+  row=$((row - 1))
+  while [ "$row" -ge "$first" ]; do
+    raw=$(_fm_composer_screen_row "$row" "$plain")
+    trimmed=$raw
+    fm_composer_normalize_trim_var trimmed
+    case "$trimmed" in
+      '┃') row=$((row - 1)); continue ;;
+      '┃'*) ;;
+      *) return 1 ;;
+    esac
+    stripped=$(_fm_composer_row_content "$(_fm_composer_screen_row "$row" "$screen")" 1)
+    case "$stripped" in '┃'*) stripped=${stripped#┃} ;; esac
+    fm_composer_normalize_trim_var stripped
+    plain_content=$(_fm_composer_leftbar_plain_content "$raw")
+    _fm_composer_row_is_leftbar_footer "$stripped" "$plain_content" "$footer_re" || return 1
+    printf '%s\n' "$row"
+    return 0
+  done
+  return 1
+}
+
 # _fm_composer_leftbar_flat_shape: 0 when a left-bar region is OpenCode 2.x's
 # FLAT composer (the layout the constant above draws), which differs from the
 # 1.x rail in exactly two ways that matter to a verdict:
 #   - the run CLOSES on a half-block floor row (`╹▀▀…`) rather than on a blank
 #     row, so the floor row ends the content rows;
-#   - the mode/model footer is drawn INSIDE the run on the row directly above
-#     that floor, so that row is furniture rather than typed text.
+#   - the mode/model footer is drawn INSIDE the run above that floor (directly
+#     above it on the landing screen, under empty left-bar spacer rows in a
+#     session, see _fm_composer_leftbar_flat_footer_row), so that row is
+#     furniture rather than typed text.
 # Both halves are proved from the screen, never assumed: the region's last row
-# must be the floor, the row above it must match the footer pattern in either
-# its ghost-stripped or its plain form, and the row below the floor must be
-# 2.x's cwd/keybinding status row. A region that fails any of them is left to
-# the ordinary left-bar read, so the 1.x shape keeps its verdict byte for byte.
-# The floor-row half alone is what the 1.x fixtures already draw (`╹▀▀…` below
-# the footer); requiring the status row below it is what keeps the two
-# versions apart, and an absent or unreadable status row proves nothing.
+# must be the floor, the footer must be found above it under nothing but empty
+# spacer rows, and the row below the floor must be 2.x's cwd/keybinding status
+# row. A region that fails any of them is left to the ordinary left-bar read, so
+# the 1.x shape keeps its verdict byte for byte. The floor-row half alone is what
+# the 1.x fixtures already draw (`╹▀▀…` below the footer); requiring the status
+# row below it is what keeps the two versions apart, and an absent or unreadable
+# status row proves nothing.
 _fm_composer_leftbar_flat_shape() {  # <screen> <first-row> <last-row>
-  local screen=$1 first=$2 last=$3 plain raw trimmed stripped plain_content
-  local footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
+  local screen=$1 first=$2 last=$3 plain raw trimmed footer
   [ "$last" -gt "$first" ] || return 1
   plain=$(printf '%s\n' "$screen" | fm_composer_strip_ansi)
   raw=$(_fm_composer_screen_row "$last" "$plain")
@@ -2057,19 +2107,25 @@ _fm_composer_leftbar_flat_shape() {  # <screen> <first-row> <last-row>
     fm_composer_normalize_trim_var trimmed
     _fm_composer_leftbar_floor_row "$trimmed" || return 1
   fi
-  raw=$(_fm_composer_screen_row "$((last - 1))" "$plain")
-  trimmed=$raw
-  fm_composer_normalize_trim_var trimmed
-  case "$trimmed" in '┃'*) ;; *) return 1 ;; esac
-  stripped=$(_fm_composer_row_content "$(_fm_composer_screen_row "$((last - 1))" "$screen")" 1)
-  case "$stripped" in '┃'*) stripped=${stripped#┃} ;; esac
-  fm_composer_normalize_trim_var stripped
-  plain_content=$(_fm_composer_leftbar_plain_content "$raw")
-  _fm_composer_row_is_leftbar_footer "$stripped" "$plain_content" "$footer_re" || return 1
+  footer=$(_fm_composer_leftbar_flat_footer_row "$screen" "$plain" "$first" "$last") || return 1
   raw=$(_fm_composer_screen_row "$((last + 1))" "$plain")
   trimmed=$raw
   fm_composer_normalize_trim_var trimmed
-  _fm_composer_row_is_leftbar_status "$trimmed"
+  # The rail under the floor must be 2.x furniture. With no spacer row (the
+  # footer directly above the floor, the shape c985de97 proved) the landing
+  # screen's `shift+tab agents  ctrl+p commands` row is required exactly as it
+  # was; opencode 1.x also draws a floor plus a status row under its own footer,
+  # and its rail carries `ctrl+p commands` without `shift+tab`, so accepting
+  # that hint unconditionally would call an idle 1.x pane `pending`.
+  # A spacer row is 2.x-only, so the session rail it introduces (no `shift+tab`
+  # cell) is accepted there: either form carries the `ctrl+p commands` hint, and
+  # an unreadable row still proves nothing.
+  if _fm_composer_row_is_leftbar_status "$trimmed"; then return 0; fi
+  [ "$footer" -lt "$((last - 1))" ] || return 1
+  case "$trimmed" in
+    *'ctrl+p commands'*) return 0 ;;
+  esac
+  return 1
 }
 
 _fm_composer_leftbar_floor_row() {  # <trimmed-row>
@@ -2415,7 +2471,7 @@ _fm_composer_select_cursorless() {  # <plain-screen> <screen> <styled>
 
 fm_composer_extract_selected_content() {  # <caps> <screen>
   local caps=$1 screen=$2 styled=0 kv plain row raw content glyph joined='' footer_re prompt_row=-1
-  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 cwd_start content_last flat_re_scope=0
+  local leading_blank=1 placeholder_position=0 prompt_is_shell=0 cwd_start content_last flat_re_scope=0 flat_footer
   footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}
   while IFS= read -r kv; do
     [ "$kv" = styled=1 ] && styled=1
@@ -2430,12 +2486,14 @@ EOF
   flat_re_scope=0
   cwd_start=-1
   if [ "$FM_COMPOSER_SELECTED_KIND" = leftbar ]; then
-    # OpenCode 2.x keeps its footer INSIDE the run, directly above the floor
-    # row, so a proved flat region ends its content above those two furniture
+    # OpenCode 2.x keeps its footer INSIDE the run above the floor row, so a
+    # proved flat region ends its content above the footer and its empty spacer
     # rows exactly as the verdict does (see _fm_composer_classify_leftbar).
     if _fm_composer_leftbar_flat_shape "$screen" \
          "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST"; then
-      content_last=$((FM_COMPOSER_SELECTED_LAST - 2))
+      flat_footer=$(_fm_composer_leftbar_flat_footer_row "$screen" "$plain" \
+        "$FM_COMPOSER_SELECTED_FIRST" "$FM_COMPOSER_SELECTED_LAST")
+      content_last=$((flat_footer - 1))
       flat_re_scope=1
     fi
     cwd_start=$(_fm_composer_leftbar_cwd_start "$screen" \

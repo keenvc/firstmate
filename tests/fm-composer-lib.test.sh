@@ -2068,6 +2068,84 @@ test_matrix_opencode_flat_2x() {
   pass "matrix: opencode 2.0.32's flat composer reads empty/pending and scopes its furniture"
 }
 
+test_matrix_opencode_flat_2x_spacer_row() {
+  # A live OpenCode 2 session draws one EMPTY left-bar row between the mode
+  # footer and the closing floor, so the footer is not the row directly above
+  # the floor and the 2.x proof used to fail: the idle composer read `pending`
+  # on every styled backend and fm-control relaunch/exit refused to type their
+  # keys (captured 2026-11-09 from a secondmate pane; fixture keeps only the
+  # composer/footer/floor/status layout, with the SGR triples the live 2.0.32
+  # captures carry):
+  #   ┃
+  #   ┃
+  #   ┃
+  #   ┃  Build · DeepSeek V4.1 Flash 1017 (Azure Foundry) Azure AI Foundry …
+  #   ┃
+  #   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  #   ~/fm-homes/copper:main       144.3K (79%)  ctrl+p commands      ~/fm-homes/…
+  # The status rail here is the session form, `<cwd>:<branch>  <tokens> (<pct>)
+  # ctrl+p commands`, which carries no `shift+tab` cell, so the 2.x proof accepts
+  # the row through the two-signal rail recogniser as well as the landing regex.
+  local dir idle typed composer out spacer_text no_rail no_footer
+  dir="$ROOT/tests/fixtures/opencode-2.0.32-copper-session"
+  idle=$(<"$dir/opencode-2.0.32-copper-session-idle.ansi")
+  typed=$(<"$dir/opencode-2.0.32-copper-session-typed.ansi")
+
+  # Empty composer: empty on every profile, including the styled captures that
+  # used to misfire, and with the cursor parked on the rail one row past the
+  # floor exactly as 2.x parks it.
+  assert_screen "opencode 2.0.32 copper session idle on herdr" empty "$CAPS_STYLED" "$idle"
+  assert_screen "opencode 2.0.32 copper session idle on zellij" empty "$CAPS_STYLED_NOID" "$idle"
+  assert_screen "opencode 2.0.32 copper session idle on cmux/orca" empty "$CAPS_PLAIN" "$idle"
+  assert_screen "opencode 2.0.32 copper session idle on tmux (cursor on rail)" empty "$CAPS_TMUX" "$idle" 11
+
+  # The same layout holding typed text still refuses.
+  assert_screen "opencode 2.0.32 copper session typed on herdr" pending "$CAPS_STYLED" "$typed"
+  assert_screen "opencode 2.0.32 copper session typed on zellij" pending "$CAPS_STYLED_NOID" "$typed"
+  assert_screen "opencode 2.0.32 copper session typed on cmux/orca defers" unknown "$CAPS_PLAIN" "$typed"
+  assert_screen "opencode 2.0.32 copper session typed on tmux (cursor on rail)" pending "$CAPS_TMUX" "$typed" 11
+
+  # The furniture never leaks into the composer's content: the idle pane yields
+  # nothing and the typed pane yields exactly the draft.
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$idle")
+  [ -z "$out" ] || fail "copper session idle extraction must yield nothing, got '$out'"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$typed")
+  [ "$out" = 'hello typed text' ] \
+    || fail "copper session typed extraction must yield only the draft, got '$out'"
+
+  # NON-VACUOUSNESS 1: only an EMPTY spacer row is furniture. A draft on that
+  # row is typed text and keeps its refusal.
+  spacer_text=$(printf '%s\n' "$idle" | sed '10s/.*/  ┃  hello typed text/')
+  out=$(fm_composer_classify_screen "$CAPS_STYLED" "$spacer_text")
+  [ "$out" = pending ] \
+    || fail "typed text on the spacer row must read pending, got '$out'"
+
+  # NON-VACUOUSNESS 2: the flat proof still needs its status rail. Without that
+  # row the region falls back to the 1.x reading, which misfires on the spacer,
+  # so the screen must refuse rather than read empty.
+  no_rail=$(printf '%s\n' "$idle" | sed '12d')
+  out=$(fm_composer_classify_screen "$CAPS_STYLED" "$no_rail")
+  [ "$out" = pending ] \
+    || fail "without the session status rail the spacer shape must refuse, got '$out'"
+
+  # NON-VACUOUSNESS 3: and it still needs its footer.
+  out=$(FM_COMPOSER_LEFTBAR_FOOTER_RE='^NEVER-MATCHES$' fm_composer_classify_screen "$CAPS_STYLED" "$idle")
+  case "$out" in
+    empty) fail "an unrecognised footer must never read empty through a spacer row" ;;
+    pending|unknown) : ;;
+    *) fail "an unrecognised footer must refuse (pending or unknown), got '$out'" ;;
+  esac
+
+  # The spacer tolerance is what carries the empty verdict: the same layout with
+  # the empty row replaced by content above the footer reads pending above.
+  composer=$(printf '%s\n' "$idle" | sed -n '6,12p')
+  [ "$(printf '%s\n' "$composer" | wc -l)" -eq 7 ] \
+    || fail "the copper session composer must span seven rows in this fixture, got '$(printf '%s\n' "$composer" | wc -l)'"
+
+  pass "matrix: opencode 2.0.32's empty left-bar spacer row keeps the flat composer provable"
+}
+
 test_cline_near_gray_ghost_is_stripped_and_real_text_survives
 test_composer_widening_is_named_harness_only
 test_matrix_opencode_flat_2x
+test_matrix_opencode_flat_2x_spacer_row
