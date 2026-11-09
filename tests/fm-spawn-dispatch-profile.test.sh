@@ -356,6 +356,27 @@ test_droid_launch_brief_rides_the_record_doorbell_not_argv() {
   pass "a droid launch publishes the brief as an operational-inbox record and passes only the doorbell"
 }
 
+test_droid_trust_gate_accepts_a_working_pane_without_a_dialog() {
+  # 2026-11-09: an unregistered worktree never drew droid's "Trust this folder?"
+  # dialog, so the gate's old condition - "the dialog appeared OR the trust was
+  # pre-registered" before it would look at the pane - was never true, and a
+  # launch whose brief was in fact running failed as "droid never showed its
+  # folder-trust dialog on an unregistered worktree" and had its window torn
+  # down. Working proof alone confirms the launch when no dialog is on screen,
+  # because a pane processing the input has already passed the trust gate.
+  local rec id out status
+  id=profile-droid-trust-skip-z9d
+  rec=$(make_spawn_case profile-droid-trust-skip droid "$id")
+  read_case_record "$rec"
+  out=$(FM_DROID_TRUST_PREREGISTER=0 FM_DROID_READY_POLLS=40 FM_DROID_POLL_INTERVAL=0.01 \
+    run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "a droid pane that works without showing the trust dialog must launch: $out"
+  assert_no_grep "folder-trust dialog" "$HOME_DIR/state/$id.status" \
+    "a working pane must never be recorded as a folder-trust failure"
+  pass "the droid readiness gate accepts a working pane that never showed the trust dialog"
+}
+
 test_non_cursor_launch_clears_inherited_cursor_markers() {
   local rec id out status launch
   id=profile-claude-cursor-markers-z1b
@@ -1353,6 +1374,43 @@ test_opencode1_passes_model_flag_and_variant_only_config() {
   assert_not_contains "$launch" "--standalone" \
     "opencode 1.x launch must not pass the 2.x-only --standalone flag"
   pass "opencode 1.x keeps the --model flag and the variant-only config"
+}
+
+test_opencode_launch_isolates_the_database_per_task() {
+  # OpenCode 2 keeps projects, sessions and session-inbox rows in ONE SQLite
+  # file per HOME, and concurrent panes writing it deadlock the prompt path: the
+  # local server answers HTTP 500 and the CLI exits before its first turn
+  # (2026-11-09). Every launch therefore carries its own OPENCODE_DB inside the
+  # task's state dir, so two concurrent tasks never share a writer, while auth
+  # (auth.json) and configuration (OPENCODE_CONFIG_CONTENT) stay shared.
+  local rec id out status launch other_launch other_id
+  id=profile-opencode-db-z7h
+  rec=$(make_spawn_case profile-opencode-db opencode "$id")
+  read_case_record "$rec"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model anthropic/claude-sonnet-4-5)
+  status=$?
+  expect_code 0 "$status" "opencode spawn with a per-task database should succeed: $out"
+  launch=$(fm_test_launch_unframe "$(cat "$LAUNCH_LOG")")
+  assert_contains "$launch" "OPENCODE_DB='$HOME_DIR/state/$id.opencode.db'" \
+    "an opencode launch must point OPENCODE_DB at this task's own database"
+  assert_contains "$launch" "OPENCODE_CONFIG_CONTENT=" \
+    "a per-task database must not drop the shared launch configuration"
+
+  # A second task gets a different file, which is the whole point: isolation is
+  # per task, not per host.
+  other_id=profile-opencode-db2-z7i
+  rec=$(make_spawn_case profile-opencode-db2 opencode "$other_id")
+  read_case_record "$rec"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$other_id" "$PROJ_DIR" \
+    --model anthropic/claude-sonnet-4-5)
+  status=$?
+  expect_code 0 "$status" "the second opencode spawn should succeed: $out"
+  other_launch=$(fm_test_launch_unframe "$(cat "$LAUNCH_LOG")")
+  assert_contains "$other_launch" "OPENCODE_DB='$HOME_DIR/state/$other_id.opencode.db'" \
+    "each task's launch must name that task's own database"
+  pass "an opencode launch keeps its database per task and its configuration shared"
 }
 
 test_opencode1_without_effort_keeps_permission_only_config() {
@@ -3141,7 +3199,9 @@ test_claude_launch_brief_publishes_record_doorbell
 test_claude_secondmate_launch_brief_publishes_into_its_own_home
 test_claude_spawn_refuses_when_the_brief_record_cannot_publish
 test_opencode_launch_brief_rides_the_record_doorbell_not_argv
+test_opencode_launch_isolates_the_database_per_task
 test_droid_launch_brief_rides_the_record_doorbell_not_argv
+test_droid_trust_gate_accepts_a_working_pane_without_a_dialog
 test_non_cursor_launch_clears_inherited_cursor_markers
 test_relative_home_overrides_launch_with_absolute_cross_process_paths
 test_home_defaults_preserve_absolute_or_resolve_relative_paths

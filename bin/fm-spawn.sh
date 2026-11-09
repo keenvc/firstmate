@@ -3086,7 +3086,7 @@ launch_template() {
   # carries no such words. OpenCode 2.0.32 has no system-prompt flag, so the
   # doorbell line is self-describing and the worker opens it: verified live
   # that an OpenCode 2.0.32 worker reads the named record and acts on it.
-  opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN____PIRESUME__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
+  opencode) printf '%s' 'OPENCODE_DB=__OPENCODEDB__ OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN____PIRESUME__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIEXCLUDE____PIRESUME__'
     if [ "$kind" = secondmate ]; then
@@ -6353,8 +6353,19 @@ droid_wait_for_working() {
         spawn_send_key "$T" Enter
         DROID_TRUST_ANSWERED=1
       fi
-    elif [ "$DROID_TRUST_PREREGISTERED" -eq 1 ] || [ "$DROID_TRUST_ANSWERED" -eq 1 ]; then
-      droid_pane_is_working "$pane" && return 0
+    elif droid_pane_is_working "$pane"; then
+      # A pane visibly processing the launch input has already passed droid's
+      # folder-trust gate, whether this spawn answered a dialog or the directory
+      # needed no dialog at all - droid trusts a path it has seen before, and a
+      # pre-registration that did not land leaves exactly that pane: no dialog
+      # ever renders, yet the brief runs. Requiring "the dialog appeared or the
+      # trust was pre-registered" turned that success into a failed launch and
+      # a torn-down window (2026-11-09, an unregistered worktree that never drew
+      # the dialog), so the working verdict is sufficient on its own. The order
+      # still matters: a pane showing the dialog never reaches this branch, so a
+      # busy verdict that coexists with an unanswered dialog cannot confirm a
+      # launch on the wrong directory.
+      return 0
     fi
     i=$((i + 1))
     [ "$i" -ge "$max" ] || sleep "$interval"
@@ -6847,7 +6858,9 @@ if [ "$HARNESS" = droid ] && [ "$RAW_LAUNCH" -eq 0 ]; then
   else
     droid_trust_args=("$WT" "$PROJ_ABS")
   fi
-  if HOME="$DROID_HOME" "$FM_ROOT/bin/fm-droid-trust.sh" "${droid_trust_args[@]}" >/dev/null; then
+  if [ "${FM_DROID_TRUST_PREREGISTER:-1}" = 0 ]; then
+    echo "notice: droid folder-trust pre-registration disabled by FM_DROID_TRUST_PREREGISTER=0; the launch relies on the in-pane trust gate for window $T" >&2
+  elif HOME="$DROID_HOME" "$FM_ROOT/bin/fm-droid-trust.sh" "${droid_trust_args[@]}" >/dev/null; then
     DROID_TRUST_PREREGISTERED=1
   else
     echo "warning: could not pre-register droid folder trust for $WT; the launch will answer the 'Trust this folder?' dialog in window $T instead" >&2
@@ -8216,12 +8229,26 @@ opencode)
   # the shared background service, which hosts plugins with the service's own
   # environment and ignores this pane's OPENCODE_CONFIG_CONTENT, so per-worker
   # model, permissions, FM_HOME, and lock ancestry would be wrong.
+  #
+  # Every opencode launch gets its OWN database. OpenCode 2 keeps projects,
+  # sessions and its session-inbox rows in one SQLite file per HOME by default,
+  # and a dozen concurrent panes writing that file contend for its lock: a
+  # prompt handed to the local server then fails with
+  # `effect/sql/SqlError/LockTimeoutError`, the server answers HTTP 500, and the
+  # CLI exits, leaving a window with no agent in it (2026-11-09, two failed
+  # relaunches of one worktree). A per-task database removes the contention
+  # without touching what must stay shared - credentials and configuration live
+  # outside the database (auth.json and OPENCODE_CONFIG_CONTENT), so a worker
+  # still signs in as the captain's account and keeps the pinned model. The
+  # store is per task id, so a relaunched task keeps its own history and two
+  # concurrent tasks never share a writer.
   if [ -n "$OPENCODE_BIN" ]; then
     oc_launch_bin=$(shell_quote "$OPENCODE_BIN")
   else
     oc_launch_bin=opencode
   fi
   [ "$OPENCODE_MAJOR" -lt 2 ] || oc_launch_bin="$oc_launch_bin --standalone"
+  LAUNCH=${LAUNCH//__OPENCODEDB__/"$(shell_quote "$STATE_REAL/$ID.opencode.db")"}
   LAUNCH=${LAUNCH//__OPENCODEBIN__/"$oc_launch_bin"}
   ;;
 polytoken)
@@ -8827,7 +8854,7 @@ if [ "$HARNESS" = droid ]; then
     elif [ "$DROID_TRUST_PREREGISTERED" -eq 1 ]; then
       droid_spawn_fail "droid did not start processing its brief in the pre-trusted worktree in window $T"
     else
-      droid_spawn_fail "droid never showed its folder-trust dialog on an unregistered worktree in window $T, so the brief could not be confirmed to run there"
+      droid_spawn_fail "droid never showed its folder-trust dialog and never started processing its brief in window $T, so the brief could not be confirmed to run there"
     fi
     exit 1
   fi

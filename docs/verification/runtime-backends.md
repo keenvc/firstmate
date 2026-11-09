@@ -3637,6 +3637,8 @@ Backends that cannot prove an exit answer `unknown` and keep the ordinary timeou
 On proof it returns 2, `fm-spawn` records `failed: opencode <version>'s CLI exited before starting the brief turn in window <target>; pane and log kept at state/<id>.opencode-exit`, and `opencode2_capture_exit` writes that file: the version, the target, the pane's last 40 rows, and the newest `cli process failed` lines from OpenCode's own log.
 `test_opencode2_delivery_gate_fails_fast_when_the_cli_exits` in `tests/fm-spawn-dispatch-profile.test.sh` drives a pane whose agent is provably gone (an empty tty plus a shell as `pane_current_command`) and pins the exit record, no gate Enter, and the capture file; a control spawn whose agent the backend cannot prove gone must still report the delivery timeout and spend its deadline Enter, so the fast path is not a spawn that fails this way regardless.
 
+The durable half of that class is isolation, not detection: every opencode launch now carries `OPENCODE_DB=<state>/<id>.opencode.db`, so a task's projects, sessions and session-inbox rows live in its own SQLite file and two concurrent panes never share a writer (`test_opencode_launch_isolates_the_database_per_task` pins the path and pins that a second task names its own file). Credentials and configuration stay shared on purpose: `auth.json` and `OPENCODE_CONFIG_CONTENT` are not part of the database, so a worker still signs in as the captain's account with the pinned model. A relaunched task keeps its own database, which is also what a `--fresh-session` relaunch wants.
+
 ## Pi repeated-read containment
 
 Verified on 2026-10-27 UTC on Linux x86_64 with Node 24.22.1 and npm 11.19.1.
