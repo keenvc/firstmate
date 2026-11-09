@@ -1714,6 +1714,29 @@ TYPED VERDICT: pending
 SESSION-PANE VERDICT: empty
 ```
 
+### 2026-11-09 opencode 2.2.6 narrow mode line in a secondmate session composer
+
+A real OpenCode 2.2.6 pane captured live from the ci secondmate (Herdr pane `w57Z:p2`, light theme, a session after one submitted doorbell prompt) draws THREE empty left-bar rows above its mode line, and that mode line itself renders with no space after the separator:
+
+```text
+  ┃
+  ┃
+  ┃
+  ┃  Build ·DeepSeek V4.1 Fla...17 (Azure Foundry)Azure AI Foundry (eastus2, sponsorship credits)
+  ┃
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ⬝⬝⬝⬝⬝⬝■■ esc interrupt                                  156.1K (86%)  ctrl+p commands
+```
+
+A narrow pane truncates the model cell to `Fla...17` and appends the provider cell, collapsing the separator spacing to `Build ·DeepSeek`.
+`FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT` required a space AFTER the separator (`^(Build|Plan)[[:space:]]+·[[:space:]]+`), so this row did not match, the mode line counted as typed content, and an IDLE composer read `pending` on every styled profile: `bin/fm-send.sh` skipped the lane's doorbell on every steer and `bin/fm-control.sh relaunch --fresh-session` refused for that lane.
+The spacer count was never the defect - `_fm_composer_leftbar_flat_footer_row` already walks up over N empty bar rows - and the `w57Z:p2` capture pins that distinction: its 2.2.6 footer is the only row the proof missed.
+The separator's space is now optional after the middot and still REQUIRED before it, so `Build · X` and `Build ·X` are furniture while a bare `Build·X` is not.
+Relaxing it only reaches rows that already open with opencode's own `Build`/`Plan` mode word plus the middot, which no typed draft in any recorded capture does, and the exemption still applies to exactly one row per proven 2.x run.
+
+The fixture is `tests/fixtures/opencode-2.2.6-ci-session/`, the live capture byte for byte in `-typed.ansi` (its submitted doorbell message sits in the transcript block ABOVE the composer, separated by a barlESS blank row) with `-idle.ansi` derived from it by deleting those two message rows; `test_matrix_opencode_flat_2x_narrow_footer` in `tests/fm-composer-lib.test.sh` pins idle `empty` on styled, styled no-identity, and plain profiles, a draft on one of the three spacer rows `pending` and extracted as that draft, no-rail and unrecognised-footer refusals, and the submitted message above the composer as `empty`.
+Running the same suite with `FM_COMPOSER_LEFTBAR_FOOTER_RE` set to the previous default reproduces the defect (`not ok - opencode 2.2.6 narrow footer idle on herdr: expected empty, got 'pending'`), which pins the separator rule as the load-bearing signal.
+
 ### Prune and respawn
 
 The real label-collision reproduction is owned by:

@@ -710,15 +710,22 @@ FM_COMPOSER_HINTED_IDLE_RE_DEFAULT='^ask a question or describe a task ↵$'
 # Opencode draws a mode/model footer line INSIDE its left-bar composer
 # ("Build · GPT-5.5 Fast OpenAI · high"). It is composer furniture, not typed
 # text, and only the run's LAST row is ever matched against it.
-# The pattern stays deliberately narrow: the space after the separator is
-# required (`[[:space:]]+`, never `[[:space:]]*`), and it admits no mode word
-# beyond opencode's own Build/Plan pair, because this exemption is the one
-# path that can turn a row holding typed text into `empty`, and `empty` is the
-# verdict that authorizes typing into a live session. Widening it to admit a
-# colour that ghost stripping currently reaches (for example a differently
-# dimmed mode cell) belongs with a fresh live capture in
-# docs/verification/runtime-backends.md, not with a regex edit.
-FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)[[:space:]]+·[[:space:]]+'
+# The pattern stays deliberately narrow: the space BEFORE the separator is
+# required (`[[:space:]]+`), and it admits no mode word beyond opencode's own
+# Build/Plan pair, because this exemption is the one path that can turn a row
+# holding typed text into `empty`, and `empty` is the verdict that authorizes
+# typing into a live session. The space AFTER the separator is optional because
+# a narrow pane's footer renders without it: opencode 2.2.6 in a real secondmate
+# session drew `Build ·DeepSeek V4.1 Fla...17 (Azure Foundry)Azure AI Foundry
+# (eastus2, sponsorship credits)` - the model cell truncated to `Fla...17` and
+# the provider cell appended with no space, collapsing the separator spacing
+# (captured live 2026-11-09; tests/fixtures/opencode-2.2.6-ci-session/). Without
+# that tolerance the footer read as typed text and an IDLE composer answered
+# `pending`. Widening further, such as to admit a colour that ghost stripping
+# currently reaches (for example a differently dimmed mode cell), belongs with a
+# fresh live capture in docs/verification/runtime-backends.md, not with a regex
+# edit.
+FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT='^(Build|Plan)[[:space:]]+·[[:space:]]*'
 # OpenCode 2.0.32 throws the 1.x rail away and draws its composer as ONE
 # left-bar column closed by a half-block FLOOR, with the cwd and keybinding
 # hints on the rows BELOW that floor (`FM_COMPOSER_LEFTBAR_STATUS_RE_DEFAULT`
@@ -2036,13 +2043,16 @@ _fm_composer_row_is_leftbar_status() {  # <trimmed-row>
 # _fm_composer_leftbar_flat_footer_row: prints the row index of OpenCode 2.x's
 # mode/model footer inside a left-bar region whose LAST row is the closing floor
 # row, or fails when the region carries no such footer. On the landing screen the
-# footer sits DIRECTLY above the floor; a live session draws one or more EMPTY
-# left-bar rows between them (verified live on opencode 2.0.32, 2026-11-09, in a
-# real session pane: footer, bare `┃`, floor). Empty spacer rows are tolerated
-# and nothing else is: a spacer is accepted only when it is EMPTY after
-# trimming - a bar row carrying any content, a draft above all, ends the walk
-# and fails the proof - and the first non-empty row above the blanks must match
-# the footer pattern in either its ghost-stripped or its plain form.
+# footer sits DIRECTLY above the floor; a live session draws EMPTY spacer rows
+# between them (verified live on opencode 2.0.32 and 2.2.6, 2026-11-09, in real
+# session panes: footer, bare `┃`, floor - and, in the 2.2.6 pane that exposed
+# this, THREE bare `┃` rows under a full-width EMPTY body row that carries no
+# left bar at all because the composer's background fills that row edge to
+# edge). Empty spacer rows are tolerated, in either form, and nothing else is: a
+# spacer is accepted only when it is EMPTY after trimming - a bar row carrying
+# any content, a draft above all, ends the walk and fails the proof - and the
+# first non-empty row above the blanks must match the footer pattern in either
+# its ghost-stripped or its plain form.
 _fm_composer_leftbar_flat_footer_row() {  # <screen> <plain> <first-row> <floor-row>
   local screen=$1 plain=$2 first=$3 row=$4 raw trimmed stripped plain_content
   local footer_re=${FM_COMPOSER_LEFTBAR_FOOTER_RE:-$FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT}

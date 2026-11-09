@@ -2145,7 +2145,72 @@ test_matrix_opencode_flat_2x_spacer_row() {
   pass "matrix: opencode 2.0.32's empty left-bar spacer row keeps the flat composer provable"
 }
 
+test_matrix_opencode_flat_2x_narrow_footer() {
+  # A real OpenCode 2.2.6 session pane captured live on 2026-11-09 from the ci
+  # secondmate home (herdr pane w57Z:p2, light theme; the SGR triples are the
+  # live capture's, the agent transcript above the composer is not part of the
+  # fixture). Its composer draws THREE empty left-bar rows above the mode line,
+  # and the mode line itself renders with NO space after the separator because a
+  # narrow pane truncates the model cell and appends the provider cell:
+  #   ┃
+  #   ┃
+  #   ┃
+  #   ┃  Build ·DeepSeek V4.1 Fla...17 (Azure Foundry)Azure AI Foundry (eastus2, sponsorship credits)
+  #   ┃
+  #   ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  #    ⬝⬝⬝⬝⬝⬝■■ esc interrupt                     156.1K (86%)  ctrl+p commands
+  # FM_COMPOSER_LEFTBAR_FOOTER_RE_DEFAULT required that space (`[[:space:]]+`
+  # after the separator), so the mode line counted as typed text and this IDLE
+  # composer answered `pending` on every styled backend: the lane's steers all
+  # skipped their doorbell and fm-control's relaunch/exit refused to type.
+  local dir idle typed draft no_rail out
+  dir="$ROOT/tests/fixtures/opencode-2.2.6-ci-session"
+  idle=$(<"$dir/opencode-2.2.6-ci-session-idle.ansi")
+  typed=$(<"$dir/opencode-2.2.6-ci-session-typed.ansi")
+
+  # The idle composer is empty on every profile, including the plain backends
+  # that see no colour at all.
+  assert_screen "opencode 2.2.6 narrow footer idle on herdr" empty "$CAPS_STYLED" "$idle"
+  assert_screen "opencode 2.2.6 narrow footer idle on zellij" empty "$CAPS_STYLED_NOID" "$idle"
+  assert_screen "opencode 2.2.6 narrow footer idle on cmux/orca" empty "$CAPS_PLAIN" "$idle"
+
+  # The transcript above the composer carries a SUBMITTED user message in the
+  # same left-bar form (the doorbell line the fixture's own capture shows). A
+  # blank, barlESS row ends that block, so a submitted message is never read as
+  # composer content: the pane still answers empty.
+  assert_screen "opencode 2.2.6 narrow footer with a submitted message above" empty "$CAPS_STYLED" "$typed"
+
+  # NON-VACUOUSNESS: a draft ON one of those three empty rows is composer text
+  # and keeps its refusal. This is the whole point of proving the footer rather
+  # than trusting the row count.
+  draft=$(printf '%s\n' "$idle" | sed '37s/.*/  ┃  hello typed text/')
+  assert_screen "opencode 2.2.6 narrow footer draft on a spacer row" pending "$CAPS_STYLED" "$draft"
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$draft")
+  [ "$out" = 'hello typed text' ] \
+    || fail "a draft on a spacer row must extract as the draft, got '$out'"
+
+  # NON-VACUOUSNESS: the empty verdict still needs the 2.x status rail. Without
+  # it the region falls back to the 1.x reading, which misfires here, so the
+  # screen must refuse instead of reading empty.
+  no_rail=$(printf '%s\n' "$idle" | sed '41d')
+  out=$(fm_composer_classify_screen "$CAPS_STYLED" "$no_rail")
+  [ "$out" != empty ] \
+    || fail "without the 2.x status rail the narrow-footer shape must refuse, got '$out'"
+
+  # NON-VACUOUSNESS: and it still needs a row it RECOGNISES as the footer.
+  out=$(FM_COMPOSER_LEFTBAR_FOOTER_RE='^NEVER-MATCHES$' fm_composer_classify_screen "$CAPS_STYLED" "$idle")
+  [ "$out" != empty ] \
+    || fail "an unrecognised footer must never read empty through the narrow footer"
+
+  # The furniture never leaks into the composer's content.
+  out=$(fm_composer_extract_selected_content "$CAPS_STYLED" "$idle")
+  [ -z "$out" ] || fail "opencode 2.2.6 narrow footer idle extraction must yield nothing, got '$out'"
+
+  pass "matrix: opencode 2.2.6's narrow-footered flat composer reads empty under N spacer rows"
+}
+
 test_cline_near_gray_ghost_is_stripped_and_real_text_survives
 test_composer_widening_is_named_harness_only
 test_matrix_opencode_flat_2x
 test_matrix_opencode_flat_2x_spacer_row
+test_matrix_opencode_flat_2x_narrow_footer
