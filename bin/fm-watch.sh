@@ -3534,6 +3534,7 @@ check_sweep_lane_launch() {  # <lane-dir> <mode> <check-path> <task-id>
       # the serial sweep did: a teardown or other lifecycle action must not
       # remove the merge authority and poll artifacts while this poll is in
       # flight. Revalidate the snapshot under the lock before polling.
+      # shellcheck disable=SC2064 # the lock path, not the release, is captured now
       trap "fm_lock_release $(printf '%q' "$control_lock")" EXIT
       if ! fm_lock_acquire_wait "$control_lock"; then
         : > "$lane_dir/done"

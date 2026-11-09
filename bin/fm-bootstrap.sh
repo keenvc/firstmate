@@ -1192,7 +1192,6 @@ crew_dispatch_validate() {
       elif $h == "kiro" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "droid" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "cline" then (["low","medium","high","xhigh"] | index($e))
-      elif $h == "droid" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "pi" or $h == "pi-signed" or $h == "omp" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "muse" then (["low","medium","high","xhigh","max"] | index($e))
       elif $h == "rovo" then (["low","medium","high","max"] | index($e))
