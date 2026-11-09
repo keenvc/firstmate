@@ -8074,6 +8074,12 @@ cortex)
   LAUNCH=${LAUNCH//__CORTEXPLUGIN__/"$(shell_quote "$STATE_REAL/$ID.cortex-plugin")"}
   ;;
 agy) LAUNCH=${LAUNCH//__AGYBIN__/"$(shell_quote "$AGY_BIN")"} ;;
+droid)
+  LAUNCH=${LAUNCH//__DROIDBIN__/"$(shell_quote "$DROID_BIN")"}
+  LAUNCH=${LAUNCH//__DROIDSETTINGS__/"$(shell_quote "${DROID_SETTINGS_PATH:-$STATE_REAL/$ID.droid-settings.json}")"}
+  LAUNCH=${LAUNCH//__DROIDROLEPIN__/"$(shell_quote "$FM_DROID_ROLE_PIN")"}
+  LAUNCH=${LAUNCH//__DROIDHOME__/"$(shell_quote "${DROID_HOME:-$HOME}")"}
+  ;;
 cline) LAUNCH=${LAUNCH//__CLINEBIN__/"$(shell_quote "$CLINE_BIN")"} ;;
 opencode)
   # The resolved absolute path probed for the version gate above, so the pane
@@ -8128,7 +8134,7 @@ case "$LAUNCH" in
   ;;
 esac
 case "$HARNESS" in
-claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin | commandcode | cortex | kiro | hermes | cline)
+claude | codex | opencode | pi | pi-signed | grok | kimi | gemini | muse | rovo | agy | devin | commandcode | cortex | kiro | droid | hermes | cline)
   LAUNCH="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS -u GEMINI_CLI $LAUNCH"
   ;;
 esac
