@@ -3692,6 +3692,9 @@ if [ "$KIND" = secondmate ] && [ -z "$ARG3" ]; then
   fi
 fi
 fm_backend_validate_harness "$BACKEND" "$HARNESS" || exit 1
+# Prepaid-credit launch preflight: refuse a model whose provider balance is
+# exhausted before any worktree or endpoint exists (bin/fm-credit-preflight.sh).
+[ -z "$MODEL" ] || "$SCRIPT_DIR/fm-credit-preflight.sh" "$MODEL" || exit 1
 # Ultra is an explicit native capability, never a Pi thinking-level alias.
 # Validate the fully resolved profile before worktree or endpoint provisioning.
 if [ "$EFFORT" = ultra ]; then
