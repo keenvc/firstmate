@@ -509,6 +509,41 @@ def flight_state(keys):
         pass
     return {"at": int(time.time()), "window_sec": 300, "rows": {},
             "error": "flight requests unreadable: " + (r.stderr or r.stdout or "no answer")[-160:]}
+def flight_row(key):
+    """The flight as the board's own flights payload shows it, read server-side so an unowned request
+    carries the payload's facts rather than whatever the page sent."""
+    try:
+        d = json.load(open(PLAIN_FILES["/api/console/flights.json"]))
+        for f in d.get("flights") or []:
+            if isinstance(f, dict) and str(f.get("key") or "").upper() == key:
+                return f
+    except Exception:
+        return None
+    return None
+def unowned_flight_note(key, action, f):
+    """Captain ask 2026-11-18 (corr=c4591dfd5be956c0): a flight no lane or Super Agent ticket owns can
+    still be accelerated or paused. The note starts `ACCELERATE <KEY> <title>` (or `PAUSE ...`) and
+    carries the flight's state, its PRs, its last update and the reason `no owner`, so firstmate can
+    review it and task it to a Super Agent worker. One line, because the inbox note is one line."""
+    title = re.sub(r"\s+", " ", str(f.get("title") or "")).strip()[:200]
+    stage = {"boarding": "at the gate", "enroute": "en route", "approach": "on approach", "landed": "landed"}.get(f.get("stage"), str(f.get("stage") or ""))
+    prs = []
+    for p in (f.get("prs") or [])[:12]:
+        if isinstance(p, dict) and p.get("number"):
+            st = "merged" if p.get("merged") else ("draft" if p.get("draft") else (p.get("kind") or "open"))
+            prs.append("%s#%s %s, checks %s" % (p.get("repo") or "", p["number"], st, p.get("checks") or "unknown"))
+    age = f.get("ageSec")
+    last = str(f.get("updatedAt") or "unknown") + ((" (%dh%02dm ago)" % (int(age) // 3600, int(age) % 3600 // 60)) if isinstance(age, (int, float)) else "")
+    head = "%s %s %s" % ("ACCELERATE" if action == "accelerate" else "PAUSE", key, title)
+    facts = (" - state: %s (%s); PRs: %s; last update: %s; reason: no owner"
+             % (f.get("state") or "unknown", stage, "; ".join(prs) if prs else "none", last))
+    if action == "accelerate":
+        ask = (". No lane or Super Agent ticket owns this flight. Review it and task it to a Super Agent worker "
+               "(or say why not), and reply with what you dispatched. The board started nothing and wrote nothing to Linear.")
+    else:
+        ask = (". No lane or Super Agent ticket owns this flight, so nothing is running to stop. Record it as held for "
+               "the captain so nobody picks it up, and reply with the hold you recorded. The board wrote nothing to Linear.")
+    return head + facts + ask
 def flight_record(key, rid, action, request, note_id=None, test=False, error=None):
     args = [sys.executable, FLIGHT_ACTIONS, "--record", key, rid, action, request]
     if note_id: args += ["--note-id", note_id]
@@ -828,7 +863,21 @@ class H(BaseHTTPRequestHandler):
             owner = str(d.get("owner", "")).strip()[:120]
             home = str(d.get("home", "")).strip()[:200]
             if not owner:
-                return self.send(409, json.dumps({"error": "this flight has no lane or Super Agent ticket to route to", "state": row}))
+                # An unowned flight (captain ask 2026-11-18): the note goes to firstmate itself to review
+                # and task, built from the server's own flights payload. The open-request check above
+                # already refuses a second one until firstmate answers, so it cannot be double-sent.
+                f = flight_row(key)
+                if not f:
+                    return self.send(409, json.dumps({"error": "this flight is not on the board's flights payload right now; reload the page", "state": row}))
+                rid = f"console-flight-{action}-{key}-{int(time.time() * 1000)}"
+                res = note(("TEST " if test else "") + unowned_flight_note(key, action, f), rid)
+                if "error" in res:
+                    flight_record(key, rid, action, "no owner", test=test, error=res.get("error") or "the inbox refused the note")
+                    return self.send(502, json.dumps({"error": "could not reach firstmate inbox"}))
+                flight_record(key, rid, action, "no owner", note_id=res.get("id"), test=test)
+                return self.send(200, json.dumps({"ok": True, "key": key, "action": action, "request": rid,
+                                                  "note": res.get("id"), "test": test, "unowned": True,
+                                                  "state": (flight_state([key]).get("rows") or {}).get(key)}))
             if action == "accelerate":
                 body = (f"CAPTAIN FLIGHT ACCELERATE (via console) for [{key}]: get this flight moving. "
                         f"Its owner in the flights payload is {owner}" + (f" in {home}" if home else "") +

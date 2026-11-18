@@ -983,6 +983,9 @@ function renderPaneTab(k){
  // Calls is the live ranked list from /api/console/calls, not the builder's old panes.
  if(k==="calls"){panes.innerHTML='<div class=nystrip-host></div><div id=calls></div>';nyStrips();callsEl=document.getElementById("calls");
   if(callsData)renderCalls(callsData);else callsEl.innerHTML='<div class=empty>Calls are loading…</div>';return}
+ // Tabs that draw themselves (Flights, Phases, Tasks, ...) are not builder panes: a body refresh must
+ // not wipe them, which it did when the board was opened straight onto one (UX review 2026-11-18).
+ if(!PANE_MAP[k])return;
  var want=PANE_MAP[k]||[],host=panes,openD={};
  host.querySelectorAll("details").forEach(function(d){var s=d.querySelector("summary");if(s)openD[s.textContent.replace(/\d+$/,"").trim()]=d.open});
  host.innerHTML="";
@@ -3426,7 +3429,7 @@ function trkStageWord(s){
 // per action through the board's only write path (/api/console/flight-action -> fm-inbox.sh note).
 // Nothing here writes Linear or starts work: a request is a note firstmate then acts on, and the
 // modal shows the note's real state from the server's own ledger, never an assumed success.
-var FLD_KEY=null,FLD_BUSY={},FLD_NOTE={},FLD_TIP=null,FLD_ERR=null;
+var FLD_KEY=null,FLD_BUSY={},FLD_NOTE={},FLD_TIP=null,FLD_ERR=null,FLD_OK={};
 var FLD_ACTIONS={accelerate:"Accelerate",pause:"Pause"};
 // The flight row the page is showing, from the payload the board already holds.
 function fldFlight(key){
@@ -3515,8 +3518,11 @@ function fldActionRow(f,act){
  var busy=!!FLD_BUSY[key+":"+act];
  var owners=fldOwner(f);
  var otherOpen=(st.open||[]).some(function(r){return r.action!==act&&r.open});
- var disabled=busy||otherOpen||!owners.length;
- var label=(act==="accelerate"?"Accelerate":"Pause")+(busy?"…":"");
+ // An unowned flight is actionable too (captain ask 2026-11-18): the note goes to firstmate to review
+ // and task. Any request still open on it disables both buttons, so it cannot be double-sent.
+ var sameOpen=!owners.length&&(st.open||[]).some(function(r){return r.action===act&&r.open});
+ var disabled=busy||otherOpen||sameOpen;
+ var label=sameOpen?(act==="accelerate"?"Acceleration requested":"Pause requested"):(act==="accelerate"?"Accelerate":"Pause")+(busy?"…":"");
  var colour=act==="accelerate"?"#5CC8FF":"#F5B83D";
  return '<button type="button" data-fld-act="'+act+'" data-fld-key="'+esc(key)+'"'+(disabled?" disabled":"")+
   ' style="font:inherit;font-size:12.5px;padding:7px 13px;border-radius:9px;cursor:'+(disabled?"default":"pointer")+
@@ -3534,7 +3540,7 @@ function fldOutcome(f){
   // Three real states, not two: a request firstmate answered, one still waiting, and one that was
   // closed without an answer (it failed to send, or a later note superseded it). Calling the third
   // "requested" would claim firstmate is still working on it, which is false.
-  var word=r.answered?"answered":(r.open?"requested":"closed");
+  var word=r.answered?"answered":(r.open?(r.request==="no owner"?(act==="accelerate"?"acceleration requested":"pause requested"):"requested"):"closed");
   var tone=r.answered?"#6FD39A":(r.open?"#F5B83D":"#8B98A8");
   var line=r.reply?(" — "+r.reply):(r.error?(" — "+r.error):"");
   out+='<div style="display:flex;gap:8px;font-size:11.5px;color:#B4C0CE;margin-top:4px">'+
@@ -3549,11 +3555,14 @@ function fldModal(f){
  var owners=fldOwner(f);
  var ownerLine=owners.length
   ? owners.map(function(o){return '<span class=mono style="color:'+(o.live?"#6FD39A":"#8B98A8")+'">'+esc(o.kind+" "+o.id)+(o.live?" (running)":" ("+(o.state||"not running")+")")+"</span>"}).join(" ")
-  : '<span style="color:#FF8A6B">no lane or Super Agent ticket owns this flight, so there is nothing to steer</span>';
+  : '<span style="color:#FF8A6B">no worker - no lane or Super Agent ticket carries this key</span>';
+ // One plain line instead of "in progress" beside "nothing running" (captain ask 2026-11-18).
+ var unowned=!owners.length&&f.stage!=="landed";
+ var stalled=unowned?(f.stage==="boarding"?"not started, no worker":"stalled, no worker")+(f.ageSec!=null?" · last update "+fldAge(f.ageSec):""):"";
  var facts=fldFacts(f).map(function(p){
   return '<div><div style="font-size:10px;color:#7F8EA3;letter-spacing:.08em;text-transform:uppercase">'+esc(p[0])+"</div>"+
    '<div class=mono style="font-size:12.5px;color:'+(p[2]?"#5CC8FF":"#E6EDF3")+'">'+esc(p[1])+"</div></div>"}).join("");
- var why=f.stageWhy?('<div style="font-size:12px;color:#B4C0CE;margin-top:10px"><b style="color:#E6EDF3">Why it is here:</b> '+esc(f.stageWhy)+"</div>"):"";
+ var why=unowned?('<div style="font-size:12px;color:#B4C0CE;margin-top:10px"><b style="color:#E6EDF3">Why it is here:</b> <span style="color:#FF8A6B">'+esc(stalled)+"</span></div>"):f.stageWhy?('<div style="font-size:12px;color:#B4C0CE;margin-top:10px"><b style="color:#E6EDF3">Why it is here:</b> '+esc(f.stageWhy)+"</div>"):"";
  var pos=f.posWhy?('<div style="font-size:12px;color:#B4C0CE;margin-top:4px"><b style="color:#E6EDF3">Position:</b> '+esc(f.posWhy)+"</div>"):"";
  var prs=(f.prs||[]).length?('<div style="margin-top:12px"><div style="font-size:10px;color:#7F8EA3;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px">Pull requests</div>'+
    f.prs.map(function(p){return '<div style="font-size:11.5px;color:#B4C0CE;overflow-wrap:anywhere">'+
@@ -3561,10 +3570,11 @@ function fldModal(f){
  var out=fldOutcome(f);
  var notice="";
  if(FLD_ERR)notice='<div style="margin-top:10px;font-size:11.5px;color:#FF8A6B">'+esc(FLD_ERR)+"</div>";
+ else if(FLD_OK[f.key])notice='<div style="margin-top:10px;font-size:12px;color:#6FD39A">'+esc(FLD_OK[f.key])+"</div>";
  // A flight with no owner still shows both buttons DISABLED with the reason, rather than hiding
  // them: the captain asked for these controls, so their absence would be the confusing part.
  var acts='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">'+fldActionRow(f,"accelerate")+fldActionRow(f,"pause")+"</div>";
- var actWhy=owners.length?"":'<div style="margin-top:6px;font-size:11px;color:#FF8A6B">This flight cannot be routed: no lane and no Super Agent ticket carries its key.</div>';
+ var actWhy=owners.length?"":'<div style="margin-top:6px;font-size:11px;color:#B4C0CE">Accelerate sends it to firstmate to review and task to a Super Agent worker; Pause asks firstmate to record it as held.</div>';
  return '<div style="position:fixed;inset:0;z-index:9000;background:rgba(6,10,14,.72);display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto" data-fld-backdrop="1">'+
   '<div role="dialog" aria-modal="true" aria-label="'+esc("Flight "+f.key)+'" onclick="event.stopPropagation()" style="width:min(720px,100%);background:#0F151D;border:1px solid #3A4C61;border-radius:14px;padding:16px;font-family:Inter,system-ui,sans-serif;color:#E6EDF3;box-shadow:0 20px 60px rgba(0,0,0,.6)">'+
    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">'+
@@ -3577,7 +3587,7 @@ function fldModal(f){
    prs+acts+actWhy+
    (out?'<div style="margin-top:12px;border-top:1px solid #1F2833;padding-top:10px"><div style="font-size:10px;color:#7F8EA3;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px">Requests for this flight</div>'+out+"</div>":"")+
    notice+
-   '<div style="margin-top:12px;font-size:10.5px;color:#6f6d67;line-height:1.5">Accelerate asks the lane or ticket that owns this flight to get it moving; Pause records a hold for the captain. Both are notes either way — this page never writes to Linear or starts work itself.</div>'+
+   '<div style="margin-top:12px;font-size:10.5px;color:#6f6d67;line-height:1.5">'+(owners.length?"Accelerate asks the lane or ticket that owns this flight to get it moving; Pause records a hold for the captain.":"With no owner, Accelerate and Pause go to firstmate itself.")+' Both are notes either way — this page never writes to Linear or starts work itself.</div>'+
   "</div></div>";
 }
 function fldStageWord(s){
@@ -3601,15 +3611,16 @@ function fldSend(key,act,btn){
  // request. A flight with no owner is refused in the modal with the reason rather than posted as a
  // request firstmate would have to guess a home for.
  var owners=fldOwner(f);
- if(!owners.length){FLD_ERR="this flight has no lane or Super Agent ticket to route to";fldRender();return}
- // Prefer a live owner: a running lane or ticket is the thing that can actually be steered.
- var own=owners.filter(function(o){return o.live})[0]||owners[0];
+ // No owner: sent with an empty owner, and the server writes the note to firstmate itself
+ // (captain ask 2026-11-18). Prefer a live owner otherwise: a running lane or ticket can be steered.
+ var own=owners.filter(function(o){return o.live})[0]||owners[0]||{id:"",home:""};
  var ownerId=own.id,ownerHome=own.home||"";
- FLD_BUSY[slot]=1;FLD_ERR=null;fldRender();
- post("/api/console/flight-action",{key:key,action:act,owner:ownerId,home:ownerHome},function(code,txt){
+ FLD_BUSY[slot]=1;FLD_ERR=null;delete FLD_OK[key];fldRender();
+ var body={key:key,action:act,owner:ownerId,home:ownerHome};if(NY_TEST)body.test=true;
+ post("/api/console/flight-action",body,function(code,txt){
   delete FLD_BUSY[slot];
   var r={};try{r=JSON.parse(txt||"{}")}catch(_){}
-  if(code===200&&r.state){FLD_NOTE[key]=r.state;FLD_ERR=null}
+  if(code===200&&r.state){FLD_NOTE[key]=r.state;FLD_ERR=null;if(r.unowned)FLD_OK[key]=(act==="accelerate"?"Sent to firstmate for review":"Sent to firstmate to record as held")+(r.test?" (TEST)":"")+"."}
   else if(code===429){FLD_NOTE[key]=r.state||FLD_NOTE[key];FLD_ERR="one request per flight per 5 minutes; this one is already open"}
   else if(code===403){FLD_ERR="not signed in to the board (reload the page and sign in)"}
   else if(code===409){FLD_NOTE[key]=r.state||FLD_NOTE[key];FLD_ERR=r.error||"this flight cannot be routed"}
