@@ -146,6 +146,8 @@ first_reported_line() {  # <text>
   printf '%s\n' "$1" | sed -n '/./{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}'
 }
 
+new_token() { od -An -tx1 -N8 /dev/urandom | tr -d ' \n'; }
+
 # Send the ordinary re-read steer to a mate this pass will not restart, and say
 # plainly which it was. It is a notice, so it is fire-and-forget and arms no reply expectation. A nudge is a partial reload and is never reported as more.
 fall_back_to_nudge() {  # <id> <reason>
