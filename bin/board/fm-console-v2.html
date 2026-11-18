@@ -15,6 +15,13 @@ a{color:#7fb3ff;text-decoration:none}a:hover{color:#a9ccff;text-decoration:under
 #app{height:100vh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;font-size:12.5px;line-height:1.35}
 header{display:flex;align-items:center;gap:14px;padding:8px 16px;border-bottom:1px solid #262626;flex-wrap:wrap}
 .brand{display:flex;align-items:center;gap:8px}.brand .dot{width:8px;height:8px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite}.brand b{font-weight:600;font-size:14px}
+#brandIcon.profile:focus-visible{outline:2px solid #7fb3ff;outline-offset:2px}
+#pfModal{position:fixed;inset:0;z-index:70;display:none;background:rgba(0,0,0,.62)}#pfModal.open{display:flex;align-items:flex-start;justify-content:center;padding:8vh 12px}
+#pfModal .pfsheet{width:min(520px,100%);background:#141414;border:1px solid #2b2b2b;border-radius:14px;padding:16px 18px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+#pfModal .pfhead{display:flex;gap:14px;align-items:center}#pfModal .pfimg{width:96px;height:96px;border-radius:50%;flex:none;border:1px solid #2b3a4d;background:#1f2733 center/cover no-repeat}
+#pfModal .pfrow{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:baseline;padding:9px 0;border-top:1px solid #222}
+#pfModal .pfv{font-size:22px;font-weight:600;min-width:3ch;text-align:right}#pfModal .pfv.na{font-size:13px;font-weight:500;color:#9a978f}
+#pfModal .pfl{font-size:13.5px}#pfModal .pfs{grid-column:2;font-size:11.5px;color:#9a978f;line-height:1.4}
 #brandIcon.profile{width:20px;height:20px;border-radius:50%;flex:0 0 auto;display:inline-block;background:#1f2733 center/cover no-repeat;border:1px solid var(--line,#2b3a4d);box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}
 /* Approvals badge + audible-alert controls (captain 2026-11-07, corr=458a773b1052536e) */
 .askbadge{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:#2a1919;color:#f87171;font-size:12.5px;font-weight:600;border:1px solid #7f1d1d}
@@ -365,7 +372,7 @@ kbd{font:11px/1 ui-monospace,Menlo,monospace;padding:2px 5px;border:1px solid #3
 </style></head><body>
 <div id=app>
   <header>
-    <div class=brand><span class=dot></span><span class=profile id=brandIcon role=img aria-label="Profile" style="background-image:url('/console/profile-icon.jpg')"></span><b>Pablo's HQ</b></div>
+    <div class=brand><span class=dot></span><span class=profile id=brandIcon role=button tabindex=0 aria-haspopup=dialog aria-label="Open Pablo's last-24-hours stats" title="Last 24 hours" style="background-image:url('/console/profile-icon.jpg');cursor:pointer"></span><b>Pablo's HQ</b></div>
     <nav class=pills id=nav aria-label="Sections"></nav>
     <button id=askBadge class=askbadge type=button hidden aria-haspopup="dialog" aria-label="Open approvals needing you">
       <span class=askbell aria-hidden=true>&#128276;</span><span id=askCount>0</span>
@@ -3399,6 +3406,15 @@ function renderMapPanel(d){
      mia=(MAP_P2[0]/10.8).toFixed(2)+'%',miaTop=(MAP_P2[1]/6.6).toFixed(2)+'%';
  var pins='<span aria-hidden="true" style="position:absolute;left:'+ctg+';top:'+ctgTop+'"><span style="position:absolute;left:-5px;top:-5px;width:10px;height:10px;border-radius:50%;border:2px solid #E6EDF3;background:#0B131C"></span></span>'+
   '<span aria-hidden="true" style="position:absolute;left:'+mia+';top:'+miaTop+'"><span style="position:absolute;left:-5px;top:-5px;width:10px;height:10px;border-radius:50%;border:2px solid #E6EDF3;background:#0B131C"></span></span>';
+ // City labels sit AT the pins (captain ask 2026-11-18): the same MAP_P0 / MAP_P2 positions and the same
+ // ground / landed counts as the row below, so a label can never drift from its marker. CTG reads to the
+ // left of its pin and MIA below-right of its pin, which keeps both clear of COLOMBIA and FLORIDA / CUBA.
+ var cityTag=function(left,top,code,name,count,side){
+  return '<span style="position:absolute;left:'+left+';top:'+top+';z-index:3;pointer-events:none">'+
+   '<span style="position:absolute;'+(side==="left"?"right:10px;top:-15px;text-align:right":"left:9px;top:5px")+';white-space:nowrap;background:rgba(11,19,28,.88);border:1px solid #2A3A4D;border-radius:6px;padding:2px 6px;line-height:1.25">'+
+   '<b class=mono style="font-size:12px;color:#E6EDF3">'+esc(code)+'</b> <span style="font-size:11px;color:#C9D3DE">'+esc(name)+'</span>'+
+   '<span style="display:block;font-size:10px;color:#8B98A8">'+esc(count)+'</span></span></span>'};
+ pins+=cityTag(ctg,ctgTop,"CTG","Cartagena",ground.length+" on the ground","left")+cityTag(mia,miaTop,"MIA","Miami",customs.length+" landed","right");
  var dot='<span aria-hidden="true" style="flex:none;width:10px;height:10px;border-radius:50%;border:2px solid #E6EDF3;background:#0B131C"></span>';
  var airports='<div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 24px;margin-top:10px">'+
    '<span style="display:inline-flex;align-items:center;gap:8px;min-width:0">'+dot+
@@ -4536,6 +4552,37 @@ document.addEventListener("keydown",function(e){
  else if(k==="s"){e.preventDefault();rvMove(1)}
  else if(k==="r"){e.preventDefault();document.getElementById("rvText").focus()}},true);
 
+// ---- Profile panel: last-24-hours stats (captain ask 2026-11-18, corr=fa78f3d1a9fcc152) ----
+// Every number is one the board already reads; each row names its source and its window, and a figure
+// the board does not measure says so instead of showing a guess. The only image on the server is the
+// 64x64 profile icon, so it is shown larger and named as the icon, never passed off as a portrait.
+function pfStats(){var k=(summary&&summary.kpis)||{},lw=laneWorkingCount(),ny=nyCount();
+ function n(v){return (typeof v==="number"&&isFinite(v))?v:null}
+ return [
+  {v:n(k.merged24),l:"PRs merged, last 24 hours",s:"Board summary (/api/console/summary), rolling 24 hours: merged PRs in the AdClinica, Front Desk Clinic and v10 repositories; ad-hoc repositories are not counted."+(n(k.mergedToday)!=null?" "+k.mergedToday+" of them since 00:00 UTC.":"")},
+  {v:null,na:"not measured",l:"Releases shipped, last 24 hours",s:"The board keeps no release or deploy record it could count, so this is left unmeasured rather than estimated."},
+  {v:n(k.closedToday),l:"Issues closed, since 00:00 UTC",s:"Board summary (/api/console/summary). The board counts the UTC calendar day, not a rolling 24 hours, so this is labelled as what it is."},
+  {v:n(lw!=null?lw:k.lanes),l:"Active lanes, right now",s:(lw!=null?"Live lane collector (/api/console/lanes), the same rows as the lane table.":"Board summary's lane count; the live lane collector has not answered yet.")+" A current count, not a 24-hour total."},
+  {v:ny,l:"Open decisions, right now",s:"The one Needs-you count (/api/console/urgent-questions): decisions, captain holds and owner calls still waiting. A current count, not a 24-hour total."}
+ ]}
+function pfRender(){var m=document.getElementById("pfModal");if(!m||!m.classList.contains("open"))return;
+ var at=summary&&summary.at?timeShort(summary.at):"";
+ m.querySelector(".pfbody").innerHTML=pfStats().map(function(r){
+  return '<div class=pfrow><span class="pfv'+(r.v==null?" na":"")+'">'+(r.v==null?esc(r.na||"not read yet"):esc(String(r.v)))+'</span><span class=pfl>'+esc(r.l)+'</span><span class=pfs>'+esc(r.s)+'</span></div>'}).join("")+
+  (at?'<div class=sub style="margin-top:8px;font-size:11.5px">Summary built '+esc(at)+'.</div>':"")}
+function pfOpen(){var m=document.getElementById("pfModal");
+ if(!m){m=document.createElement("div");m.id="pfModal";m.setAttribute("role","dialog");m.setAttribute("aria-modal","true");m.setAttribute("aria-label","Pablo's last 24 hours");
+  m.innerHTML='<div class=pfsheet><div class=pfhead><span class=pfimg role=img aria-label="Pablo profile icon" style="background-image:url(\'/console/profile-icon.jpg\')"></span>'+
+   '<div style="min-width:0;flex:1"><b style="font-size:17px">Pablo\'s HQ</b><div class=sub style="font-size:12px;margin-top:3px;line-height:1.45">This is the board\'s 64×64 profile icon, shown at 96 px. There is no full-size portrait on the board, so it is not upscaled into one.</div></div>'+
+   '<button class=mclose type=button id=pfClose aria-label="Close" style="all:unset;cursor:pointer;align-self:flex-start;font-size:22px;line-height:1;color:#9a978f;padding:2px 8px">&times;</button></div>'+
+   '<h3 style="margin:14px 0 4px;font-size:13px;color:#c9c6bf;font-weight:600">Top stats</h3><div class=pfbody></div></div>';
+  document.body.appendChild(m);m.addEventListener("click",function(e){if(e.target===m)pfClose()});
+  document.getElementById("pfClose").onclick=pfClose}
+ m.classList.add("open");pfRender();document.getElementById("pfClose").focus()}
+function pfClose(){var m=document.getElementById("pfModal");if(m)m.classList.remove("open");var b=document.getElementById("brandIcon");if(b)b.focus()}
+(function(){var b=document.getElementById("brandIcon");if(!b)return;b.onclick=pfOpen;
+ b.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();pfOpen()}}})();
+document.addEventListener("keydown",function(e){var m=document.getElementById("pfModal");if(e.key==="Escape"&&m&&m.classList.contains("open")){e.stopPropagation();pfClose()}},true);
 renderNav();go(st.tab);loadQ();qpane();refreshAll();dload();loadLanes();loadCalls();loadCopper();loadSA();loadPph();loadPhases();loadTasks();loadOutstanding();
 // The zone label is stated once, in the header, so a reader never has to infer it per timestamp.
 (function(){var e=document.getElementById("tzName");if(e)e.textContent=TZ_NAME||"your local time"})();
