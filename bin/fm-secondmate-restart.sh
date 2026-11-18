@@ -26,6 +26,10 @@
 #      the /stow skill's "Open-record persistence" contract and nothing else from
 #      it: no memory, learnings, or captain-preference sweep, which would make
 #      every instruction update cost far more than the reload it is paying for.
+#      A REMOTE mate answers by a beacon file instead (bin/fm-restart-ack.sh on
+#      its host, read back with fm-remote-secondmate-control.sh ack): its request
+#      is fire-and-forget, so no pending-reply expectation exists to be reported
+#      as missed. The re-read nudge is fire-and-forget for every mate.
 #      All requests go out before any restart, so a slow mate delays only its own
 #      restart instead of serializing the fleet behind it.
 #   B. RESTART. Only after that mate's own correlated answer lands on the parent
@@ -192,6 +196,19 @@ restart_mate() {  # <array-index>
   report_unreached "$id" "the restart outcome is unknown: $restart_reason"
 }
 
+# Whether one mate's persist acknowledgement has landed: a beacon file on its
+# host for a remote mate, a correlated parent-channel reply for a local one.
+persist_answered() {  # <array-index>
+  local i=$1 verdict
+  if [ "${PLACEMENT[i]}" = remote ]; then
+    verdict=$("$SCRIPT_DIR/fm-on.sh" "${IDS[$i]}" \
+      fm-remote-secondmate-control.sh ack "${IDS[$i]}" "${CORR[i]}" < /dev/null 2>/dev/null) || return 1
+    [ "$(printf '%s\n' "$verdict" | tail -1)" = acked ]
+    return
+  fi
+  fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"
+}
+
 launch_restart() {  # <array-index>
   local i=$1 result tmp
   result="$RESULT_DIR/$i.result"
@@ -306,6 +323,23 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
     fi
   fi
 
+  if [ "${PLACEMENT[i]}" = remote ]; then
+    # A remote mate acknowledges with a beacon file, so this request creates no
+    # pending-reply expectation: it is fire-and-forget, keyed by the beacon token.
+    corr=$(new_token)
+    if ! send_out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$SCRIPT_DIR/fm-send.sh" "$id" --fire-and-forget "$corr" \
+      "${FM_SECONDMATE_PERSIST_REQUEST_BEACON//__TOKEN__/$corr}" 2>&1); then
+      REASON[i]="the request to write down its open work could not be delivered: $(first_reported_line "$send_out")"
+      i=$((i + 1))
+      continue
+    fi
+    CORR[i]=$corr
+    DEADLINE[i]=$(($(date +%s) + PERSIST_WAIT))
+    PLAN[i]="persisted-pending"
+    i=$((i + 1))
+    continue
+  fi
   if ! corr=$(fm_pending_reply_create "$FM_HOME" "$STATE" "$id" \
     "$FM_SECONDMATE_PERSIST_REQUEST"); then
     REASON[i]="its answer about the open work cannot be tracked, so a clean reload could not be proven"
@@ -355,7 +389,7 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
   i=0
   while [ "$i" -lt "${#IDS[@]}" ]; do
     if [ "${PLAN[i]}" = persisted-pending ] \
-      && fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
+      && persist_answered "$i"; then
       pending_count=$((pending_count - 1))
       launch_restart "$i"
     fi
@@ -370,7 +404,7 @@ while [ "$((pending_count + restart_active_count))" -gt 0 ]; do
     if [ "$now" -ge "${DEADLINE[i]}" ]; then
       # A reply can land after the fleet-wide resolution pass. Recheck at the
       # timeout decision so an answer already on disk wins over the fallback.
-      if fm_pending_reply_try_resolve "$STATE" "${CORR[i]}"; then
+      if persist_answered "$i"; then
         pending_count=$((pending_count - 1))
         launch_restart "$i"
       else

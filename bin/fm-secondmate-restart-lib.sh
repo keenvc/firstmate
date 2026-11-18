@@ -37,6 +37,12 @@ _FM_SECONDMATE_RESTART_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # correlated answer, never the wall clock, is what releases the restart.
 FM_SECONDMATE_PERSIST_REQUEST='Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Then reply on your parent channel saying it is done, or saying what you deliberately left alone and why.'
 
+# The remote variant of that request: a remote mate answers with a beacon file,
+# not a chat reply, so the request names the exact command and its token. __TOKEN__
+# is replaced by the sender; the request is sent fire-and-forget, so it never
+# creates a pending-reply expectation.
+FM_SECONDMATE_PERSIST_REQUEST_BEACON='Firstmate was updated and I am about to restart your agent so it comes up on the current instructions and launch-time settings, which drops your conversation but keeps every durable record. Before that, persist the open work you are holding only in this conversation, following the /stow skill'"'"'s "Open-record persistence" section and nothing else from that skill: file a task for each open record that exists only in this conversation, including any captain call you had formed but never registered, and correct any task whose status no longer reflects what you now know. Do NOT run the memory, learnings, or captain-preference sweeps. Then run bin/fm-restart-ack.sh __TOKEN__ in your home. That file is the acknowledgement; do not reply on your parent channel.'
+
 # Resolve one mate's restart capability from its durable record alone.
 # Publishes, on success:
 #   FM_SECONDMATE_RESTART_PLACEMENT  local|remote

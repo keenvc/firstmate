@@ -3099,6 +3099,30 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
   pass "fm-spawn --relaunch: resumes the bound Pi session only for a Pi registration"
 }
 
+test_herdr_relaunch_of_opencode_starts_a_fresh_session() {
+  local dir out rc=0 command
+  herdr_case_or_skip resume-opencode resume-opencode || {
+    echo "skip - herdr relaunch needs jq (the herdr adapter parses JSON with it)"
+    return 0
+  }
+  dir=$HERDR_CASE_DIR
+  rm -f "$dir/fake/herdr-stopped"
+  sed -i 's/^harness=claude$/harness=opencode/' "$dir/home/state/resume-opencode.meta"
+  # The pane's runtime reports an opencode session; the replacement must still be
+  # a fresh one, never the old conversation.
+  printf '{"result":{"agent":{"agent":"opencode","agent_status":"idle","agent_session":{"kind":"id","value":"ses_old_conversation"}}}}\n' \
+    > "$dir/fake/herdr-agent-registration"
+  # The fixture cannot prove OpenCode's own brief-turn readiness, so the exit
+  # status is not asserted: only the command that was launched is.
+  out=$(run_spawn "$dir" resume-opencode --relaunch --harness opencode) || rc=$?
+  [ -s "$dir/fake/launched-command" ] || fail "no replacement was launched"$'\n'"$out"
+  command=$(cat "$dir/fake/launched-command")
+  assert_not_contains "$command" "--session" "an opencode relaunch must not resume a session"
+  assert_not_contains "$command" "--continue" "an opencode relaunch must not continue the last session"
+  assert_not_contains "$command" "ses_old_conversation" "an opencode relaunch must not carry the old session id"
+  pass "fm-spawn --relaunch: an opencode replacement starts a fresh session"
+}
+
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server() {
   local dir out rc=0 log stray
   herdr_case_or_skip gone-herdr rl68 || {
@@ -3515,6 +3539,7 @@ test_tmux_refuses_a_session_that_cannot_be_found
 test_tmux_refuses_when_the_server_is_gone
 test_reclaim_refuses_an_unreadable_endpoint
 test_herdr_relaunch_resumes_only_the_registered_pi_session
+test_herdr_relaunch_of_opencode_starts_a_fresh_session
 test_herdr_reclaim_adopts_a_pane_that_outlived_its_server
 test_herdr_exit_reports_already_stopped_when_the_pane_outlived_its_server
 test_herdr_rebind_stays_in_the_recorded_session

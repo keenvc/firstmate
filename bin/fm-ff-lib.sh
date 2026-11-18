@@ -36,6 +36,13 @@
 # edited further. Every other divergence stays put and
 # records an inspectable state/.secondmate-update-reconcile/<id>.pending marker
 # in the supervising home until a later successful convergence clears it.
+# FF_SALVAGE=yes (set only by bin/fm-update.sh) makes a secondmate home that is
+# dirty or uniquely diverged converge instead of staying behind: untracked files
+# and a patch of tracked edits are saved under that home's own
+# data/update-salvage/<stamp>/ with a MANIFEST, committed local work is parked on
+# a fm-update-parked/<id>-<short> branch, and only then is the tree reset to the
+# target and the .pending record cleared. Nothing is deleted before its copy
+# exists; a save or park that fails leaves the home skipped as before.
 # Locally leased homes start at a detached HEAD on the default branch, so their
 # fast-forward advances HEAD only and never moves the shared default branch or
 # any other worktree's checkout. A standalone remote home may instead advance
@@ -327,6 +334,55 @@ secondmate_update_reconcile_clear() { # <state> <id>
   rm -f -- "$marker"
 }
 
+FF_SALVAGE="${FF_SALVAGE:-no}"
+
+# Save everything a reset to the target would discard, so the home can converge.
+# Prints one line naming what was kept. Returns 1, having discarded nothing, when
+# any save fails. <park> is yes when committed local work must be parked.
+ff_salvage_home() { # <dir> <id> <park> <local-commit>
+  local dir=$1 id=$2 park=$3 local_rev=$4 stamp dest data f saved=0 branch short n=0 notes=""
+  case "$id" in *[!A-Za-z0-9._-]*|'') return 1 ;; esac
+  data="$dir/data"
+  [ ! -L "$data" ] || return 1
+  mkdir -p "$data" || return 1
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  dest="$data/update-salvage/$stamp"
+  mkdir -p "$dest" || return 1
+  short=$(git -C "$dir" rev-parse --short "$local_rev") || return 1
+  : > "$dest/MANIFEST" || return 1
+  if [ "$park" = yes ]; then
+    branch="fm-update-parked/$id-$short"
+    while git -C "$dir" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; do
+      n=$((n + 1)); branch="fm-update-parked/$id-$short-$n"
+    done
+    git -C "$dir" branch "$branch" "$local_rev" >/dev/null 2>&1 || return 1
+    printf 'parked-branch %s %s\n' "$branch" "$local_rev" >> "$dest/MANIFEST"
+    notes="$notes parked local commits on $branch;"
+  fi
+  if ! git -C "$dir" diff HEAD --quiet 2>/dev/null; then
+    git -C "$dir" diff --binary HEAD > "$dest/tracked.patch" 2>/dev/null || return 1
+    printf 'tracked-patch tracked.patch\n' >> "$dest/MANIFEST"
+    notes="$notes tracked edits in tracked.patch;"
+  fi
+  while IFS= read -r -d '' f; do
+    [ "$f" != "$SUB_HOME_MARKER" ] || continue
+    case "$f" in data/update-salvage/*) continue ;; esac
+    mkdir -p "$dest/untracked/$(dirname -- "$f")" || return 1
+    cp -p -- "$dir/$f" "$dest/untracked/$f" || return 1
+    printf 'untracked %s\n' "$f" >> "$dest/MANIFEST"
+    saved=$((saved + 1))
+  done < <(git -C "$dir" ls-files --others --exclude-standard -z 2>/dev/null)
+  [ "$saved" -eq 0 ] || notes="$notes $saved untracked file(s);"
+  # Every copy exists; only now remove the saved originals.
+  while IFS= read -r -d '' f; do
+    [ "$f" != "$SUB_HOME_MARKER" ] || continue
+    case "$f" in data/update-salvage/*) continue ;; esac
+    rm -f -- "$dir/$f"
+  done < <(git -C "$dir" ls-files --others --exclude-standard -z 2>/dev/null)
+  git -C "$dir" reset --hard HEAD >/dev/null 2>&1 || return 1
+  printf 'saved to %s:%s\n' "$dest" "${notes:- nothing to save}"
+}
+
 # Prove that merging LOCAL into TARGET from their real merge base adds no tree
 # change to TARGET. merge-tree performs the three-way merge at content level, so
 # a patch TARGET already carries is recognized even when TARGET later edited the
@@ -444,8 +500,18 @@ ff_target() {
   fi
 
   if [ -n "$(dirty_status "$dir" "$ignore_seed_marker")" ]; then
-    echo "$label: skipped: dirty working tree"
-    return 0
+    if [ "$FF_SALVAGE" = yes ] && [ -n "$secondmate_id" ] && [ -n "$reconciliation_state" ]; then
+      local dirty_note
+      if dirty_note=$(ff_salvage_home "$dir" "$secondmate_id" no "$(git -C "$dir" rev-parse HEAD 2>/dev/null)"); then
+        echo "$label: dirty working tree cleaned; $dirty_note"
+      else
+        echo "$label: skipped: dirty working tree could not be saved"
+        return 0
+      fi
+    else
+      echo "$label: skipped: dirty working tree"
+      return 0
+    fi
   fi
 
   local_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || {
@@ -480,6 +546,21 @@ ff_target() {
         return 0
       fi
       echo "$label: skipped: redundant divergence could not be reconciled with reset --keep"
+      return 0
+    fi
+    if [ "$FF_SALVAGE" = yes ] && [ -n "$secondmate_id" ] && [ -n "$reconciliation_state" ]; then
+      local saved_note
+      instr=$(changed_instr "$dir" "$base")
+      if saved_note=$(ff_salvage_home "$dir" "$secondmate_id" yes "$local_rev") \
+        && git -C "$dir" reset --hard "$base" >/dev/null 2>&1; then
+        after=$(git -C "$dir" rev-parse --short HEAD)
+        FF_STATUS="updated"
+        FF_INSTR="$instr"
+        secondmate_update_reconcile_clear "$reconciliation_state" "$secondmate_id" || true
+        echo "$label: reset diverged home to $base at $after; $saved_note"
+        return 0
+      fi
+      echo "$label: skipped: diverged from $base and its local work could not be saved"
       return 0
     fi
     if [ -n "$secondmate_id" ] && [ -n "$reconciliation_state" ]; then

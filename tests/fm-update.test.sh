@@ -6,10 +6,11 @@
 #   - The running firstmate repo (on its default branch) fast-forwards from
 #     origin; a leased secondmate home (detached HEAD on the default branch)
 #     fast-forwards the same way.
-#   - A dirty, offline, wrong-branch, or genuinely unique diverged target is
-#     skipped and reported, never forced or stashed, so unlanded work survives.
-#     Divergence leaves a durable reconciliation record, while a clean local
-#     result already present upstream after a squash merge heals automatically.
+#   - An offline or wrong-branch target is skipped and reported, never forced
+#     or stashed. A dirty or uniquely diverged secondmate home is salvaged
+#     (files saved under its data/update-salvage, commits parked on a branch),
+#     reset to origin, and its .pending record cleared; a failed save skips it.
+#     A local result already present upstream after a squash merge heals first.
 #   - The update is a single-parent fast-forward (never a merge commit) and a
 #     fast-forward of one worktree never disturbs another worktree's checkout
 #     or the shared default branch.
@@ -301,26 +302,52 @@ EOF
   pass "T3e a legacy remote advance still restarts the live remote mate"
 }
 
-# --- T4: dirty secondmate is skipped, its edit preserved -------------------
-test_dirty_secondmate_skipped() {
-  local w out
+# --- T4: dirty secondmate is salvaged, then converges ----------------------
+test_dirty_secondmate_salvaged() {
+  local w out salvage
   w=$(new_world t4)
   add_sm "$w" sm1
   bump_origin "$w" instr
   printf 'uncommitted local edit\n' >> "$w/sm1/AGENTS.md"
+  printf 'stray note\n' > "$w/sm1/stray.txt"
 
   out=$(run_update "$w")
 
-  assert_contains "$out" "secondmate sm1: skipped: dirty working tree" "dirty home skipped"
-  assert_not_contains "$out" "fm-sm1" "skipped secondmate is not nudged"
-  grep -q 'uncommitted local edit' "$w/sm1/AGENTS.md" \
-    || fail "dirty edit was discarded"
-  pass "T4 dirty secondmate skipped, local edit preserved"
+  assert_contains "$out" "secondmate sm1: dirty working tree cleaned; saved to" "dirty home salvaged"
+  assert_contains "$out" "secondmate sm1: updated" "dirty home converged after salvage"
+  assert_contains "$out" "restart-secondmates: fm-sm1" "converged dirty home restarts"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$(git -C "$w/sm1" rev-parse origin/main)" ] \
+    || fail "salvaged dirty home did not reach origin/main"
+  salvage=$(ls -d "$w"/sm1/data/update-salvage/*)
+  assert_grep 'uncommitted local edit' "$salvage/tracked.patch" "tracked edit not saved"
+  assert_grep 'stray note' "$salvage/untracked/stray.txt" "untracked file not saved"
+  assert_grep 'untracked stray.txt' "$salvage/MANIFEST" "manifest does not list the untracked file"
+  assert_absent "$w/sm1/stray.txt" "saved untracked file was left in the tree"
+  pass "T4 dirty secondmate saved under data/update-salvage and converged"
 }
 
-# --- T5: diverged secondmate is skipped, its commit preserved --------------
-test_diverged_secondmate_skipped() {
-  local w out before marker second_out
+# --- T4b: a failed save leaves the dirty home untouched ----------------------
+test_dirty_secondmate_unsavable_is_skipped() {
+  local w out
+  w=$(new_world t4b)
+  add_sm "$w" sm1
+  bump_origin "$w" instr
+  printf 'uncommitted local edit\n' >> "$w/sm1/AGENTS.md"
+  # A file where the salvage directory belongs means nothing can be saved, so
+  # nothing may be reset.
+  mkdir -p "$w/sm1/data"
+  : > "$w/sm1/data/update-salvage"
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "secondmate sm1: skipped: dirty working tree could not be saved" "unsavable home skipped"
+  grep -q 'uncommitted local edit' "$w/sm1/AGENTS.md" || fail "unsaved edit was discarded"
+  pass "T4b a failed salvage discards nothing"
+}
+
+# --- T5: diverged secondmate has its commits parked, then converges ----------
+test_diverged_secondmate_parked() {
+  local w out before marker branch
   w=$(new_world t5)
   add_sm "$w" sm1
   # Local commit on the secondmate's detached HEAD makes it diverge from origin.
@@ -329,27 +356,27 @@ test_diverged_secondmate_skipped() {
   git -C "$w/sm1" commit -qm local-work
   before=$(git -C "$w/sm1" rev-parse HEAD)
   bump_origin "$w" instr
+  # A pre-existing durable reconcile record is cleared by the convergence.
+  marker="$w/home/state/.secondmate-update-reconcile/sm1.pending"
+  mkdir -p "$w/home/state/.secondmate-update-reconcile"
+  printf 'schema=fm-secondmate-update-reconcile.v1\nid=sm1\nstatus=diverged\n' > "$marker"
 
   out=$(run_update "$w")
 
-  assert_contains "$out" "secondmate sm1: skipped: diverged from origin/main" "diverged home skipped"
-  assert_contains "$out" "reconciliation required (record:" "diverged skip is actionable"
-  assert_not_contains "$out" "fm-sm1" "diverged secondmate is not nudged"
-  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$before" ] \
-    || fail "diverged secondmate HEAD moved (unlanded work at risk)"
-  marker="$w/home/state/.secondmate-update-reconcile/sm1.pending"
-  assert_present "$marker" "diverged secondmate did not retain a durable reconciliation record"
-  assert_grep 'schema=fm-secondmate-update-reconcile.v1' "$marker" "divergence record schema missing"
-  assert_grep "local_commit=$before" "$marker" "divergence record lost the protected local commit"
-
-  second_out=$(run_update "$w")
-  assert_contains "$second_out" "reconciliation required (record: $marker)" \
-    "a later update did not surface the durable divergence"
-  pass "T5 diverged secondmate is preserved and durably actionable"
+  assert_contains "$out" "secondmate sm1: reset diverged home to origin/main" "diverged home reset"
+  assert_contains "$out" "restart-secondmates: fm-sm1" "converged diverged home restarts"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$(git -C "$w/sm1" rev-parse origin/main)" ] \
+    || fail "diverged secondmate did not reach origin/main"
+  branch=$(git -C "$w/sm1" for-each-ref --format='%(refname:short)' 'refs/heads/fm-update-parked/*')
+  [ -n "$branch" ] || fail "committed local work was not parked on a branch"
+  [ "$(git -C "$w/sm1" rev-parse "$branch")" = "$before" ] \
+    || fail "parked branch does not hold the unlanded commit"
+  assert_absent "$marker" "convergence left the .pending record behind"
+  pass "T5 diverged secondmate parked on a branch and converged"
 }
 
 test_squash_merged_divergence_reconciles() {
-  local w branch_base local_tip out marker
+  local w branch_base local_tip out
   w=$(new_world t5b)
   add_sm "$w" sm1
   branch_base=$(git -C "$w/sm1" rev-parse HEAD)
@@ -362,17 +389,11 @@ test_squash_merged_divergence_reconciles() {
   git -C "$w/sm1" commit -qm local-tooling
   local_tip=$(git -C "$w/sm1" rev-parse HEAD)
 
-  bump_origin "$w" readme
-  out=$(run_update "$w")
-  marker="$w/home/state/.secondmate-update-reconcile/sm1.pending"
-  assert_contains "$out" "secondmate sm1: skipped: diverged from origin/main" \
-    "unique local work was not initially protected"
-  assert_present "$marker" "initial divergence did not leave its durable record"
-
   git -C "$w/sm1" diff "$branch_base" "$local_tip" | git -C "$w/seed" apply
   git -C "$w/seed" add -A
   git -C "$w/seed" commit -qm squash-local-contribution
   git -C "$w/seed" push -q origin main
+  bump_origin "$w" readme
 
   out=$(run_update "$w")
 
@@ -380,10 +401,11 @@ test_squash_merged_divergence_reconciles() {
     "the squash-merged local result did not heal"
   [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$(git -C "$w/sm1" rev-parse origin/main)" ] \
     || fail "reconciled secondmate did not reach origin/main"
-  assert_absent "$marker" "successful reconciliation left the divergence marker behind"
+  [ -z "$(git -C "$w/sm1" for-each-ref 'refs/heads/fm-update-parked/*')" ] \
+    || fail "a redundant divergence needed no parked branch"
   assert_contains "$out" "restart-secondmates: fm-sm1" \
     "the reconciled live secondmate was excluded from restart"
-  pass "T5b squash-merged divergence heals and rejoins live convergence"
+  pass "T5b squash-merged divergence heals without parking"
 }
 
 # seed_file_lines <w> <file>: land a multi-line file on origin and bring the main
@@ -803,8 +825,9 @@ test_bin_only_advance_restarts
 test_unprovable_runtime_gets_fallback_nudge
 test_dead_secondmate_gets_no_action
 test_legacy_remote_advance_restarts
-test_dirty_secondmate_skipped
-test_diverged_secondmate_skipped
+test_dirty_secondmate_salvaged
+test_dirty_secondmate_unsavable_is_skipped
+test_diverged_secondmate_parked
 test_squash_merged_divergence_reconciles
 test_same_patch_with_later_edit_reconciles
 test_extra_local_change_stays_diverged
