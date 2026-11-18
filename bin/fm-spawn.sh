@@ -3946,11 +3946,13 @@ relaunch_fresh_args() {  # <harness> <opencode-version>
   case "$major" in
   '' | 0 | 1) return 0 ;;
   esac
-  # A session id must be unique across relaunches of the same task, and readable
-  # in a task record; the timestamp keeps it ordered and the pid plus $RANDOM
-  # keep two relaunches of one task from colliding.
+  # OpenCode 2 rejects any id that does not start with `ses` (2.3.2: `Error:
+  # Expected a string starting with "ses" at ["sessionID"]`, exiting before the
+  # brief turn), so the minted id is `ses_` plus 24 hex characters, the shape
+  # OpenCode itself issues. It must differ on every relaunch of a task, so it is
+  # built from the clock, the pid and $RANDOM.
   printf -- ' --session %s' \
-    "$(shell_quote "fm-fresh-$(date -u +%Y%m%dT%H%M%SZ)-${BASHPID:-$$}-$RANDOM")"
+    "$(shell_quote "$(printf 'ses_%08x%08x%04x%04x' "$(date -u +%s)" "$((RANDOM * 32768 + RANDOM))" "${BASHPID:-$$}" "$RANDOM")")"
 }
 
 model_flag_for_harness() {

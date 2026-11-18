@@ -1798,7 +1798,7 @@ test_spawn_relaunch_fresh_session_forces_a_new_opencode_session() {
   first=$(cat "$dir/fake/literal")
   # The id is shell-quoted on the launch line, as every launch argument is.
   case "$first" in
-  *--session\ \'fm-fresh-*\'" --prompt "*) : ;;
+  *--session\ \'ses_[0-9a-f]*\'" --prompt "*) : ;;
   *) fail "a fresh relaunch must name a new session id immediately before --prompt, got: $first" ;;
   esac
   # A second fresh relaunch gets a different id, so the replacement can never
@@ -1854,7 +1854,7 @@ test_relaunch_fresh_session_is_reported_and_recorded() {
   expect_code 0 "$rc" "a fresh relaunch should succeed"$'\n'"$out"
   assert_contains "$out" "session=fresh" "the result should report the new session"
   [ "$(meta_field "$dir" rl64 session)" = fresh ] || fail "the record must say session=fresh"
-  assert_grep "--session 'fm-fresh-" "$dir/fake/literal" "the replacement must be launched with a new session id"
+  assert_grep "--session 'ses_" "$dir/fake/literal" "the replacement must be launched with a new session id"
   out=$(run_control "$dir" rl64 relaunch --note "carry on"); rc=$?
   expect_code 0 "$rc" "the default relaunch should succeed"$'\n'"$out"
   assert_contains "$out" "session=resumed" "a default relaunch should report the resumed session"
