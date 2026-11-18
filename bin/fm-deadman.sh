@@ -39,7 +39,7 @@ mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 
 # newest_mtime <glob>: newest mtime among matches, empty when none match.
 newest_mtime() {
-  local best= m f
+  local best='' m f
   for f in $1; do
     [ -f "$f" ] || continue
     m=$(mtime "$f") || continue
