@@ -38,6 +38,12 @@ HOMES = sorted(["/home/azureuser/firstmate"] +
                 for d in os.listdir("/home/azureuser/fm-homes")
                 if os.path.isdir(os.path.join("/home/azureuser/fm-homes", d))]) if os.path.isdir("/home/azureuser/fm-homes") else ["/home/azureuser/firstmate"]
 QUESTIONS_JSON = "/mnt/workdisk/tmp/fm-console/questions.json"
+# The console's own answer log (UX review 2026-11-18): an owner call or captain hold the captain has
+# already answered on the board no longer needs him, so it leaves the Needs-you count and is listed
+# under `answered` until its record closes. Test answers never count.
+ANSWERS = "/mnt/workdisk/tmp/fm-console/answers.jsonl"
+OLD_DAYS = 7
+SINCE_RE = re.compile(r"\(since (\d{4}-\d{2}-\d{2})")
 CALL_RE = re.compile(r"\b(owner|client|captain)[ -](call|decision|consent|go[- ]ahead)\b", re.I)
 HOLD_ITEM = re.compile(r"^- \[ \] ([^ ]+) - (.*)$")
 
@@ -82,6 +88,42 @@ def held_reason(raw):
     return raw.strip()
 
 
+def answer_qid(item):
+    """The qid the board's answer endpoint records for this item: calls keep their feed id (so answers
+    given on the Questions tab count too), holds are qualified by home because two homes can share an
+    id. Sanitised and cut exactly as the server's /api/console/answer does."""
+    raw = ("hold:%s:%s" % (item.get("home") or "", item.get("id") or "")) if item.get("source") == "hold" else str(item.get("id") or "")
+    return re.sub(r"[^A-Za-z0-9_.:-]", "", raw)[:60]
+
+
+def board_answers(problems):
+    """qid -> the captain's first real answer on the board (the server never overwrites that one)."""
+    out = {}
+    try:
+        with open(ANSWERS, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    a = json.loads(line)
+                except Exception:
+                    continue
+                if a.get("test") or a.get("conflict") or a.get("kind") or not (a.get("choice") or a.get("text")):
+                    continue
+                out.setdefault(str(a.get("qid") or ""), a)
+    except FileNotFoundError:
+        pass
+    except Exception as ex:
+        problems.append({"source": "answers", "path": ANSWERS, "error": "the board's answer log could not be read: " + str(ex)[:160]})
+    return out
+
+
+def age_days(asked_at, now):
+    try:
+        t = time.mktime(time.strptime(str(asked_at)[:10], "%Y-%m-%d")) - time.timezone
+    except Exception:
+        return None
+    return max(0, int((now - t) // 86400))
+
+
 def get(url):
     import urllib.request
     with urllib.request.urlopen(url, timeout=40) as r:
@@ -115,9 +157,16 @@ def cards(problems, items):
     for c in d.get("open", []):
         if c.get("card"):
             continue          # already carried above with its structured fields
+        # Firstmate's written recommendation for this numbered card, when one exists, is its options:
+        # the `pick` one is the recommended default and its `why` is the evidence shown beside it.
+        rec = c.get("rec") if isinstance(c.get("rec"), dict) else {}
+        ropts = [o for o in (rec.get("options") or []) if isinstance(o, dict) and o.get("text")]
+        opts = ([{"label": o["text"], "detail": o.get("why", ""), "recommended": bool(o.get("pick"))} for o in ropts]
+                or [{"label": o} for o in (c.get("options") or [])])
         items.append({"source": "card", "id": "decision-" + str(c.get("n")), "n": c.get("n"), "project": "",
-                      "question": c.get("question", ""), "context": c.get("context", ""),
-                      "options": [{"label": o} for o in (c.get("options") or [])],
+                      "question": c.get("question", ""), "context": rec.get("summary") or c.get("context", ""),
+                      "options": opts, "links": [u for u in (rec.get("links") or []) if isinstance(u, str)],
+                      "rec_at": d.get("recs_at") if ropts else 0,
                       "asked_at": "", "stale": False, "problems": [], "card": False,
                       "record": "/home/azureuser/firstmate/data/decision-cards/open-decisions.md"})
 
@@ -150,9 +199,10 @@ def holds(problems, items):
                 continue                      # a work hold is firstmate's queue, not the captain's
             if not kind and not CALL_RE.search(title):
                 continue                      # untyped hold with no captain-call wording: not provably his
+            since = SINCE_RE.search(body)
             items.append({"source": "hold", "id": m.group(1), "home": home_name, "project": home_name,
                           "question": title_of(title), "context": held_reason(hold.group(1)),
-                          "options": [], "asked_at": "", "stale": False, "problems": [], "card": False,
+                          "options": [], "asked_at": since.group(1) if since else "", "stale": False, "problems": [], "card": False,
                           "record": path})
 
 
@@ -220,9 +270,27 @@ def main():
     # One question, one card: a legacy numbered card and the owner call behind it are the same
     # question, so the card (which carries the board's buttons) keeps the place and the other
     # source is named in `also` rather than drawn twice.
-    payload = {"at": int(time.time()), "took_ms": int((time.time() - t0) * 1000), "count": len(out),
-               "by_source": {s: len([i for i in out if i["source"] == s]) for s in ("card", "hold", "call")},
-               "items": out, "problems": problems,
+    #
+    # ONE Needs-you count (UX review 2026-11-18): `count` is the number every tab and the header show.
+    # It is the deduplicated open set minus what the captain already answered on the board; those are
+    # kept under `answered` (with his answer) until their own record closes, so nothing is lost.
+    now = time.time()
+    given = board_answers(problems)
+    need, answered = [], []
+    for it in out:
+        it["qid"] = answer_qid(it) if it["source"] != "card" else it.get("id")
+        it["age_days"] = age_days(it.get("asked_at"), now)
+        it["old"] = it["age_days"] is not None and it["age_days"] > OLD_DAYS
+        a = given.get(it["qid"]) if it["source"] != "card" else None
+        if a:
+            it["answer"] = {"at": a.get("at"), "choice": a.get("choice", ""), "text": a.get("text", ""), "request": a.get("rid", "")}
+            answered.append(it)
+        else:
+            need.append(it)
+    payload = {"at": int(now), "took_ms": int((time.time() - t0) * 1000), "count": len(need),
+               "by_source": {s: len([i for i in need if i["source"] == s]) for s in ("card", "hold", "call")},
+               "old_days": OLD_DAYS, "older_n": len([i for i in need if i["old"]]),
+               "items": need, "answered": answered, "answered_n": len(answered), "problems": problems,
                "sources": {"cards": CONSOLE + "/api/console/decisions", "holds": [h + "/data/backlog.md" for h in HOMES],
                            "calls": QUESTIONS_JSON, "homes": HOMES}}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

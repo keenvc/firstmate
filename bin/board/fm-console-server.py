@@ -129,7 +129,10 @@ def _load_decisions():
     The tracked copy lives in this repo's bin/ beside the command; an older beside-the-server copy
     is accepted only when the tracked one is absent, so an upgrade never silently keeps stale logic."""
     here = os.path.dirname(os.path.realpath(__file__))
-    for p in ("/mnt/fastpool/.treehouse/deck-6f7161/1/deck/bin/fm-console-decisions.py", here + "/fm-console-decisions.py"):
+    # The deck home's own tracked bin/ is the copy that ships (UX review 2026-11-18): the old treehouse
+    # slot path is gone, which left the Decisions tab reporting "the card deck module is not installed".
+    for p in (CONSOLE_HOME + "/bin/fm-console-decisions.py",
+              "/mnt/fastpool/.treehouse/deck-6f7161/1/deck/bin/fm-console-decisions.py", here + "/fm-console-decisions.py"):
         if os.path.exists(p):
             ld = importlib.machinery.SourceFileLoader("fm_console_decisions", p)
             sp = importlib.util.spec_from_loader("fm_console_decisions", ld)
