@@ -77,6 +77,11 @@ wait_poll_cycle() {  # <state> <pid> [limit-ticks]
     kill -0 "$pid" 2>/dev/null || return 1
     now=$(file_mtime "$beat")
     if [ -n "$now" ] && [ "$now" != "$first" ]; then
+      # The watcher also refreshes this beacon between cycle stages (the
+      # concurrent sweep keeps it fresh through slow stages), so the first change
+      # can land before the cycle's later stages ran. Let those stages finish
+      # before the caller reads their effects; the cycle idles for FM_POLL after.
+      sleep 1
       return 0
     fi
     sleep 0.1
