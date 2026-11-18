@@ -17,7 +17,7 @@
 # own open decision or blocker), and
 # escalate once if the recovery turn also completes without a correlated
 # report. Never loop, never repeatedly inject, never silently expire unresolved
-# records (a stale expiry is an explicit resolved line: fm_pending_reply_expire_stale), and never treat wrong-home or structured-home heuristics as
+# records, and never treat wrong-home or structured-home heuristics as
 # acknowledgement. A same-basename restatement-copy of the mate home's
 # state/<task_id>.status onto the parent channel is a repair of the
 # FM_HOME-relative mixup, not acknowledgement of an arbitrary mate-home file.
@@ -1340,75 +1340,6 @@ EOF
   fi
   now=$(fm_pending_reply_now)
   fm_pending_reply_set "$rec" escalation_closed_epoch "$now"
-}
-
-# Stale expiry: a pending-reply-missed decision still open after
-# FM_PENDING_REPLY_STALE_SECS (default 24h) is closed as `stale`, written as an
-# ordinary resolved line carrying its exact key, so the log records that it was
-# expired rather than answered. A key (or its task) that names a captain-held
-# task is never expired: that hold owns the decision. Prints one line per
-# candidate: "would-close|closed|skipped-held|failed <status-file> <key> age=<secs>".
-# bin/fm-pending-reply-expire.sh is the operator entry point (dry-run default).
-fm_pending_reply_expire_stale() {  # <state-dir> <apply:0|1> [max-age-secs]
-  local state=$1 apply=${2:-0} max=${3:-${FM_PENDING_REPLY_STALE_SECS:-86400}}
-  local f open key verb note line opened age now task corr rec held id rc
-  now=$(fm_pending_reply_now)
-  for f in "$state"/*.status; do
-    [ -f "$f" ] && [ ! -L "$f" ] || continue
-    open=$(status_open_decisions "$f")
-    while IFS=$'\t' read -r key verb note; do
-      [ "$verb" = blocked ] || continue
-      case "$key" in pending-reply-*) ;; *) continue ;; esac
-      case "$note" in pending-reply-missed:*) ;; *) continue ;; esac
-      line=$(grep -F "[key=$key]" "$f" | grep '^blocked ' | tail -n 1)
-      opened=$(status_line_at_epoch "$line") || continue
-      age=$((now - opened))
-      [ "$age" -ge "$max" ] || continue
-      task=$(printf '%s' "$note" | sed -n 's/.*[[:space:]]task=\([^[:space:]]*\).*/\1/p')
-      held=0
-      for id in "$key" "$task"; do
-        [ -n "$id" ] || continue
-        # Exit 1 is "not held"; 0 is held and 2 is an unreadable backlog, which
-        # is treated as held so an unprovable hold is never expired.
-        rc=0
-        "$_FM_PENDING_REPLY_LIB_DIR/fm-captain-hold.sh" open "$id" >/dev/null 2>&1 || rc=$?
-        [ "$rc" = 1 ] || held=1
-      done
-      if [ "$held" = 1 ]; then
-        printf 'skipped-held %s %s age=%s\n' "$f" "$key" "$age"
-        continue
-      fi
-      if [ "$apply" != 1 ]; then
-        printf 'would-close %s %s age=%s\n' "$f" "$key" "$age"
-        continue
-      fi
-      corr=${key#pending-reply-}
-      rec=$(fm_pending_reply_path "$state" "$corr")
-      if [ -f "$rec" ] && [ "$(fm_pending_reply_get "$rec" phase)" != resolved ]; then
-        fm_pending_reply_set "$rec" phase resolved || true
-        fm_pending_reply_set "$rec" resolved_epoch "$now" || true
-        fm_pending_reply_set "$rec" resolved_via stale || true
-      fi
-      if _fm_pending_reply_append_stale_close "$state" "$f" "$key" "$task" "$corr"; then
-        printf 'closed %s %s age=%s\n' "$f" "$key" "$age"
-      else
-        printf 'failed %s %s age=%s\n' "$f" "$key" "$age"
-      fi
-    done <<__FM_EXPIRE_OPEN__
-$open
-__FM_EXPIRE_OPEN__
-  done
-}
-
-_fm_pending_reply_append_stale_close() {  # <state-dir> <status-file> <key> <task> <corr>
-  local state=$1 f=$2 key=$3 task=$4 corr=$5 rc=0
-  local STATE FM_WAKE_QUEUE FM_WAKE_QUEUE_LOCK
-  STATE=$state
-  . "$_FM_PENDING_REPLY_LIB_DIR/fm-wake-lib.sh"
-  fm_wake_status_append_self_announced "$state" "$f" \
-    "resolved [key=$key]: $(fm_pending_reply_resolved_note "$task" "$corr" stale)" \
-    2>/dev/null || rc=$?
-  [ "$rc" -ne 2 ]
 }
 
 # Escalate once after a missed recovery report or failed delivery outcome.

@@ -17,9 +17,6 @@
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-# Spawn tests never read live provider balances (bin/fm-credit-preflight.sh);
-# the preflight has its own test that turns it back on.
-export FM_CREDIT_PREFLIGHT=off
 
 if [ -n "${FM_TEST_FIXTURES_SOURCED:-}" ]; then
   return 0

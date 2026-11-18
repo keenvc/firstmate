@@ -474,15 +474,13 @@ case "${FM_FAKE_SSH_MODE:-ok}" in
 esac
 case "${rargs[1]:-}" in
   send-stdin)
-    # Model the live remote mate: act on the instruction and acknowledge it with
-    # the beacon file the request named, never a parent-channel reply.
+    # Model the live remote mate: act on the instruction and report back on the
+    # parent channel, carrying the correlation token the request embedded.
     if [ -n "${FM_FAKE_ANSWER_STATUS:-}" ]; then
-      token=$(printf '%s' "$stdin_payload" | grep -oE 'fm-restart-ack\.sh [0-9a-f]{16}' | head -1 | cut -d' ' -f2)
-      [ -z "$token" ] || : > "$FM_FAKE_DIR/ack-$token"
+      corr=$(printf '%s' "$stdin_payload" | grep -oE 'corr=[0-9a-f]{16}' | head -1)
+      [ -z "$corr" ] || printf 'done [%s]: open records written down\n' "$corr" \
+        >> "$FM_FAKE_ANSWER_STATUS"
     fi
-    ;;
-  ack)
-    if [ -e "$FM_FAKE_DIR/ack-${rargs[3]}" ]; then echo acked; else echo waiting; fi
     ;;
   relaunch)
     case "${FM_FAKE_SSH_MODE:-ok}" in
@@ -512,18 +510,6 @@ SH
   export FM_TEST_SSH_BIN="$fb/fake-ssh"
 }
 
-test_restart_ack_writes_a_beacon_file() {
-  local dir out
-  dir=$(new_case ack)
-  out=$(FM_HOME="$dir/home" bash "$ROOT/bin/fm-restart-ack.sh" 0123456789abcdef 2>&1) \
-    || fail "the ack command failed: $out"
-  assert_present "$dir/home/state/restart-acks/0123456789abcdef" "the beacon file was not written"
-  out=$(FM_HOME="$dir/home" bash "$ROOT/bin/fm-restart-ack.sh" not-a-token 2>&1) \
-    && fail "a malformed token must be refused"
-  assert_absent "$dir/home/state/restart-acks/not-a-token" "a malformed token wrote a file"
-  pass "T7 fm-restart-ack writes the beacon the remote sender reads"
-}
-
 test_remote_mate_restarts_over_the_transport_hop() {
   local dir out rc relaunch_line
   dir=$(new_case remote)
@@ -547,11 +533,6 @@ test_remote_mate_restarts_over_the_transport_hop() {
   [ "$(grep -n '^fm-remote-secondmate-control.sh send-stdin' "$dir/ssh.log" | head -1 | cut -d: -f1)" \
      -lt "$(grep -n '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" | head -1 | cut -d: -f1)" ] \
     || fail "the remote mate was restarted before it was asked to persist"$'\n'"$(cat "$dir/ssh.log")"
-  # The remote mate answered by beacon: the restart never opened a reply expectation.
-  [ -z "$(ls "$dir/home/state/pending-replies" 2>/dev/null)" ] \
-    || fail "a remote restart must not create a pending-reply expectation"$'\n'"$(ls "$dir/home/state/pending-replies")"
-  assert_contains "$(cat "$dir/ssh.log")" "fm-remote-secondmate-control.sh ack sm2 " \
-    "the remote persist answer was not read from the beacon"
   pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
 }
 
@@ -1018,7 +999,6 @@ test_unknown_mate_is_accounted_for
 test_refused_restart_falls_back_without_claiming_a_reload
 test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
-test_restart_ack_writes_a_beacon_file
 test_remote_mate_restarts_over_the_transport_hop
 test_remote_restart_lands_on_the_per_mate_pin
 test_remote_restart_uses_the_default_for_an_unpinned_mate
