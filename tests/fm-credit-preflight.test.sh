@@ -35,7 +35,7 @@ export FAKE_BODY=
 
 test_openrouter_negative_refused() {
   FAKE_BODY=$OR_NEG run openrouter/deepseek/deepseek-v4.1-flash-1017
-  [ "$RC" = 1 ] && has "$OUT" "credit is exhausted" || fail "openrouter negative: rc=$RC $OUT"
+  { [ "$RC" = 1 ] && has "$OUT" "credit is exhausted"; } || fail "openrouter negative: rc=$RC $OUT"
   pass "openrouter negative balance refused"
 }
 test_openrouter_positive_allowed() {
@@ -55,12 +55,12 @@ test_deepseek_positive_allowed() {
 }
 test_no_balance_provider_says_so() {
   run azure-foundry/DeepSeek-V4.1-Flash-1017
-  [ "$RC" = 0 ] && has "$OUT" "exposes no balance" || fail "no-balance provider: rc=$RC $OUT"
+  { [ "$RC" = 0 ] && has "$OUT" "exposes no balance"; } || fail "no-balance provider: rc=$RC $OUT"
   pass "provider without a balance says so and is allowed"
 }
 test_unreadable_balance_not_blocking() {
   FAKE_BODY_FAIL=1 run openrouter/x
-  [ "$RC" = 0 ] && has "$OUT" "could not read" || fail "read failure: rc=$RC $OUT"
+  { [ "$RC" = 0 ] && has "$OUT" "could not read"; } || fail "read failure: rc=$RC $OUT"
   pass "unreadable balance does not block"
 }
 test_off_switch() {
