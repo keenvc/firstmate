@@ -154,6 +154,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-peek.sh`             | Print a bounded tail of a crewmate endpoint                                          |
 | `fm-check-register.sh`   | Bind an intentional custom watcher check to its current bytes                       |
 | `fm-check-unregister.sh` | Retire a custom watcher check and its trust binding by validated task id            |
+| `fm-deadman.sh`          | Generic dead-man check: a scheduled job declared in `config/deadman.tsv` whose last success is older than two cadences raises one `check:` line carrying its last log line; `arm` and `disarm` manage the watcher check |
 | `fm-check-lib.sh`        | Validate custom-check registrations and prepare private execution snapshots          |
 | `fm-tool-update-check.sh` | Report watched tooling with an update available, and updates installed but left inert by PATH order |
 | `fm-startup-growth-check.sh` | Daily metadata-only growth check for startup memory and tracked startup/instruction surfaces |
