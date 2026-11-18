@@ -17,6 +17,16 @@
 FM_SECOND_MATE_NUDGE_MESSAGE='firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'
 FM_REMOTE_SECOND_MATE_NUDGE_MESSAGE='Firstmate instructions or inherited config changed on this host. Re-read AGENTS.md and the inherited config files before further work.'
 
+# A re-read notice is fire-and-forget: it arms no parent pending-reply, so an
+# unanswered notice can never pile up as a missed-reply record. The delivery id
+# is fresh per send (16 lowercase hex), so a later identical notice stays distinct.
+fm_secondmate_nudge_delivery_id() {
+  local id
+  id=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
+  [ "${#id}" = 16 ] || id=$(printf '%016x' "$(( ($(date +%s) * 1000003 + $$) & 0x7fffffffffffffff ))")
+  printf '%s' "$id"
+}
+
 fm_secondmate_nudge_marker_path() { # <state-dir> <id>
   local state=$1 id=$2
   case "$id" in *[!/A-Za-z0-9._-]*|''|*/*) return 1 ;; esac
