@@ -30,8 +30,13 @@
 # home to that root. FAST-FORWARD ONLY, exactly like
 # fm-fleet-sync.sh: never force, never create a merge commit, never stash.
 # A secondmate divergence whose complete local tree result is already present at
-# the target is reconciled with reset --keep; every other unsafe target is
-# skipped and reported, with divergence recorded durably by fm-ff-lib.sh.
+# the target is reconciled with reset --keep. A dirty or uniquely diverged
+# secondmate home is salvaged and reset to the target (fm-ff-lib.sh FF_SALVAGE):
+# untracked files and tracked edits are saved under that home's data/update-salvage/,
+# committed local work is parked on a fm-update-parked/ branch, and the
+# .pending reconcile record is cleared. Every other unsafe target (wrong branch,
+# offline, unsafe home, a failed save) is skipped and reported; the primary
+# firstmate repo and projects/ keep the strict guards.
 # A tracked-files update never touches the gitignored operational
 # dirs (data/, state/, config/, projects/, .no-mistakes/), so a secondmate's
 # in-flight work is never disrupted. Worktrees of this repo share one object
@@ -66,7 +71,7 @@
 #
 # Only two things keep a live mate out of the restart set, and neither is papered
 # over as a reload:
-#   - its home was SKIPPED (dirty, uniquely diverged, offline, unsafe). It is not
+#   - its home was SKIPPED (offline, unsafe, wrong branch, or a failed salvage). It is not
 #     on the new bytes, nothing here forces, stashes, or discards it, and it gets
 #     no action at all. A divergence remains in the durable reconciliation record
 #     that this or a later bootstrap/update pass surfaces.
@@ -198,6 +203,7 @@ fi
 # sweep's threshold, not this command's, so only the two sets below are read.
 FF_NUDGE_WINDOWS=""
 FF_SEEN_HOMES=""
+FF_SALVAGE=yes
 FF_RESTART_WINDOWS=""
 FF_STEER_WINDOWS=""
 
