@@ -41,6 +41,7 @@ case "$1 $2" in
   "pr view")
     case "$3" in
       7) printf '%s' '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","headRefOid":"abcdef1234567890","title":"docs: tidy wording","labels":[{"name":"captain-hold"}],"files":[{"path":"docs/guide.md"}],"statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"},{"name":"Mergify Merge Protections","state":"PENDING"}],"comments":[{"body":"## Claude review\nHead: abcdef1\nVERDICT: CLEAN"}]}' ;;
+      8) printf '%s' '{"state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","headRefOid":"abcdef1234567890","title":"fix: thread view","body":"Stops the thread view showing the wrong patient chart.","labels":[],"files":[{"path":"app/thread.ts"}],"statusCheckRollup":[{"name":"ci","conclusion":"SUCCESS"}],"comments":[{"body":"Head: abcdef1\nVERDICT: CLEAN"}]}' ;;
       9) printf '%s' '{"state":"MERGED","isDraft":false,"mergeable":"UNKNOWN","headRefOid":"1111111111111111","title":"docs: old","labels":[],"files":[],"statusCheckRollup":[],"comments":[]}' ;;
       *) exit 1 ;;
     esac ;;
@@ -93,6 +94,7 @@ needs-decision [key=fresh-amb] [at=$((NOW - 60))]: how should the retry behave? 
 needs-decision [key=prod-mention] [at=$OLD]: the prod deploy of v147 is ready; deploy now? Recommend: deploy it
 needs-decision [key=soft-irrev] [at=$OLD]: the prod contact list is ready; Recommend: email every contact
 needs-decision [key=crit-norec] [at=$OLD]: PHI exposed on the intake page
+needs-decision [key=pr-phi] [at=$OLD]: ok to merge https://github.com/o/r/pull/8 ?
 needs-decision [key=baa-call] [at=$OLD]: [class=legal] does the vendor contract cover us? Recommend: sign it
 EOF
 }
@@ -102,12 +104,12 @@ test_classify_protects_captain_only_classes() {
   out=$("$SLA" classify "rotate the leaked API key for the vendor")
   assert_contains "$out" "class=captain-only:" "a credential hold was not captain-only"
   out=$("$SLA" classify "approve the ad spend top-up of 200 USD")
-  assert_contains "$out" "class=captain-only:spend" "a spending hold was not captain-only: $out"
+  assert_contains "$out" "class=captain-only:money" "a spending hold was not captain-only: $out"
   out=$("$SLA" classify "rename the nav label? Recommend: Inbox")
   assert_contains "$out" "class=quick" "a naming call did not resolve immediately: $out"
   assert_contains "$out" "default=Inbox" "the recorded recommendation was not taken as the default: $out"
   out=$("$SLA" classify "write the clinic rows into production data")
-  assert_contains "$out" "class=captain-only:prod-write" "a production data write was not critical: $out"
+  assert_contains "$out" "class=captain-only:prod-data" "a production data write was not critical: $out"
   out=$("$SLA" classify "[class=incident] keep the flag off")
   assert_contains "$out" "class=captain-only:incident" "an explicit critical class was ignored: $out"
   out=$("$SLA" classify "should the worker retry the flaky step")
@@ -120,8 +122,72 @@ test_classify_protects_captain_only_classes() {
   out=$("$SLA" classify "flip the dev flag? Recommend: flip it")
   assert_contains "$out" "class=ambiguous" "a dev flag flip was not an auto-resolving hold: $out"
   out=$("$SLA" classify "the prod contact list is ready; Recommend: email every contact")
-  assert_contains "$out" "class=captain-only:uncertain-irreversible" "an uncertain irreversible default auto-resolved: $out"
+  assert_contains "$out" "class=returned" "an irreversible recommendation was applied for the owner: $out"
+  out=$("$SLA" classify "adc1235-captain-pause: work held until the captain lifts it")
+  assert_contains "$out" "class=captain-only:captain" "a captain-paused hold was not the captain's: $out"
+  out=$("$SLA" classify "see the recommendations in the report, then ship")
+  assert_contains "$out" "class=returned" "a mid-word recommendation fragment was taken as a default: $out"
   pass "classify keeps only critical holds for the captain"
+}
+
+# The six holds a dry run on 2026-11-19 wrongly auto-resolved (synthetic text
+# in their shape). Each MUST be captain-only, in classify and in a live sweep.
+SIX_KEYS='v12008-shared-number-disclosure v10-11910-security-blocker adc1490-q5 ci-adc-gh-token-annotation nic3306-billing-modifiers-25-95 pr-flow-billing-bases m273-demographics-live-proof'
+six_status() {  # <epoch>
+  printf '%s\n' \
+    "needs-decision [key=v12008-shared-number-disclosure] [at=$1]: the captain path on a shared number shows an activity-picked record to the wrong caller. Recommend: merge the guard" \
+    "blocked [key=v10-11910-security-blocker] [at=$1]: PR 11910 has carried an unanswered blocker for 14 hours. Recommend: merge once fixed" \
+    "needs-decision [key=adc1490-q5] [at=$1]: re-mint, or in-place add with a fresh one? Recommend: in-place add" \
+    "needs-decision [key=ci-adc-gh-token-annotation] [at=$1]: annotate the step output? Recommend: add the annotation" \
+    "needs-decision [key=nic3306-billing-modifiers-25-95] [at=$1]: apply 25 and 95 on these lines? Recommend: merge" \
+    "blocked [key=pr-flow-billing-bases] [at=$1]: two PRs sit on stale bases. Recommend: rebase both" \
+    "blocked [key=m273-demographics-live-proof] [at=$1]: the proof run is blocked by the rig. Recommend: retry tomorrow"
+}
+
+test_six_missed_holds_are_captain_only() {
+  local line key out open h
+  while IFS= read -r line; do
+    key=${line#*\[key=}; key=${key%%\]*}
+    out=$("$SLA" classify "$key: ${line#*]: }")
+    assert_contains "$out" "class=captain-only:" "$key auto-resolved: $out"
+  done < <(six_status "$OLD")
+  h=$(make_home six)
+  mkdir -p "$TMP_ROOT/bin"; make_fake_gh "$TMP_ROOT/bin"; make_fake_send "$TMP_ROOT/bin"
+  six_status "$OLD" > "$h/state/w.status"
+  out=$(run_sla "$h" sweep --live) || fail "sweep failed: $out"
+  open=$(open_keys "$h/state/w.status")
+  for key in $SIX_KEYS; do
+    case " $open " in *" $key "*) ;; *) fail "live sweep resolved critical hold $key" ;; esac
+    assert_contains "$(cat "$h/state/hold-sla/digest-latest.md")" "$key" "$key is missing from the digest"
+  done
+  pass "the six previously missed holds stay captain-only and reach the digest"
+}
+
+test_no_recommendation_is_returned_never_applied() {
+  local h out
+  h=$(make_home norec)
+  mkdir -p "$TMP_ROOT/bin"; make_fake_gh "$TMP_ROOT/bin"; make_fake_send "$TMP_ROOT/bin"; : > "$TMP_ROOT/send.log"
+  printf 'kind=secondmate\nhome=%s\n' "$h" > "$h/state/w.meta"
+  printf 'needs-decision [key=what-next] [at=%s]: what should the lane do next?\n' "$OLD" > "$h/state/w.status"
+  out=$(run_sla "$h" sweep --live) || fail "sweep failed: $out"
+  grep -q 'expire returned .*key=what-next' "$h/state/hold-sla/hold-sla.log" || fail "the hold was not returned"
+  grep -q 'what-next.*applied' "$h/state/hold-sla/hold-sla.log" && fail "a hold with no recommendation was logged as applied"
+  grep -q 'resolved \[key=what-next\].*sla-returned' "$h/state/w.status" || fail "the hold was not closed as sla-returned"
+  grep -q 'w --fire-and-forget .*what-next.*decide this yourself' "$TMP_ROOT/send.log" || fail "the owner was not told to decide"
+  pass "a hold with no recommendation is returned to its owner, never applied"
+}
+
+test_scratch_dir_dry_run_leaves_state_alone() {
+  local h out
+  h=$(make_home scratch)
+  six_status "$OLD" > "$h/state/w.status"
+  printf 'needs-decision [key=ux-label] [at=%s]: which label? Recommend: keep Save\n' "$OLD" >> "$h/state/w.status"
+  out=$(FM_HOLD_SLA_DIR="$TMP_ROOT/scratch-sla" run_sla "$h" sweep --live) || fail "scratch sweep failed: $out"
+  [ ! -e "$h/state/hold-sla" ] || fail "a scratch-dir sweep wrote state/hold-sla"
+  [ -f "$TMP_ROOT/scratch-sla/digest-latest.md" ] || fail "the scratch dir has no digest"
+  grep -q 'DRY expire quick .*key=ux-label' "$TMP_ROOT/scratch-sla/hold-sla.log" || fail "a scratch-dir sweep ran live"
+  grep -q 'resolved \[key=ux-label\]' "$h/state/w.status" && fail "a scratch-dir sweep closed a hold"
+  pass "FM_HOLD_SLA_DIR dry runs write only to the scratch dir and never act"
 }
 
 test_report_is_read_only() {
@@ -133,9 +199,9 @@ test_report_is_read_only() {
   [ "$before" = "$after" ] || fail "report changed a status log"
   [ ! -e "$MAIN/state/hold-sla" ] || fail "report wrote SLA state"
   out=$(cat "$TMP_ROOT/report.md")
-  assert_contains "$out" "open holds: 14" "report headline count is wrong"
-  assert_contains "$out" "captain-only:prod-write" "report did not list the production hold as critical"
-  assert_contains "$out" "returned to the raising agent (no recommendation, not critical): 1" "report returned count is wrong"
+  assert_contains "$out" "open holds: 15" "report headline count is wrong"
+  assert_contains "$out" "captain-only:prod-data" "report did not list the production hold as critical"
+  assert_contains "$out" "returned to the raising agent (no recommendation, not critical): 2" "report returned count is wrong"
   assert_contains "$out" "truly captain-only: 4" "report captain-only count is wrong"
   assert_contains "$out" "resolve IMMEDIATELY (duplicate, moot, green+CLEAN PR, quick call, captain-parked): 7" "report immediate count is wrong"
   assert_contains "$out" "| moot |" "report did not list the moot mirror"
@@ -165,10 +231,10 @@ test_live_sweep_resolves_routine_and_escalates_the_rest() {
   setup_world
   out=$(run_sla "$MAIN" sweep --live) || fail "live sweep failed: $out"
   open=$(open_keys "$MAIN/state/mate.status")
-  for k in ux-copy captain-hold-gone-q-1 captain-hold-wording-q-1 dup-a dup-b landed fresh-ask no-rec prod-mention; do
+  for k in ux-copy captain-hold-gone-q-1 captain-hold-wording-q-1 dup-a dup-b landed fresh-ask no-rec prod-mention soft-irrev; do
     case " $open " in *" $k "*) fail "non-critical hold $k stayed open: $open" ;; esac
   done
-  for k in prod-flip baa-call fresh-amb soft-irrev crit-norec; do
+  for k in prod-flip baa-call fresh-amb crit-norec pr-phi; do
     case " $open " in *" $k "*) ;; *) fail "hold $k should stay open: $open" ;; esac
   done
   show=$(tasks_in "$MATE" show wording-q --full)
@@ -271,6 +337,9 @@ test_hold_requires_a_critical_class_when_enforced() {
 
 set -e
 test_classify_protects_captain_only_classes
+test_six_missed_holds_are_captain_only
+test_no_recommendation_is_returned_never_applied
+test_scratch_dir_dry_run_leaves_state_alone
 test_report_is_read_only
 rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
 test_dry_run_changes_nothing

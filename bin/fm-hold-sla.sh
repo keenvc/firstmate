@@ -27,19 +27,16 @@
 #                   ("decide this yourself on your best recommendation ...").
 #   ambiguous (everything else): FM_HOLD_SLA_HOURS (default 2h), then resolved
 #     to its recorded recommendation. A held WORK item is released.
-#   Matching is on the hold's own stated action (a write/rotate/grant against
-#   production data or Key Vault, "PHI exposed", "secret leaked", "purchase",
-#   "$"), never on a PR's title, labels, or paths. A hold that only mentions a
-#   sensitive subject (FM_HOLD_SLA_SOFT) takes the auto path only when its
-#   default is reversible (FM_HOLD_SLA_REVERSIBLE: merge, queue, close, label,
-#   retry, revert, ...); otherwise it is captain-only (uncertain-irreversible).
+#   Critical detection reads the hold's FULL text (key, reason, recommendation,
+#   and a linked PR's title, body, and labels) and favors recall: any PHI,
+#   security, credential, money/billing, production-data, legal/consent, or
+#   incident term makes it captain-only. An ambiguous hold auto-resolves
+#   only when its recommendation is reversible (FM_HOLD_SLA_REVERSIBLE: merge,
+#   queue, close, label, retry, revert, ...); an irreversible one is returned.
 #   A captain-only hold with no recommendation asks its owner for one.
 #   critical (never auto-resolved): an explicit [class=<c>] tag
-#     (fm-captain-hold.sh hold --class) or a match on the FM_HOLD_SLA_CRIT_*
-#     patterns: prod-write (production data, production secrets, Key Vault),
-#     exposure (PHI / credential / security exposure findings), spend (spending
-#     money, paid plans), destructive (irreversible data operations), incident
-#     (an open incident), legal (legal / compliance / BAA).
+#     (fm-captain-hold.sh hold --class) or any FM_HOLD_SLA_CRIT_* term: phi,
+#     security, credential, money, prod-data, legal, incident.
 #     These stay held and go into ONE daily digest, each with its recommendation
 #     and the one-word answer command.
 #
@@ -77,7 +74,7 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 export FM_HOME
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
-SLA_DIR="$STATE/hold-sla"
+SLA_DIR="${FM_HOLD_SLA_DIR:-$STATE/hold-sla}"
 
 die() { printf 'fm-hold-sla: %s\n' "$*" >&2; exit 2; }
 usage() { sed -n '2,/^set -u/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -109,21 +106,25 @@ NOTIFY_OWNER=${FM_HOLD_SLA_NOTIFY_OWNER:-1}
 NOW=${FM_HOLD_SLA_NOW:-$(date +%s)}
 TODAY=$(date -u -d "@$NOW" +%F 2>/dev/null || date -u -r "$NOW" +%F)
 
-# Critical patterns (extended regex, lower-cased text, word boundaries). Each
-# is overridable; the class name is what the digest prints.
-P_PROD_WRITE=${FM_HOLD_SLA_CRIT_PROD_WRITE:-}; [ -n "$P_PROD_WRITE" ] || P_PROD_WRITE='(write|writes|writing|insert|inserting|update|updating|upsert|delete|deleting|remove|rotate|rotating|grant|granting|revoke|seed|backfill|patch|modify|alter|set)[a-z0-9 ,/-]{0,40}(prod|production)[a-z -]{0,12}(data|db|database|rows?|records?|tables?|secrets?|vault|key ?vault)|(prod|production)[a-z -]{0,12}(data|db|database|rows?|records?|tables?|secrets?)[a-z0-9 ,/-]{0,30}(write|writes|writing|insert|inserting|update|updating|upsert|delete|deleting|remove|rotate|rotating|grant|granting|revoke|seed|backfill|patch|modify|alter|set)|key ?vault[a-z0-9 ,/-]{0,30}(write|set|rotate|grant|update|add|delete|put)|(write|set|rotate|grant|update|add|delete|put)[a-z0-9 ,/-]{0,40}key ?vault'
-P_EXPOSURE=${FM_HOLD_SLA_CRIT_EXPOSURE:-}; [ -n "$P_EXPOSURE" ] || P_EXPOSURE='(phi|pii|patient data|patient records|credentials?|secrets?|tokens?|api keys?|passwords?)[a-z ,-]{0,20}(exposed|exposure|leak|leaked|leaking|exfiltrated|compromised|public)|(exposed|leaked|leaking|exposure of)[a-z ,-]{0,20}(phi|pii|patient|credentials?|secrets?|tokens?|keys?|passwords?)|breach|cross-(tenant|clinic) (phi|data|access|leak|exposure)|security (finding|vulnerability|hole)|vulnerability|cve-[0-9]'
-P_SPEND=${FM_HOLD_SLA_CRIT_SPEND:-}; [ -n "$P_SPEND" ] || P_SPEND='purchase|buy|pay for|paid plan|upgrade (the )?(plan|tier|subscription|seat)|downgrade (the )?(plan|tier)|subscription|top-?up|ad spend|spend|raise (the )?budget|budget (increase|change)|credit card|invoice|\$[0-9]|[0-9]+ ?usd'
-P_DESTRUCTIVE=${FM_HOLD_SLA_CRIT_DESTRUCTIVE:-}; [ -n "$P_DESTRUCTIVE" ] || P_DESTRUCTIVE='(delete|drop|truncate|purge|wipe|destroy|hard-delete|overwrite)[a-z0-9 ,-]{0,30}(data|rows?|records?|tables?|database|db|bucket|backups?|volume|disk|users?|accounts?|history|contacts?)|irreversible|cannot be undone|force-push (to )?main|backfill'
-P_INCIDENT=${FM_HOLD_SLA_CRIT_INCIDENT:-}; [ -n "$P_INCIDENT" ] || P_INCIDENT='incident|outage|sev[0-9]|p0'
-P_LEGAL=${FM_HOLD_SLA_CRIT_LEGAL:-}; [ -n "$P_LEGAL" ] || P_LEGAL='legal|compliance|baa|counsel|lawyer|terms of service|gdpr|hipaa|contract|licen[cs]e terms|copyright|regulator|regulatory'
+# Critical terms, read over the hold's FULL text (key, reason, recommendation,
+# and for a PR its title, body, and labels). Recall over precision: a false
+# captain-only costs minutes, a false auto-resolve can be a HIPAA incident.
+# Each list is overridable through its FM_HOLD_SLA_CRIT_* variable.
+P_PHI=${FM_HOLD_SLA_CRIT_PHI:-}; [ -n "$P_PHI" ] || P_PHI='phi|pii|hipaa|patients?|charts?|demographics?|disclos[a-z]*|expos[a-z]*|leak[a-z]*|breach[a-z]*|mrn|dob|date of birth|medical records?|health records?|ehr|emr'
+P_SECURITY=${FM_HOLD_SLA_CRIT_SECURITY:-}; [ -n "$P_SECURITY" ] || P_SECURITY='security|insecure|vuln[a-z]*|cve|exploit[a-z]*|xss|csrf|ssrf|injection|rls|tenant isolation|cross-tenant|cross-clinic|authn|authz|authenticat[a-z]*|authoriz[a-z]*|oauth|sso|login|permissions?|access control'
+P_CREDENTIAL=${FM_HOLD_SLA_CRIT_CREDENTIAL:-}; [ -n "$P_CREDENTIAL" ] || P_CREDENTIAL='credentials?|tokens?|totp|mfa|2fa|otp|secrets?|vault|keyvault|key vault|rotat[a-z]*|re-?mint[a-z]*|passwords?|passkeys?|api[ -]?keys?|private keys?|ssh keys?|pat|certs?|certificates?'
+P_MONEY=${FM_HOLD_SLA_CRIT_MONEY:-}; [ -n "$P_MONEY" ] || P_MONEY='billing|billed|bill|bills|claims?|payments?|pay|paid|payers?|payors?|modifiers?|charges?|charged|spend[a-z]*|purchas[a-z]*|buy|pricing|prices?|subscriptions?|plan (upgrade|change|tier)|paid plan|invoices?|refunds?|stripe|usdc|usd|[$][0-9]|costs?|budget[a-z]*|era|eob|cpt|icd|superbill|copays?|insurance|insurer'
+P_PROD_DATA=${FM_HOLD_SLA_CRIT_PROD_DATA:-}; [ -n "$P_PROD_DATA" ] || P_PROD_DATA='backfill[a-z]*|prod(uction)? (data|db|database|rows?|records?|tables?)|live (data|db|database|rows?|records?)|delet[a-z]*|drop|dropping|truncat[a-z]*|purg[a-z]*|wipe|wiping|destroy[a-z]*|irreversible|data migration|migrat[a-z]* (on|against|to|in|of) (prod|production|live)'
+P_LEGAL=${FM_HOLD_SLA_CRIT_LEGAL:-}; [ -n "$P_LEGAL" ] || P_LEGAL='legal|baa|compliance|compliant|consent|counsel|lawyer|attorney|contracts?|gdpr|licen[cs][a-z]*|copyright|regulat[a-z]*|terms of service|privacy policy|dpa'
+P_INCIDENT=${FM_HOLD_SLA_CRIT_INCIDENT:-}; [ -n "$P_INCIDENT" ] || P_INCIDENT='incident|outage|sev[0-9]|p0|postmortem'
+P_CAPTAIN=${FM_HOLD_SLA_CRIT_CAPTAIN:-}; [ -n "$P_CAPTAIN" ] || P_CAPTAIN='captain[- ](pause|paused|freeze|frozen|authored|owned)|paused by (the )?captain|captain paused|captain froze|on the captain.?s word|captain.?s own'
+CRIT_CLASSES='phi security credential money prod-data legal incident captain'
+# Explicit tags fm-captain-hold.sh hold --class writes; each names a critical class.
+CRIT_TAGS='prod-write exposure spend destructive incident legal phi security credential money prod-data'
 P_QUICK=${FM_HOLD_SLA_QUICK:-}; [ -n "$P_QUICK" ] || P_QUICK='option [a-d]|options|either|equivalent|naming|name|rename|wording|copy|label|labels|design|layout|ordering|order|numbering|renumber|number|requeue|dequeue|queue|rebase|sequence|first|priority|prioriti[sz]e'
 P_PARKED=${FM_HOLD_SLA_PARKED:-}; [ -n "$P_PARKED" ] || P_PARKED='[Dd]eferred under captain-approved triage|[Kk]eep paused|parked list|[Pp]ark until'
 PARK_DAYS=${FM_HOLD_SLA_PARK_DAYS:-30}
-CRIT_CLASSES='prod-write exposure spend destructive incident legal'
-# A hold that mentions a sensitive subject but states no critical action is
-# uncertain: it takes the auto path only when its default is reversible.
-P_SOFT=${FM_HOLD_SLA_SOFT:-}; [ -n "$P_SOFT" ] || P_SOFT='prod|production|secrets?|vault|credentials?|phi|pii|patients?|delete|drop|billing|payments?|security|tokens?|passwords?|money'
+# A non-critical hold auto-resolves only when its default is reversible.
 P_REVERSIBLE=${FM_HOLD_SLA_REVERSIBLE:-}; [ -n "$P_REVERSIBLE" ] || P_REVERSIBLE='merge|deploy|redeploy|ship|release|rollback|roll back|flip|toggle|enable|disable|queue|requeue|dequeue|close|label|unlabel|rebase|retry|rerun|revert|wait|defer|park|keep|leave|skip|draft|reopen|review|land|hold off|no action|do nothing|leave it'
 RETURNED='decide this yourself on your best recommendation and record it; a human is required only for the critical classes (production data/secret writes, PHI/credential/security exposure, spend, destructive data operations, open incidents, legal/compliance/BAA)'
 
@@ -132,12 +133,13 @@ RETURNED='decide this yourself on your best recommendation and record it; a huma
 protected_class() {  # <text>
   local t c pat tag
   tag=$(printf '%s' "$1" | grep -Eo '\[class=[a-z-]+\]' | head -1 | sed 's/^\[class=//; s/\]$//')
-  case " $CRIT_CLASSES " in *" $tag "*) [ -z "$tag" ] || { printf '%s\n' "$tag"; return 0; } ;; esac
+  case " $CRIT_TAGS " in *" $tag "*) [ -z "$tag" ] || { printf '%s\n' "$tag"; return 0; } ;; esac
   t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
   for c in $CRIT_CLASSES; do
     case "$c" in
-      prod-write) pat=$P_PROD_WRITE ;; exposure) pat=$P_EXPOSURE ;; spend) pat=$P_SPEND ;;
-      destructive) pat=$P_DESTRUCTIVE ;; incident) pat=$P_INCIDENT ;; legal) pat=$P_LEGAL ;;
+      phi) pat=$P_PHI ;; security) pat=$P_SECURITY ;; credential) pat=$P_CREDENTIAL ;;
+      money) pat=$P_MONEY ;; prod-data) pat=$P_PROD_DATA ;; legal) pat=$P_LEGAL ;; incident) pat=$P_INCIDENT ;;
+      captain) pat=$P_CAPTAIN ;;
     esac
     if printf '%s' "$t" | grep -Eq "(^|[^a-z0-9])($pat)([^a-z0-9]|$)"; then
       printf '%s\n' "$c"; return 0
@@ -157,9 +159,10 @@ is_quick() {  # <text>
 # The agent's own recommendation, if it wrote one.
 extract_default() {  # <text>
   printf '%s' "$1" | sed -nE '
-    s/.*[Rr]ecommend(ation|ed|s)?[[:space:]]*[:=-]?[[:space:]]*([^.;]{3,160}).*/\2/p; t
-    s/.*([Ss]uggest(ion|ed)?|[Mm]y pick|[Pp]ropos(e|ed|al))[[:space:]]*[:=-][[:space:]]*([^.;]{3,160}).*/\4/p; t
-    s/.*[Dd]efault( action)?[[:space:]]*[:=-][[:space:]]*([^.;]{3,160}).*/\2/p' | head -1
+    s/.*[Rr]ecommend(ation|ed)?[[:space:]]*[:=][[:space:]]*([A-Za-z][^.;]{2,159}).*/\2/p; t
+    s/.*([Ii] recommend|[Rr]ecommendation is|[Mm]y recommendation is)[[:space:]]+([A-Za-z][^.;]{2,159}).*/\2/p; t
+    s/.*([Ss]uggest(ion|ed)?|[Mm]y pick|[Pp]roposal|[Pp]roposed)[[:space:]]*[:=][[:space:]]*([A-Za-z][^.;]{2,159}).*/\3/p; t
+    s/.*[Dd]efault( action)?[[:space:]]*[:=][[:space:]]*([A-Za-z][^.;]{2,159}).*/\2/p' | head -1
 }
 
 extract_pr() {  # <text> -> "owner/repo N" or nothing
@@ -269,7 +272,7 @@ owner_home() {  # <owner>
 pr_facts() {  # <repo> <n>
   local json head
   PR_STATE='' PR_GREEN=0 PR_CLEAN=0 PR_PROTECT='' PR_WHY=''
-  json=$("$GH" pr view "$2" -R "$1" --json state,isDraft,mergeable,headRefOid,title,labels,files,statusCheckRollup,comments 2>/dev/null) \
+  json=$("$GH" pr view "$2" -R "$1" --json state,isDraft,mergeable,headRefOid,title,body,labels,files,statusCheckRollup,comments 2>/dev/null) \
     || { PR_WHY='PR unreadable'; return 1; }
   PR_STATE=$(printf '%s' "$json" | jq -r '.state')
   head=$(printf '%s' "$json" | jq -r '.headRefOid // ""')
@@ -287,8 +290,8 @@ pr_facts() {  # <repo> <n>
         | last // "" | test("VERDICT\\W*:?\\W*(CLEAN|PASS|APPROVE)"; "i")' >/dev/null 2>&1; then
     PR_CLEAN=1
   fi
-  # A PR is never critical for what its title, labels, or paths mention; only
-  # the hold's own stated action decides (classify_row).
+  # The PR's own title, body, and labels are part of the hold's full text.
+  PR_PROTECT=$(protected_class "$(printf '%s' "$json" | jq -r '(.title // "") + " " + (.body // "") + " " + ([.labels[]?.name] | join(" "))')")
   [ "$PR_GREEN" = 1 ] || PR_WHY="CI not green, draft, or conflicting"
   [ "$PR_CLEAN" = 1 ] || PR_WHY="${PR_WHY:+$PR_WHY; }no CLEAN verdict on head ${head:0:8}"
   return 0
@@ -302,7 +305,7 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
   ov="$SLA_DIR/overrides/$(safe_name "$key").set"
   prot=$(protected_class "$text")
   if [ "$dup" = 1 ]; then CLS=duplicate
-  elif [ "$source" = task ] && printf '%s' "$text" | grep -Eiq "$P_PARKED"; then
+  elif [ -z "$prot" ] && [ "$source" = task ] && printf '%s' "$text" | grep -Eiq "$P_PARKED"; then
     # Already answered: the captain parked it. It is not an open question, only
     # an undated hold; the default re-dates it so it leaves Captain's Call.
     CLS=parked DEFAULT="re-hold with --until $(date -u -d "@$((NOW + PARK_DAYS * 86400))" +%F 2>/dev/null) (captain already parked it)"
@@ -311,7 +314,11 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
       ts=$(mirror_task_state "$owner" "$task")
       case "$ts" in
         unknown|'') CLS="wait:unverifiable-mirror" ;;
-        absent) CLS=moot MOOT="mirrored task $task is absent from $owner's backlog" ;;
+        absent)
+          # Absence is weaker evidence than a recorded close: a critical mirror
+          # stays with the captain rather than closing on a missing row.
+          if [ -n "$prot" ]; then CLS="captain-only:$prot"
+          else CLS=moot MOOT="mirrored task $task is absent from $owner's backlog"; fi ;;
         done\ *) CLS=moot MOOT="mirrored task $task is closed in $owner's home" ;;
         *\ no\ *) CLS=moot MOOT="mirrored task $task is no longer held in $owner's home" ;;
         *) CLS=''; kindf=${ts##* } ;;
@@ -320,10 +327,6 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
       CLS=''; kindf=$(mirror_kind_main "$key")
     else
       CLS=''
-    fi
-    if [ -z "$CLS" ] && [ -z "$prot" ] && matches "$P_SOFT" "$text" \
-      && [ -n "$DEFAULT" ] && ! matches "$P_REVERSIBLE" "$DEFAULT"; then
-      prot=uncertain-irreversible
     fi
     if [ -z "$CLS" ]; then
       if [ -n "$prot" ]; then CLS="captain-only:$prot"
@@ -336,6 +339,11 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
         # proceeds; any other hold with no recommendation goes back to its raiser.
         if [ "$RELEASE" = 1 ]; then DEFAULT='hold released: proceed with the work'
         else CLS=returned DEFAULT=$RETURNED; fi
+      elif [ "$CLS" = ambiguous ] && [ "$RELEASE" = 0 ] \
+        && ! matches "$P_REVERSIBLE" "$DEFAULT"; then
+        # The recommendation is not reversible, so firstmate does not apply it;
+        # the raiser decides (it is still not a captain call).
+        CLS=returned DEFAULT="$RETURNED (your recommendation \"$DEFAULT\" is not reversible, so it was not applied for you)"
       fi
     fi
   fi
@@ -435,13 +443,13 @@ evaluate() {  # <mode: sweep|report>
       repo=${rid#pr:}; num=${repo##*#}; repo=${repo%#*}
       if pr_facts "$repo" "$num"; then
         pr="$repo#$num"
-        if [ "$PR_STATE" = MERGED ] || [ "$PR_STATE" = CLOSED ]; then
+        if [ -n "$PR_PROTECT" ]; then CLS="captain-only:$PR_PROTECT"
+        elif [ "$PR_STATE" = MERGED ] || [ "$PR_STATE" = CLOSED ]; then
           CLS=moot; MOOT="PR $pr is $PR_STATE"
-        elif [ -n "$PR_PROTECT" ]; then CLS="captain-only:$PR_PROTECT"
         else DEFAULT="merge once CI is green and the head verdict is CLEAN (now: green=$PR_GREEN clean=$PR_CLEAN)"
         fi
       else
-        DEFAULT="merge once CI is green and the head verdict is CLEAN (PR unreadable now)"
+        CLS="wait:pr-unreadable"
       fi
     fi
     deadline=$((raised + HOURS * 3600))
@@ -571,13 +579,15 @@ case "$cmd" in
   scan) scan ;;
   classify)
     c=$(protected_class "${1:-}"); d=$(extract_default "${1:-}")
-    if [ -z "$c" ] && matches "$P_SOFT" "${1:-}" && [ -n "$d" ] && ! matches "$P_REVERSIBLE" "$d"; then c=uncertain-irreversible; fi
-    if [ -n "$c" ]; then c="captain-only:$c"; elif [ -z "$d" ]; then c=returned; d=$RETURNED; elif is_quick "${1:-}"; then c=quick; else c=ambiguous; fi
+    if [ -n "$c" ]; then c="captain-only:$c"; elif [ -z "$d" ]; then c=returned; d=$RETURNED
+    elif is_quick "${1:-}"; then c=quick; elif ! matches "$P_REVERSIBLE" "$d"; then c=returned; d=$RETURNED; else c=ambiguous; fi
     printf 'class=%s\ndefault=%s\n' "$c" "$d" ;;
   sweep)
     [ "${1:-}" = --live ] && LIVE=1
-    mkdir -p "$STATE" || die "cannot create $STATE"
-    exec 8>"$STATE/.hold-sla.lock" || die "cannot open the sweep lock"
+    # A scratch FM_HOLD_SLA_DIR is for inspecting a dry run; it never acts.
+    [ -z "${FM_HOLD_SLA_DIR:-}" ] || LIVE=0
+    mkdir -p "$SLA_DIR" || die "cannot create $SLA_DIR"
+    exec 8>"$SLA_DIR/.sweep.lock" || die "cannot open the sweep lock"
     flock -n 8 || { echo "fm-hold-sla: another sweep is running"; exit 0; }
     evaluate sweep < <(scan | dedupe)
     write_digest ;;
