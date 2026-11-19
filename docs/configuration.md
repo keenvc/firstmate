@@ -110,6 +110,9 @@ Each effective `FM_HOME` contains private operational directories.
 - Per-task steering-inbox records under `state/<id>.inbox/` (`bin/fm-task-inbox-lib.sh`).
 - Parent-owned secondmate pending-reply records under `state/pending-replies/` (`bin/fm-pending-reply-lib.sh`).
 - Dated declared holds under `state/declared-holds/` and the per-check wake log `state/check-wakes.log` (`bin/fm-declared-hold.sh`).
+- Captain-hold SLA records, overrides, log, and daily digests under `state/hold-sla/` (`bin/fm-hold-sla.sh`; optional `config/hold-sla.env` sets `FM_HOLD_SLA_*`, dry run unless `FM_HOLD_SLA_LIVE=1`).
+- `config/hold-require-class`: when present, `bin/fm-captain-hold.sh hold` refuses a hold without a critical `--class` and reports it as a decision for the raiser.
+- The cron second-mate relaunch log `state/autorelaunch.log`, its per-window alert markers, and the `state/.autorelaunch-off` switch (`bin/fm-secondmate-autorelaunch.sh`).
 
 `config/` holds local gitignored operating choices, including explicit extension bindings under `config/extensions.d/`.
 

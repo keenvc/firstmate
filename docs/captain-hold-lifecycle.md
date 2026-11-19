@@ -43,6 +43,7 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 | `reconcile-requests` | Internal intake that records a reconcile request from a board selection. | [Reconcile](#reconcile-re-check-reality-never-a-blind-close) |
 | `reconcile close`, `reconcile note`, `reconcile list` | Retire or list pending reconcile requests. | [Verifying and retiring a request](#verifying-and-retiring-a-request) |
 | `diverged` | Read-only report of a call whose two records disagree. | [Record divergence](#record-divergence) |
+| `sla-close` | Resolves a non-critical hold to the default recorded when it was raised. | [Hold SLA](#hold-sla-sla-close) |
 
 ### Creating a hold (`hold`)
 
@@ -328,6 +329,25 @@ A successful normal answer also retires any pending request, because an answered
 Every retirement is checked.
 If request removal fails after an answer, close, or note is already durable, the durable outcome stands, but the command fails and leaves the pending request visible for retry.
 No path here closes a captain call without either the captain's words through `answer` or the evidence through `reconcile close`.
+
+## Hold SLA (`sla-close`)
+
+Owner policy (2026-11-19): the captain is asked only when it is critical.
+`bin/fm-hold-sla.sh` resolves every other hold to the recommendation its raiser recorded: duplicates, moot holds, green PRs with a CLEAN head verdict, and quick calls (equivalent options, naming, ordering, requeue) at once, and anything else ambiguous after a short deadline (2h by default).
+Its header owns the classes, the patterns, and the dry-run default.
+
+The critical classes are `prod-write` (production data, production secrets, Key Vault), `exposure` (PHI, credential, or security exposure findings), `spend` (spending money, paid plans), `destructive` (irreversible data operations), `incident`, and `legal` (legal, compliance, BAA).
+`hold --class <class>` records one as a leading `[class=<class>]` token on the reason, so it reaches the parent mirror too.
+When `config/hold-require-class` exists, a hold with no critical class is refused with exit 3 and a `converted:` line: the raiser decides it and records the decision itself.
+A dated re-hold (`--until`) is the captain's own deferral and is not refused.
+Critical holds stay held and appear in one daily digest with their recommendation and the command that answers each.
+
+`sla-close <task-id> --evidence-file <path> [--release]` is the backlog outcome.
+It writes a resolution record with mode `sla-default` under an `SLA default applied:` label, so the record never reads as the captain's words.
+Without `--release` it closes a question row (kind `captain`); with `--release` it lifts the hold on a held work item so the work proceeds.
+It refuses to replay over a record of any other mode.
+
+Tests: `tests/fm-hold-sla.test.sh`.
 
 ## Card hygiene: a landed subject is not a live call
 
