@@ -140,6 +140,41 @@ EOF
   pass "push guard: the repository's own pre-push hook runs after the guard passes and still blocks"
 }
 
+test_empty_branch_at_base_head_is_refused() {
+  local second
+  fixture uncommitted fm/ backup
+  # The fixture's commit is the worktree branch's own, so start over from a
+  # branch that is still exactly at main's head: the state every worker is in
+  # between `git checkout -b` and its first real commit.
+  git -C "$FX_WT" checkout -q -b "$FX_BRANCH-empty" main
+  assert_equals "$(git -C "$FX_WT" rev-parse main)" "$(git -C "$FX_WT" rev-parse HEAD)" \
+    "the fixture's empty branch is not at main's head, so this case proves nothing"
+  PUSH_OUT=$(with_hooks "$FX_HOOKS" git -C "$FX_WT" push backup HEAD:refs/heads/backup/empty 2>&1)
+  PUSH_RC=$?
+  refused "a branch with no commit past main pushed to the backup remote" \
+    "no commit of its own" "$FX_BACKUP" refs/heads/backup/empty
+  # A branch pushed by its own name is refused the same way, whatever remote it
+  # goes to; git spells that form `refs/heads/<name>` on the hook's stdin.
+  second="$TMP_ROOT/uncommitted/other.git"
+  git init -q --bare "$second"
+  git -C "$FX_WT" rev-parse --verify --quiet refs/heads/main >/dev/null || fail "the fixture has no main"
+  git -C "$FX_WT" checkout -q -B "$FX_BRANCH-empty" main
+  PUSH_OUT=$(with_hooks "$FX_HOOKS" git -C "$FX_WT" push "file://$second" "HEAD:refs/heads/at-main" 2>&1)
+  PUSH_RC=$?
+  refused "an empty branch pushed to another remote" "no commit of its own" "$second" refs/heads/at-main
+  PUSH_OUT=$(with_hooks "$FX_HOOKS" git -C "$FX_WT" push "file://$second" "$FX_BRANCH-empty:refs/heads/by-name" 2>&1)
+  PUSH_RC=$?
+  refused "an empty branch pushed by its branch name" "no commit of its own" "$second" refs/heads/by-name
+  # The same branch becomes pushable the moment it carries a real commit.
+  git -C "$FX_WT" commit -q --allow-empty -m 'the first real change'
+  PUSH_OUT=$(with_hooks "$FX_HOOKS" git -C "$FX_WT" push "file://$second" HEAD:refs/heads/at-main 2>&1)
+  PUSH_RC=$?
+  [ "$PUSH_RC" -eq 0 ] || fail "a branch with a commit of its own was still refused: $PUSH_OUT"
+  assert_equals "$(git -C "$FX_WT" rev-parse HEAD)" "$(git -C "$second" rev-parse refs/heads/at-main)" \
+    "the committed branch did not land on the remote"
+  pass "push guard: a branch with no commit past main is refused, and pushes once it has one"
+}
+
 test_unreadable_guard_refuses_everything() {
   local out rc
   out=$(printf 'refs/heads/a 1 refs/heads/a 0\n' | "$GUARD" "$TMP_ROOT/no-such-guard" other https://example.test/x 2>&1)
@@ -152,6 +187,7 @@ test_unreadable_guard_refuses_everything() {
 test_origin_pushes_are_refused
 test_backup_namespace_rules
 test_empty_prefix_still_refuses_the_task_branch
+test_empty_branch_at_base_head_is_refused
 test_repository_pre_push_still_chains
 test_unreadable_guard_refuses_everything
 

@@ -328,8 +328,9 @@ EOF
     guard_file="$hooks_dir/fm-push-guard"
     { cp "$guard_src" "$guard_file" && chmod 400 "$guard_file"; } || return 1
     guard_cmd="$(quote_for_hook "${SELF%/*}/fm-git-push-guard.sh") $(quote_for_hook "$guard_file")"
-    # git passes the refs being pushed on stdin; the guard reads them, so they
-    # are captured once and replayed to the repository's own pre-push hook.
+    # git passes each ref being pushed as "<local-ref> <local-oid> <remote-ref>
+    # <remote-oid>" on stdin; the guard reads the ids to refuse a branch with no
+    # commit of its own, so they are captured once and replayed to it unchanged.
     write_executable "$hooks_dir/pre-push" <<EOF
 #!/usr/bin/env bash
 set -u

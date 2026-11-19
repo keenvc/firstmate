@@ -24,7 +24,10 @@
 #       aliasing origin's URL with or without a trailing `.git`;
 #   (b) any destination ref equal to refs/heads/<task-branch>, or under
 #       refs/heads/<task-prefix> when that prefix is non-empty, on any remote;
-#   (c) on the backup remote, any destination outside refs/heads/<backup-prefix>.
+#   (c) on the backup remote, any destination outside refs/heads/<backup-prefix>;
+#   (d) any branch still at its base branch's commit, because a branch with no
+#       commit of its own would publish the base branch's history under the
+#       task's name and trip a downstream fail-closed scan.
 # An unreadable or malformed guard file refuses every push.
 #
 # ACCEPTED RESIDUAL. `git push --no-verify` skips every hook, a tool that
@@ -81,6 +84,27 @@ write_guard() {  # <guard-file> <repo> <task-branch> <task-prefix> [<backup-remo
   fi
 }
 
+refuse_uncommitted_head() {  # <local-ref> <local-oid> <remote-oid> <backup> <backup-prefix>
+  local local_ref=$1 local_oid=$2 remote_oid=$3 backup=$4 backup_prefix=$5 base
+  # Git's zero object id is a deletion rather than a push of a commit.
+  case "$local_oid" in
+    ''|*[!0]*) ;;
+    *) return 0 ;;
+  esac
+  [ "$local_oid" = "$remote_oid" ] && return 0
+  # Only a branch is checked: a tag or other ref carries no base-branch head to
+  # be identical to. git spells an ordinary branch push `refs/heads/<name>`, but
+  # `push <remote> HEAD:<ref>` - the durable-copy form the brief names - arrives
+  # as the literal local ref `HEAD`, so that counts as the current branch too.
+  case "$local_ref" in refs/heads/*|HEAD) ;; *) return 0 ;; esac
+  for base in main master; do
+    if [ "$(git rev-parse --verify --quiet "refs/heads/$base^{commit}" 2>/dev/null)" = "$local_oid" ]; then
+      refuse "$local_ref is still at the head of $base, so this push carries no commit of its own and would publish the base branch's history as a task branch; make your first real commit, then push${backup:+ (a durable copy at refs/heads/$backup_prefix<task-id> on $backup is refused the same way)}"
+    fi
+  done
+  return 0
+}
+
 guard_push() {  # <guard-file> <remote-name> <remote-url>
   local file=$1 name=$2 url=$3 line key value header
   local task_branch='' task_prefix='' backup='' backup_prefix='' has_branch=0
@@ -125,9 +149,10 @@ guard_push() {  # <guard-file> <remote-name> <remote-url>
     done
   fi
 
-  local remote_ref
-  while read -r _ _ remote_ref _; do
+  local local_ref local_oid remote_ref remote_oid
+  while read -r local_ref local_oid remote_ref remote_oid; do
     [ -n "${remote_ref:-}" ] || continue
+    refuse_uncommitted_head "$local_ref" "$local_oid" "$remote_oid" "$backup" "$backup_prefix"
     if [ "$remote_ref" = "refs/heads/$task_branch" ]; then
       refuse "$remote_ref is your task branch, which is never pushed to any remote on this project${backup:+; push a durable copy to refs/heads/$backup_prefix<task-id> on $backup instead}"
     fi
