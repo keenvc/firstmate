@@ -62,6 +62,7 @@ run_sla() {  # <home> <args...>
   FM_HOME="$h" FM_STATE_OVERRIDE="$h/state" FM_CONFIG_OVERRIDE="$h/config" \
     FM_HOLD_SLA_GH="$TMP_ROOT/bin/gh" FM_HOLD_SLA_SEND="$TMP_ROOT/bin/fm-send" \
     FAKE_GH_LOG="$TMP_ROOT/gh.log" FAKE_SEND_LOG="$TMP_ROOT/send.log" \
+    FM_HOLD_SLA_NOTIFY_MAX_AGE_HOURS="${FM_HOLD_SLA_NOTIFY_MAX_AGE_HOURS:-0}" \
     FM_HOLD_SLA_NOW="$NOW" "$SLA" "$@"
 }
 
@@ -335,6 +336,17 @@ test_hold_requires_a_critical_class_when_enforced() {
   pass "with enforcement on, only a critical class can raise a captain hold"
 }
 
+test_old_holds_close_without_waking_their_owner() {
+  local out
+  setup_world
+  out=$(FM_HOLD_SLA_NOTIFY_MAX_AGE_HOURS=24 run_sla "$MAIN" sweep --live) || fail "live sweep failed: $out"
+  grep -q 'resolved \[key=ux-copy\]' "$MAIN/state/mate.status" || fail "the old quick hold was not closed"
+  grep -q 'resolved \[key=no-rec\].*sla-returned' "$MAIN/state/mate.status" || fail "the old returned hold was not closed"
+  grep -q 'ux-copy\|no-rec\|crit-norec' "$TMP_ROOT/send.log" && fail "a hold older than 24h woke its owner"
+  grep -q 'owner wake skipped for ux-copy (mate): hold is 72h old, over 24h' "$MAIN/state/hold-sla/hold-sla.log" || fail "the skipped wake was not logged"
+  pass "holds older than FM_HOLD_SLA_NOTIFY_MAX_AGE_HOURS close without waking their owner"
+}
+
 set -e
 test_classify_protects_captain_only_classes
 test_six_missed_holds_are_captain_only
@@ -345,6 +357,8 @@ rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
 test_dry_run_changes_nothing
 rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
 test_live_sweep_resolves_routine_and_escalates_the_rest
+rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
+test_old_holds_close_without_waking_their_owner
 rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
 test_overrides_cannot_unprotect
 rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"

@@ -61,7 +61,8 @@
 # hold closes through `fm-captain-hold.sh sla-close`, whose record says
 # "SLA default applied", never "Captain decision" (`--release` for a held work
 # item); the applied default is delivered to its owner fire-and-forget through
-# bin/fm-send.sh; the digest raises one `check` wake per UTC day. Config: optional config/hold-sla.env (KEY=VALUE).
+# bin/fm-send.sh unless the hold is older than FM_HOLD_SLA_NOTIFY_MAX_AGE_HOURS
+# (24; 0 = no cap), which is logged instead; the digest raises one `check` wake per UTC day. Config: optional config/hold-sla.env (KEY=VALUE).
 #
 # State: state/hold-sla/records/<id>.sla (first_seen, deadline, class, default),
 # state/hold-sla/overrides/<key>.set, state/hold-sla/hold-sla.log,
@@ -103,6 +104,10 @@ in_home() {  # <home> <command...>
 MERGE_MODE=${FM_HOLD_SLA_MERGE_MODE:-mergify-queue}
 PR_HOLD_LABELS=${FM_HOLD_SLA_PR_HOLD_LABELS:-captain-hold do-not-auto-ready}
 NOTIFY_OWNER=${FM_HOLD_SLA_NOTIFY_OWNER:-1}
+# A hold older than this many hours gets no owner wake: draining an old backlog
+# would otherwise send one wake per hold per sweep. 0 disables the cap.
+NOTIFY_MAX_AGE_HOURS=${FM_HOLD_SLA_NOTIFY_MAX_AGE_HOURS:-24}
+case "$NOTIFY_MAX_AGE_HOURS" in ''|*[!0-9]*) NOTIFY_MAX_AGE_HOURS=24 ;; esac
 NOW=${FM_HOLD_SLA_NOW:-$(date +%s)}
 TODAY=$(date -u -d "@$NOW" +%F 2>/dev/null || date -u -r "$NOW" +%F)
 
@@ -407,6 +412,13 @@ deliver_text() {  # <owner> <key> <text>
   "$SEND" "$1" --fire-and-forget "$id" "$3" >/dev/null 2>&1
 }
 
+# Reads age, key and owner from the caller (evaluate).
+owner_wake_fresh() {
+  [ "$NOTIFY_MAX_AGE_HOURS" -gt 0 ] && [ "$age" -gt "$NOTIFY_MAX_AGE_HOURS" ] || return 0
+  slog "owner wake skipped for $key ($owner): hold is ${age}h old, over ${NOTIFY_MAX_AGE_HOURS}h"
+  return 1
+}
+
 deliver_default() {  # <owner> <key> <default> <hours>
   [ "$NOTIFY_OWNER" = 1 ] || return 0
   [ "$1" != main ] || return 0
@@ -469,7 +481,7 @@ evaluate() {  # <mode: sweep|report>
       if [ "${CLS%%:*}" = captain-only ] && [ "$expired" = 1 ] && [ -z "$DEFAULT" ]; then
         if [ "$owner" = main ]; then DEFAULT="firstmate: add 'Recommend: <one action>' to this hold"
         else DEFAULT="recommendation requested from $owner"; fi
-        if [ "$LIVE" = 1 ]; then
+        if [ "$LIVE" = 1 ] && [ "$owner" != main ] && owner_wake_fresh; then
           deliver_text "$owner" "$key" "hold-sla: [key=$key] is a critical captain call (${CLS#captain-only:}) with no recommendation. Post one on your status line as 'Recommend: <one action>' so the captain can answer it in one word."
         fi
       fi
@@ -529,6 +541,7 @@ evaluate() {  # <mode: sweep|report>
     fi
     if status_close "$owner" "$key" "$outcome"; then
       slog "closed status key $key in $owner.status"
+      case "$CLS" in quick|ambiguous|returned) [ "$owner" = main ] || owner_wake_fresh || CLS="$CLS:quiet" ;; esac
       case "$CLS" in
         quick|ambiguous) deliver_default "$owner" "$key" "$DEFAULT" "$HOURS" ;;
         returned) deliver_text "$owner" "$key" "hold-sla: [key=$key] was returned to you (sla-returned): $RETURNED." ;;
