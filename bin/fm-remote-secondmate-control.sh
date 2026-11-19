@@ -6,6 +6,7 @@
 #   fm-remote-secondmate-control.sh relaunch <id> <harness> <model|default|-> <effort|default|->
 #   fm-remote-secondmate-control.sh state <id>
 #   fm-remote-secondmate-control.sh route <id>
+#   fm-remote-secondmate-control.sh ack <id> <token>   # prints acked|waiting for a restart beacon
 #   fm-remote-secondmate-control.sh send <id> <message> [fire-and-forget]
 #   fm-remote-secondmate-control.sh send-stdin <id> [fire-and-forget]  # message on stdin
 #   fm-remote-secondmate-control.sh key <id> <key>
@@ -188,6 +189,17 @@ state_value() { # <id>; prints recovery-grade state
     return 0
   fi
   remote_agent_state "$REMOTE_ENDPOINT_BACKEND" "$REMOTE_ENDPOINT_TARGET" "$REMOTE_ENDPOINT_META"
+}
+
+# The restart beacon a mate writes with bin/fm-restart-ack.sh: a file, not a reply.
+cmd_ack() { # <id> <token>
+  local id=$1 token=$2 beacon
+  validate_id "$id"
+  validate_home "$id"
+  case "$token" in *[!0-9a-f]*|'') die "invalid restart token" ;; esac
+  [ "${#token}" -eq 16 ] || die "invalid restart token"
+  beacon="$TARGET_HOME/state/restart-acks/$token"
+  if [ -f "$beacon" ] && [ ! -L "$beacon" ]; then printf 'acked\n'; else printf 'waiting\n'; fi
 }
 
 print_route() { # <id>
@@ -544,6 +556,7 @@ case "${1:-}" in
   relaunch) shift; [ "$#" -eq 4 ] || usage; cmd_relaunch "$@" ;;
   state) shift; [ "$#" -eq 1 ] || usage; validate_id "$1"; validate_home "$1"; state_value "$1" ;;
   route) shift; [ "$#" -eq 1 ] || usage; cmd_route "$1" ;;
+  ack) shift; [ "$#" -eq 2 ] || usage; cmd_ack "$@" ;;
   send) shift; [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;
   send-stdin) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_send_stdin "$@" ;;
   key) shift; [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;
