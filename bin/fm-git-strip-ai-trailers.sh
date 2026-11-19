@@ -187,6 +187,12 @@ write_executable() {
 # core.hooksPath makes that lookup fail, but plain git reads it as "no hooks",
 # so the wrapper runs none; any other failure reruns the lookup to show git's
 # error and refuses.
+# A pre-push with no hook there falls back to a tracked one at a conventional
+# path (.githooks/pre-push, scripts/ci/pre-push) in the worktree. A repository's
+# own installer sets core.hooksPath per clone or links the hook per worktree,
+# and a fleet clone or a fresh task worktree often lacks that step, so crew
+# pushes skipped the checks the PR build then failed on (v10, adclinica). The
+# hook keeps its own opt-out variables; --no-verify still skips it.
 runtime_chain_body() {
   local ours=$1
   cat <<EOF
@@ -220,6 +226,13 @@ if [ "\$orig" = "\$ours" ]; then
 fi
 if [ -x "\$orig/\$name" ]; then
   exec "\$orig/\$name" "\$@"
+fi
+if [ "\$name" = pre-push ] && top=\$(git rev-parse --show-toplevel 2>/dev/null); then
+  for hook in .githooks/pre-push scripts/ci/pre-push; do
+    if [ -x "\$top/\$hook" ]; then
+      exec "\$top/\$hook" "\$@"
+    fi
+  done
 fi
 EOF
 }

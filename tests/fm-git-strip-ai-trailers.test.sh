@@ -352,6 +352,65 @@ test_repository_pre_push_runs_on_every_override_channel() {
   pass "the repository's pre-push runs and can refuse under every hooksPath override channel"
 }
 
+# A tracked pre-push at a conventional path runs when the clone never installed
+# it: no core.hooksPath (a fleet clone that skipped `prepare`), or one naming a
+# per-worktree link a fresh task worktree lacks. It sees git's ref lines, its
+# refusal stops the push, and its success lets the push through.
+test_tracked_pre_push_runs_when_the_clone_never_installed_it() {
+  local rel config repo remote hooks marker
+  for rel in .githooks/pre-push scripts/ci/pre-push; do
+    for config in unset missing-dir; do
+      repo="$TMP_ROOT/tracked-${rel//\//-}-$config"
+      remote="$repo.remote.git"
+      make_repo "$repo"
+      git init -q --bare "$remote"
+      git -C "$repo" remote add origin "$remote"
+      [ "$config" = unset ] || git -C "$repo" config core.hooksPath scripts/ci/hooks
+      marker="$repo.marker"
+      mkdir -p "$repo/${rel%/*}"
+      cat >"$repo/$rel" <<SH
+#!/usr/bin/env bash
+cat >>"$marker"
+[ -z "\${ALLOW_PUSH:-}" ] && exit 1
+exit 0
+SH
+      chmod 755 "$repo/$rel"
+      hooks="$TMP_ROOT/hooks-tracked-${rel//\//-}-$config"
+      "$STRIP" install "$hooks" "$repo" || fail "install should succeed"
+      with_hooks_env "$hooks" git -C "$repo" push -q origin HEAD:refs/heads/refused 2>/dev/null &&
+        fail "push succeeded past the refusing tracked $rel ($config)"
+      grep -q ' refs/heads/refused ' "$marker" 2>/dev/null ||
+        fail "tracked $rel did not run with git's ref lines ($config)"
+      ALLOW_PUSH=1 with_hooks_env "$hooks" git -C "$repo" push -q origin HEAD:refs/heads/allowed ||
+        fail "push refused although tracked $rel passed ($config)"
+      git -C "$remote" rev-parse -q --verify refs/heads/allowed >/dev/null ||
+        fail "the passing push did not reach the remote ($config)"
+    done
+  done
+  pass "a tracked .githooks or scripts/ci pre-push runs, refuses and passes when the clone never installed it"
+}
+
+# The repository's own configured pre-push wins; the tracked fallback is not run too.
+test_configured_pre_push_wins_over_the_tracked_fallback() {
+  local repo remote hooks marker
+  repo="$TMP_ROOT/configured-wins"
+  remote="$repo.remote.git"
+  make_repo "$repo"
+  git init -q --bare "$remote"
+  git -C "$repo" remote add origin "$remote"
+  marker="$repo.marker"
+  write_refusing_pre_push "$repo/.git/hooks/pre-push" "$marker.configured"
+  mkdir -p "$repo/.githooks"
+  write_refusing_pre_push "$repo/.githooks/pre-push" "$marker.tracked"
+  hooks="$TMP_ROOT/hooks-configured-wins"
+  "$STRIP" install "$hooks" "$repo" || fail "install should succeed"
+  with_hooks_env "$hooks" git -C "$repo" push -q origin HEAD:refs/heads/x 2>/dev/null &&
+    fail "push succeeded past the configured refusing pre-push"
+  [ -f "$marker.configured" ] || fail "the configured pre-push did not run"
+  [ ! -e "$marker.tracked" ] || fail "the tracked fallback ran although a configured pre-push exists"
+  pass "a configured repository pre-push wins over the tracked fallback"
+}
+
 test_git_c_override_still_strips_and_chains_commit_hooks() {
   local repo hooks
   repo="$TMP_ROOT/param-commit"
@@ -556,6 +615,8 @@ test_empty_project_hookspath_runs_no_repository_hook
 test_unresolvable_project_hookspath_still_refuses
 test_valueless_project_hookspath_still_refuses
 test_repository_pre_push_runs_on_every_override_channel
+test_tracked_pre_push_runs_when_the_clone_never_installed_it
+test_configured_pre_push_wins_over_the_tracked_fallback
 test_git_c_override_still_strips_and_chains_commit_hooks
 test_repository_hook_keeps_inherited_git_config
 test_env_file_canonicalizes_hooks_dir
