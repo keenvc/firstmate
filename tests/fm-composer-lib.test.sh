@@ -1986,8 +1986,57 @@ test_quoted_exit_picker_text_is_not_a_dialog() {
   pass "picker text quoted above a normal composer is not read as a live picker"
 }
 
+# The picker as newer Claude Code draws it (recorded 2026-11-19 from a second
+# mate's death capture): a ruled panel above the prompt, so the footer is
+# followed by the prompt's own chrome instead of being the last row.
+ruled_exit_picker_screen() {
+  local rule='────────────────────────────────────────'
+  printf '%s\n' \
+    'Background update waiting while this panel is open' \
+    '' \
+    "$rule" \
+    '  Background work is running' \
+    '  The following will stop when you exit:' \
+    '' \
+    '  shell · sleep 300' \
+    '' \
+    '  ❯ 1. Exit and stop tasks' \
+    '    2. Move to background and exit' \
+    '    3. Stay' \
+    '' \
+    '  Enter to confirm · Esc to cancel' \
+    '' \
+    "$rule" \
+    '❯ ' \
+    "$rule" \
+    '  ⏵⏵ bypass permissions on'
+}
+
+test_ruled_exit_picker_above_the_prompt_matches_only_in_full() {
+  local screen out rc rule='────────────────────────────────────────'
+  screen=$(ruled_exit_picker_screen)
+  out=$(fm_composer_blocking_dialog "$screen"); rc=$?
+  [ "$rc" -eq 0 ] || fail "the ruled picker above an empty prompt should match"
+  [ "$out" = 'Claude background-task exit picker' ] || fail "dialog name was '$out'"
+  out=$(fm_composer_blocking_dialog "$(printf '%s\n' "$screen" | sed 's/^❯ $/❯ typed text/')"); rc=$?
+  [ "$rc" -eq 1 ] || fail "a prompt row holding text below the picker must not match"
+  out=$(fm_composer_blocking_dialog "$(printf '%s\n' "$screen" | grep -v '^─' )"); rc=$?
+  [ "$rc" -eq 1 ] || fail "the picker without its rules must not match"
+  out=$(fm_composer_blocking_dialog "$(printf '%s\n' "$screen" | sed '3d')"); rc=$?
+  [ "$rc" -eq 1 ] || fail "a heading not directly under a rule must not match"
+  # A quoted capture of that screen followed by more transcript and a real
+  # prompt is not a live picker: too much follows the quoted prompt chrome.
+  out=$(fm_composer_blocking_dialog "$(printf '%s\n' "$screen" \
+    'Resume this session with:' 'claude --resume x' '● Next step' \
+    "$rule" '❯ ' "$rule" '  ⏵⏵ bypass permissions on')"); rc=$?
+  [ "$rc" -eq 1 ] || fail "a quoted ruled picker above more transcript must not match"
+  [ -z "$out" ] || fail "a miss must print nothing, got '$out'"
+  pass "the ruled exit picker above the prompt matches only in its full recorded layout"
+}
+
 test_background_exit_picker_stays_pending_and_blocks_retry
 test_dialog_heading_and_footer_must_be_the_recorded_lines
+test_ruled_exit_picker_above_the_prompt_matches_only_in_full
 test_dialog_note_skips_the_match_when_no_sink_is_set
 test_quoted_exit_picker_text_is_not_a_dialog
 test_kiro_near_gray_ghost_is_stripped_and_real_text_survives

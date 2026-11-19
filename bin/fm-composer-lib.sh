@@ -2588,14 +2588,38 @@ EOF
 # and prints nothing.
 # Recorded 2026-10-05 on Claude Code 2.1.289: /exit while a background shell
 # is still running opens this picker, and its selected row is Exit and stop tasks.
+# Recorded 2026-11-19 from a second mate's death capture (state/<id>.last-death.txt):
+# newer Claude Code draws the picker as a ruled panel ABOVE its prompt, so the
+# footer is followed by that prompt's own chrome - a rule, an empty prompt row
+# alone on its row, a rule, then at most three status rows (the permission-mode
+# line). That layout is accepted only in full: the heading must sit directly
+# under a rule, the prompt row must be empty, and nothing else may follow the
+# footer. The footer-last reading alone missed this picker, so exit typed into
+# it and the watcher could not report the mate as blocked on a prompt.
 fm_composer_blocking_dialog() {  # <screen> -> dialog name
   local screen=${1-}
   [ -n "$screen" ] || return 1
   if printf '%s\n' "$screen" | fm_composer_strip_ansi | LC_ALL=C awk '
-    /^[ \t]*Background work is running[ \t\r]*$/ { heading = 1 }
+    function rule(r) { return r ~ /^[ \t]*(─)+[ \t\r]*$/ }
+    /^[ \t]*Background work is running[ \t\r]*$/ {
+      heading = 1; selected = 0; footer = 0; bad = 0; tail = 0; after = 0
+      framed = rule(prev)
+    }
     heading && /^[ \t]*❯ 1\. Exit and stop tasks[ \t\r]*$/ { selected = 1 }
-    /[^ \t\r]/ { last = $0 }
-    END { exit !(selected && last ~ /^[ \t]*Enter to confirm · Esc to cancel[ \t\r]*$/) }
+    /[^ \t\r]/ {
+      if ($0 ~ /^[ \t]*Enter to confirm · Esc to cancel[ \t\r]*$/) {
+        footer = selected; tail = 0; after = 0; bad = 0
+      } else if (footer) {
+        # tail: 0 wants the rule under the panel, 1 the empty prompt row,
+        # 2 the rule under the prompt, 3 the status rows below it.
+        if (tail == 0) { if (rule($0)) tail = 1; else bad = 1 }
+        else if (tail == 1) { if ($0 ~ /^[ \t]*❯[ \t\r]*$/) tail = 2; else bad = 1 }
+        else if (tail == 2) { if (rule($0)) tail = 3; else bad = 1 }
+        else if (++after > 3) bad = 1
+      }
+      prev = $0
+    }
+    END { exit !(footer && !bad && (tail == 0 || (framed && tail == 3))) }
   '; then
     printf '%s' 'Claude background-task exit picker'
     return 0
