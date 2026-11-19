@@ -81,7 +81,7 @@ setup_world() {
   captain_in "$MATE" answer gone-q --decision-file "$TMP_ROOT/ans.txt" >/dev/null || fail "could not answer gone-q"
   cat > "$MAIN/state/mate.status" <<EOF
 needs-decision [key=ux-copy] [at=$OLD]: which button label for the form? Recommend: keep Save
-needs-decision [key=prod-flip] [at=$OLD]: flip the production flag for the new flow? Recommend: flip it
+needs-decision [key=prod-flip] [at=$OLD]: write the migrated rows into production data? Recommend: write them
 needs-decision [key=fresh-ask] [at=$((NOW - 60))]: naming for the tab? Recommend: Inbox
 needs-decision [key=captain-hold-gone-q-1] [at=$OLD]: captain hold gone-q: old ask
 needs-decision [key=captain-hold-wording-q-1] [at=$OLD]: captain hold wording-q: which wording? Recommend: keep the short form
@@ -90,6 +90,9 @@ needs-decision [key=dup-b] [at=$((OLD + 10))]: ok to merge https://github.com/o/
 needs-decision [key=landed] [at=$OLD]: merge https://github.com/o/r/pull/9 ?
 needs-decision [key=no-rec] [at=$OLD]: what should the lane do next?
 needs-decision [key=fresh-amb] [at=$((NOW - 60))]: how should the retry behave? Recommend: retry twice
+needs-decision [key=prod-mention] [at=$OLD]: the prod deploy of v147 is ready; deploy now? Recommend: deploy it
+needs-decision [key=soft-irrev] [at=$OLD]: the prod contact list is ready; Recommend: email every contact
+needs-decision [key=crit-norec] [at=$OLD]: PHI exposed on the intake page
 needs-decision [key=baa-call] [at=$OLD]: [class=legal] does the vendor contract cover us? Recommend: sign it
 EOF
 }
@@ -108,8 +111,16 @@ test_classify_protects_captain_only_classes() {
   out=$("$SLA" classify "[class=incident] keep the flag off")
   assert_contains "$out" "class=captain-only:incident" "an explicit critical class was ignored: $out"
   out=$("$SLA" classify "should the worker retry the flaky step")
-  assert_contains "$out" "class=ambiguous" "an unclear hold was not ambiguous: $out"
-  assert_contains "$out" "not a captain call" "an ambiguous hold with no recommendation got no default: $out"
+  assert_contains "$out" "class=returned" "a hold with no recommendation was not returned: $out"
+  assert_contains "$out" "decide this yourself" "the returned hold carries no instruction: $out"
+  out=$("$SLA" classify "prod deploy of v147? Recommend: deploy it")
+  assert_contains "$out" "class=ambiguous" "a normal prod deploy was treated as critical: $out"
+  out=$("$SLA" classify "merge the PR touching migrations and deploy config? Recommend: merge")
+  assert_contains "$out" "class=ambiguous" "touching migration paths made a hold critical: $out"
+  out=$("$SLA" classify "flip the dev flag? Recommend: flip it")
+  assert_contains "$out" "class=ambiguous" "a dev flag flip was not an auto-resolving hold: $out"
+  out=$("$SLA" classify "the prod contact list is ready; Recommend: email every contact")
+  assert_contains "$out" "class=captain-only:uncertain-irreversible" "an uncertain irreversible default auto-resolved: $out"
   pass "classify keeps only critical holds for the captain"
 }
 
@@ -122,8 +133,10 @@ test_report_is_read_only() {
   [ "$before" = "$after" ] || fail "report changed a status log"
   [ ! -e "$MAIN/state/hold-sla" ] || fail "report wrote SLA state"
   out=$(cat "$TMP_ROOT/report.md")
-  assert_contains "$out" "open holds: 11" "report headline count is wrong"
+  assert_contains "$out" "open holds: 14" "report headline count is wrong"
   assert_contains "$out" "captain-only:prod-write" "report did not list the production hold as critical"
+  assert_contains "$out" "returned to the raising agent (no recommendation, not critical): 1" "report returned count is wrong"
+  assert_contains "$out" "truly captain-only: 4" "report captain-only count is wrong"
   assert_contains "$out" "resolve IMMEDIATELY (duplicate, moot, green+CLEAN PR, quick call, captain-parked): 7" "report immediate count is wrong"
   assert_contains "$out" "| moot |" "report did not list the moot mirror"
   grep -q 'pr edit\|pr comment\|pr merge' "$TMP_ROOT/gh.log" && fail "report mutated a PR"
@@ -152,10 +165,10 @@ test_live_sweep_resolves_routine_and_escalates_the_rest() {
   setup_world
   out=$(run_sla "$MAIN" sweep --live) || fail "live sweep failed: $out"
   open=$(open_keys "$MAIN/state/mate.status")
-  for k in ux-copy captain-hold-gone-q-1 captain-hold-wording-q-1 dup-a dup-b landed fresh-ask no-rec; do
+  for k in ux-copy captain-hold-gone-q-1 captain-hold-wording-q-1 dup-a dup-b landed fresh-ask no-rec prod-mention; do
     case " $open " in *" $k "*) fail "non-critical hold $k stayed open: $open" ;; esac
   done
-  for k in prod-flip baa-call fresh-amb; do
+  for k in prod-flip baa-call fresh-amb soft-irrev crit-norec; do
     case " $open " in *" $k "*) ;; *) fail "hold $k should stay open: $open" ;; esac
   done
   show=$(tasks_in "$MATE" show wording-q --full)
@@ -167,13 +180,16 @@ test_live_sweep_resolves_routine_and_escalates_the_rest() {
   grep -q 'pr edit 7 -R o/r --remove-label captain-hold' "$TMP_ROOT/gh.log" || fail "the hold label was not lifted"
   grep -q 'pr comment 9\|pr edit 9' "$TMP_ROOT/gh.log" && fail "the merged PR was touched"
   grep -q 'mate --fire-and-forget .*ux-copy.*keep Save' "$TMP_ROOT/send.log" || fail "the quick default was not delivered to its owner"
-  grep -q 'mate --fire-and-forget .*no-rec.*decide it yourself' "$TMP_ROOT/send.log" || fail "a hold with no recommendation was not converted to the owner's own decision"
+  grep -q 'mate --fire-and-forget .*no-rec.*sla-returned.*decide this yourself' "$TMP_ROOT/send.log" || fail "a hold with no recommendation was not returned to its owner"
+  grep -q 'resolved \[key=no-rec\].*sla-returned' "$MAIN/state/mate.status" || fail "the returned hold was not closed as sla-returned"
+  grep -q 'mate --fire-and-forget .*crit-norec.*critical captain call' "$TMP_ROOT/send.log" || fail "a critical hold with no recommendation did not ask its owner for one"
   digest=$(cat "$MAIN/state/hold-sla/digest-latest.md")
   assert_contains "$digest" "prod-flip" "the production hold is missing from the digest"
   assert_contains "$digest" "baa-call" "the legal hold is missing from the digest"
   assert_contains "$digest" "sign it" "the critical hold's recommendation is missing from the digest"
   case "$digest" in *no-rec*) fail "a non-critical hold reached the digest" ;; esac
-  assert_contains "$digest" "bin/fm-send.sh mate --resolve-key prod-flip" "the digest has no answer command"
+  assert_contains "$digest" "recommendation requested from mate" "the critical hold without a recommendation shows a blank"
+  assert_contains "$digest" 'bin/fm-send.sh mate --resolve-key prod-flip "yes"' "the digest has no answer command"
   case "$digest" in *fresh-amb*) fail "a hold inside its deadline reached the digest" ;; esac
   grep -rqs 'hold-sla-digest-' "$MAIN/state" --include='*' --exclude-dir=hold-sla || fail "the digest raised no captain wake"
   lines=$(wc -l < "$MAIN/state/mate.status")

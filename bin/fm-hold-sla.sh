@@ -22,18 +22,26 @@
 #                   first" (FM_HOLD_SLA_QUICK).
 #     parked      - a backlog hold the captain already parked; re-held with
 #                   --until today+FM_HOLD_SLA_PARK_DAYS so it leaves Captain's Call.
+#     returned    - no recommendation recorded and not critical: closed as
+#                   `sla-returned` and sent back to its raiser fire-and-forget
+#                   ("decide this yourself on your best recommendation ...").
 #   ambiguous (everything else): FM_HOLD_SLA_HOURS (default 2h), then resolved
-#     to its recommendation; with none recorded, the owner is told it is not a
-#     captain call and to decide and record it. A held WORK item is released.
+#     to its recorded recommendation. A held WORK item is released.
+#   Matching is on the hold's own stated action (a write/rotate/grant against
+#   production data or Key Vault, "PHI exposed", "secret leaked", "purchase",
+#   "$"), never on a PR's title, labels, or paths. A hold that only mentions a
+#   sensitive subject (FM_HOLD_SLA_SOFT) takes the auto path only when its
+#   default is reversible (FM_HOLD_SLA_REVERSIBLE: merge, queue, close, label,
+#   retry, revert, ...); otherwise it is captain-only (uncertain-irreversible).
+#   A captain-only hold with no recommendation asks its owner for one.
 #   critical (never auto-resolved): an explicit [class=<c>] tag
 #     (fm-captain-hold.sh hold --class) or a match on the FM_HOLD_SLA_CRIT_*
 #     patterns: prod-write (production data, production secrets, Key Vault),
 #     exposure (PHI / credential / security exposure findings), spend (spending
 #     money, paid plans), destructive (irreversible data operations), incident
-#     (an open incident), legal (legal / compliance / BAA). A PR also counts as
-#     prod-write when it changes migrations, secrets, infra, or deploy paths.
+#     (an open incident), legal (legal / compliance / BAA).
 #     These stay held and go into ONE daily digest, each with its recommendation
-#     and the one-line command that answers it.
+#     and the one-word answer command.
 #
 # Usage:
 #   fm-hold-sla.sh scan                       TSV of open holds (read-only)
@@ -103,18 +111,21 @@ TODAY=$(date -u -d "@$NOW" +%F 2>/dev/null || date -u -r "$NOW" +%F)
 
 # Critical patterns (extended regex, lower-cased text, word boundaries). Each
 # is overridable; the class name is what the digest prints.
-P_PROD_WRITE=${FM_HOLD_SLA_CRIT_PROD_WRITE:-}; [ -n "$P_PROD_WRITE" ] || P_PROD_WRITE='key ?vault|kv secret|secret|secrets|credential|credentials|password|passwords|api ?keys?|rotate|rotation|prod(uction)? (data|db|database|secret|secrets|row|rows|write|writes|table|tables|records?|flag|flags|config|setting|settings|env)|(write|writes|insert|update|apply|set|rotate|seed)[a-z ]{0,30} (in|to|into|on) prod(uction)?|production secret|prod secret'
-P_EXPOSURE=${FM_HOLD_SLA_CRIT_EXPOSURE:-}; [ -n "$P_EXPOSURE" ] || P_EXPOSURE='phi|hipaa|pii|patient data|exposure|exposed|leak|leaked|leaking|breach|cross-(tenant|clinic)|vulnerability|vuln|cve|credential (leak|exposure)|secret exfil|security finding|security incident'
-P_SPEND=${FM_HOLD_SLA_CRIT_SPEND:-}; [ -n "$P_SPEND" ] || P_SPEND='spend|spending|ad spend|budget|invoice|payment|purchase|buy|paid plan|subscription|upgrade (the )?plan|top-?up|credit card|charge|\$[0-9]+|[0-9]+ ?usd'
-P_DESTRUCTIVE=${FM_HOLD_SLA_CRIT_DESTRUCTIVE:-}; [ -n "$P_DESTRUCTIVE" ] || P_DESTRUCTIVE='delete (the )?(data|rows|records|table|database|db|bucket|backups?)|drop (table|database|column)|truncate|purge|wipe|destroy|irreversible|backfill|overwrite (data|rows|records)|hard delete'
+P_PROD_WRITE=${FM_HOLD_SLA_CRIT_PROD_WRITE:-}; [ -n "$P_PROD_WRITE" ] || P_PROD_WRITE='(write|writes|writing|insert|inserting|update|updating|upsert|delete|deleting|remove|rotate|rotating|grant|granting|revoke|seed|backfill|patch|modify|alter|set)[a-z0-9 ,/-]{0,40}(prod|production)[a-z -]{0,12}(data|db|database|rows?|records?|tables?|secrets?|vault|key ?vault)|(prod|production)[a-z -]{0,12}(data|db|database|rows?|records?|tables?|secrets?)[a-z0-9 ,/-]{0,30}(write|writes|writing|insert|inserting|update|updating|upsert|delete|deleting|remove|rotate|rotating|grant|granting|revoke|seed|backfill|patch|modify|alter|set)|key ?vault[a-z0-9 ,/-]{0,30}(write|set|rotate|grant|update|add|delete|put)|(write|set|rotate|grant|update|add|delete|put)[a-z0-9 ,/-]{0,40}key ?vault'
+P_EXPOSURE=${FM_HOLD_SLA_CRIT_EXPOSURE:-}; [ -n "$P_EXPOSURE" ] || P_EXPOSURE='(phi|pii|patient data|patient records|credentials?|secrets?|tokens?|api keys?|passwords?)[a-z ,-]{0,20}(exposed|exposure|leak|leaked|leaking|exfiltrated|compromised|public)|(exposed|leaked|leaking|exposure of)[a-z ,-]{0,20}(phi|pii|patient|credentials?|secrets?|tokens?|keys?|passwords?)|breach|cross-(tenant|clinic) (phi|data|access|leak|exposure)|security (finding|vulnerability|hole)|vulnerability|cve-[0-9]'
+P_SPEND=${FM_HOLD_SLA_CRIT_SPEND:-}; [ -n "$P_SPEND" ] || P_SPEND='purchase|buy|pay for|paid plan|upgrade (the )?(plan|tier|subscription|seat)|downgrade (the )?(plan|tier)|subscription|top-?up|ad spend|spend|raise (the )?budget|budget (increase|change)|credit card|invoice|\$[0-9]|[0-9]+ ?usd'
+P_DESTRUCTIVE=${FM_HOLD_SLA_CRIT_DESTRUCTIVE:-}; [ -n "$P_DESTRUCTIVE" ] || P_DESTRUCTIVE='(delete|drop|truncate|purge|wipe|destroy|hard-delete|overwrite)[a-z0-9 ,-]{0,30}(data|rows?|records?|tables?|database|db|bucket|backups?|volume|disk|users?|accounts?|history|contacts?)|irreversible|cannot be undone|force-push (to )?main|backfill'
 P_INCIDENT=${FM_HOLD_SLA_CRIT_INCIDENT:-}; [ -n "$P_INCIDENT" ] || P_INCIDENT='incident|outage|sev[0-9]|p0'
-P_LEGAL=${FM_HOLD_SLA_CRIT_LEGAL:-}; [ -n "$P_LEGAL" ] || P_LEGAL='legal|compliance|baa|contract|counsel|lawyer|terms of service|gdpr|licen[cs]e|licensing|copyright|regulator|regulatory'
+P_LEGAL=${FM_HOLD_SLA_CRIT_LEGAL:-}; [ -n "$P_LEGAL" ] || P_LEGAL='legal|compliance|baa|counsel|lawyer|terms of service|gdpr|hipaa|contract|licen[cs]e terms|copyright|regulator|regulatory'
 P_QUICK=${FM_HOLD_SLA_QUICK:-}; [ -n "$P_QUICK" ] || P_QUICK='option [a-d]|options|either|equivalent|naming|name|rename|wording|copy|label|labels|design|layout|ordering|order|numbering|renumber|number|requeue|dequeue|queue|rebase|sequence|first|priority|prioriti[sz]e'
 P_PARKED=${FM_HOLD_SLA_PARKED:-}; [ -n "$P_PARKED" ] || P_PARKED='[Dd]eferred under captain-approved triage|[Kk]eep paused|parked list|[Pp]ark until'
 PARK_DAYS=${FM_HOLD_SLA_PARK_DAYS:-30}
-P_PATHS=${FM_HOLD_SLA_CRIT_PATHS:-}; [ -n "$P_PATHS" ] || P_PATHS='(^|/)(infra|migrations?|secrets?|keyvault)(/|$)|\.env|deploy'
 CRIT_CLASSES='prod-write exposure spend destructive incident legal'
-NO_DEFAULT='no recommendation was recorded: this is not a captain call - decide it yourself, record the decision, and carry on'
+# A hold that mentions a sensitive subject but states no critical action is
+# uncertain: it takes the auto path only when its default is reversible.
+P_SOFT=${FM_HOLD_SLA_SOFT:-}; [ -n "$P_SOFT" ] || P_SOFT='prod|production|secrets?|vault|credentials?|phi|pii|patients?|delete|drop|billing|payments?|security|tokens?|passwords?|money'
+P_REVERSIBLE=${FM_HOLD_SLA_REVERSIBLE:-}; [ -n "$P_REVERSIBLE" ] || P_REVERSIBLE='merge|deploy|redeploy|ship|release|rollback|roll back|flip|toggle|enable|disable|queue|requeue|dequeue|close|label|unlabel|rebase|retry|rerun|revert|wait|defer|park|keep|leave|skip|draft|reopen|review|land|hold off|no action|do nothing|leave it'
+RETURNED='decide this yourself on your best recommendation and record it; a human is required only for the critical classes (production data/secret writes, PHI/credential/security exposure, spend, destructive data operations, open incidents, legal/compliance/BAA)'
 
 # Prints the critical class for <text>, or nothing. An explicit [class=<c>] tag
 # naming a critical class wins; otherwise the patterns decide.
@@ -133,6 +144,10 @@ protected_class() {  # <text>
     fi
   done
   return 0
+}
+
+matches() {  # <pattern> <text>
+  printf '%s' "$2" | tr '[:upper:]' '[:lower:]' | grep -Eq "(^|[^a-z0-9])($1)([^a-z0-9]|$)"
 }
 
 is_quick() {  # <text>
@@ -272,10 +287,8 @@ pr_facts() {  # <repo> <n>
         | last // "" | test("VERDICT\\W*:?\\W*(CLEAN|PASS|APPROVE)"; "i")' >/dev/null 2>&1; then
     PR_CLEAN=1
   fi
-  PR_PROTECT=$(protected_class "$(printf '%s' "$json" | jq -r '.title')")
-  if [ -z "$PR_PROTECT" ] && printf '%s' "$json" | jq -r '.files[]?.path' | grep -Eiq "$P_PATHS"; then
-    PR_PROTECT=prod-write
-  fi
+  # A PR is never critical for what its title, labels, or paths mention; only
+  # the hold's own stated action decides (classify_row).
   [ "$PR_GREEN" = 1 ] || PR_WHY="CI not green, draft, or conflicting"
   [ "$PR_CLEAN" = 1 ] || PR_WHY="${PR_WHY:+$PR_WHY; }no CLEAN verdict on head ${head:0:8}"
   return 0
@@ -308,12 +321,22 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
     else
       CLS=''
     fi
+    if [ -z "$CLS" ] && [ -z "$prot" ] && matches "$P_SOFT" "$text" \
+      && [ -n "$DEFAULT" ] && ! matches "$P_REVERSIBLE" "$DEFAULT"; then
+      prot=uncertain-irreversible
+    fi
     if [ -z "$CLS" ]; then
       if [ -n "$prot" ]; then CLS="captain-only:$prot"
       elif [ "${rid%%:*}" = pr ]; then CLS="pr-merge"
       elif is_quick "$text"; then CLS=quick
       else CLS=ambiguous; fi
       [ -n "$kindf" ] && [ "$kindf" != captain ] && RELEASE=1
+      if [ "${CLS%%:*}" != captain-only ] && [ "$CLS" != pr-merge ] && [ -z "$DEFAULT" ]; then
+        # A held work item with no critical class is released so the work
+        # proceeds; any other hold with no recommendation goes back to its raiser.
+        if [ "$RELEASE" = 1 ]; then DEFAULT='hold released: proceed with the work'
+        else CLS=returned DEFAULT=$RETURNED; fi
+      fi
     fi
   fi
   if [ -f "$ov" ]; then
@@ -326,10 +349,9 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
     [ -z "$oh" ] || HOURS=$oh
   fi
   local ck
-  case "$CLS" in duplicate|moot|pr-merge|quick|parked) ck=FM_HOLD_SLA_HOURS_IMMEDIATE; HOURS=${!ck:-0} ;; esac
+  case "$CLS" in duplicate|moot|pr-merge|quick|parked|returned) ck=FM_HOLD_SLA_HOURS_IMMEDIATE; HOURS=${!ck:-0} ;; esac
   case "$CLS" in captain-only:*) HOURS=${FM_HOLD_SLA_HOURS_CRITICAL:-0} ;; esac
   [ -f "$ov" ] && [ -n "$(meta_get "$ov" hours)" ] && HOURS=$(meta_get "$ov" hours)
-  [ -n "$DEFAULT" ] || case "$CLS" in quick|ambiguous) DEFAULT=$NO_DEFAULT ;; esac
   return 0
 }
 
@@ -354,9 +376,9 @@ record_sla() {  # <rid> <key> <raised> <deadline> <class> <default>
 
 answer_cmd() {  # <source> <owner> <key> <task>
   if [ "$1" = status ]; then
-    printf 'bin/fm-send.sh %s --resolve-key %s "<answer>"' "$2" "$3"
+    printf 'bin/fm-send.sh %s --resolve-key %s "yes"' "$2" "$3"
   else
-    printf "printf '%%s\\\\n' '<answer>' > /tmp/a && bin/fm-captain-hold.sh answer %s --decision-file /tmp/a" "$4"
+    printf "printf '%%s\\\\n' 'yes' > /tmp/a && bin/fm-captain-hold.sh answer %s --decision-file /tmp/a" "$4"
   fi
 }
 
@@ -367,6 +389,14 @@ status_close() {  # <owner> <key> <note>
   [ "$(_fm_decision_key "$FM_LINE_CAP_LINE" 2>/dev/null)" = "$2" ] || return 2
   fm_wake_status_append_self_announced "$STATE" "$f" "$FM_LINE_CAP_LINE" || rc=$?
   [ "$rc" -ne 2 ]
+}
+
+deliver_text() {  # <owner> <key> <text>
+  [ "$NOTIFY_OWNER" = 1 ] || return 0
+  [ "$1" != main ] || return 0
+  local id
+  id=$(printf '%s %s %s %s' "$1" "$2" "$TODAY" "$3" | sha256sum | cut -c1-16)
+  "$SEND" "$1" --fire-and-forget "$id" "$3" >/dev/null 2>&1
 }
 
 deliver_default() {  # <owner> <key> <default> <hours>
@@ -418,6 +448,9 @@ evaluate() {  # <mode: sweep|report>
     age=$(( (NOW - raised) / 3600 ))
     expired=0; [ "$NOW" -lt "$deadline" ] || expired=1
     cmd=$(answer_cmd "$source" "$owner" "$key" "$task")
+    if [ "$mode" = report ] && [ "${CLS%%:*}" = captain-only ] && [ -z "$DEFAULT" ]; then
+      if [ "$owner" = main ]; then DEFAULT="(none yet: firstmate adds one)"; else DEFAULT="(none yet: the live sweep asks $owner for one)"; fi
+    fi
     if [ "$mode" = report ]; then
       REPORT_ROWS+="$CLS"$'\t'"$age"$'\t'"$owner"$'\t'"$key"$'\t'"$source:$verb$([ "$source" = status ] && [ -n "$task" ] && echo :mirror)"$'\t'"$(one_line "${MOOT:-$DEFAULT}" 160)"$'\t'"$cmd"$'\t'"$(one_line "$text" 220)"$'\n'
       continue
@@ -425,8 +458,15 @@ evaluate() {  # <mode: sweep|report>
     record_sla "$rid" "$key" "$raised" "$deadline" "$CLS" "$DEFAULT"
     case "$CLS" in wait:*) continue ;; esac
     if [ "${CLS%%:*}" = captain-only ] || [ "$expired" = 0 ]; then
+      if [ "${CLS%%:*}" = captain-only ] && [ "$expired" = 1 ] && [ -z "$DEFAULT" ]; then
+        if [ "$owner" = main ]; then DEFAULT="firstmate: add 'Recommend: <one action>' to this hold"
+        else DEFAULT="recommendation requested from $owner"; fi
+        if [ "$LIVE" = 1 ]; then
+          deliver_text "$owner" "$key" "hold-sla: [key=$key] is a critical captain call (${CLS#captain-only:}) with no recommendation. Post one on your status line as 'Recommend: <one action>' so the captain can answer it in one word."
+        fi
+      fi
       if [ "${CLS%%:*}" = captain-only ] && [ "$expired" = 1 ]; then
-        DIGEST_ROWS+="$age"$'\t'"| ${age}h | ${CLS#captain-only:} | $owner | \`$key\` | $(one_line "${DEFAULT:-none recorded - ask the raiser for one}" 120 | tr '|' '/') | \`$cmd\` |"$'\n'
+        DIGEST_ROWS+="$age"$'\t'"| ${age}h | ${CLS#captain-only:} | $owner | \`$key\` | $(one_line "$DEFAULT" 120 | tr '|' '/') | \`$cmd\` |"$'\n'
       fi
       continue
     fi
@@ -438,6 +478,7 @@ evaluate() {  # <mode: sweep|report>
     case "$CLS" in
       duplicate) outcome="superseded by a newer open hold on $rid" ;;
       moot) outcome="moot: $MOOT" ;;
+      returned) outcome="sla-returned: no recommendation recorded and not critical; returned to $owner to decide" ;;
       quick|ambiguous) outcome="not a captain call ($CLS, ${HOURS}h): firstmate applied the recorded default: $DEFAULT" ;;
       parked) outcome="captain-parked hold re-dated: $DEFAULT" ;;
       pr-merge)
@@ -463,7 +504,7 @@ evaluate() {  # <mode: sweep|report>
       fi
       continue
     fi
-    if [ "$source" = task ] || { [ -n "$task" ] && { [ "$CLS" = quick ] || [ "$CLS" = ambiguous ] || [ "$CLS" = pr-merge ]; }; }; then
+    if [ "$source" = task ] || { [ -n "$task" ] && { [ "$CLS" = quick ] || [ "$CLS" = ambiguous ] || [ "$CLS" = returned ] || [ "$CLS" = pr-merge ]; }; }; then
       ev=$(mktemp "${TMPDIR:-/tmp}/fm-hold-sla.XXXXXX") || continue
       printf 'hold-sla %s: %s\nRaised: %s; deadline %sh; class %s.\n' "$TODAY" "$outcome" \
         "$(date -u -d "@$raised" +%FT%TZ 2>/dev/null)" "$HOURS" "$CLS" > "$ev"
@@ -480,7 +521,10 @@ evaluate() {  # <mode: sweep|report>
     fi
     if status_close "$owner" "$key" "$outcome"; then
       slog "closed status key $key in $owner.status"
-      case "$CLS" in quick|ambiguous) deliver_default "$owner" "$key" "$DEFAULT" "$HOURS" ;; esac
+      case "$CLS" in
+        quick|ambiguous) deliver_default "$owner" "$key" "$DEFAULT" "$HOURS" ;;
+        returned) deliver_text "$owner" "$key" "hold-sla: [key=$key] was returned to you (sla-returned): $RETURNED." ;;
+      esac
     else
       slog "status close failed for $key in $owner.status"
     fi
@@ -527,8 +571,9 @@ case "$cmd" in
   scan) scan ;;
   classify)
     c=$(protected_class "${1:-}"); d=$(extract_default "${1:-}")
-    if [ -n "$c" ]; then c="captain-only:$c"; elif is_quick "${1:-}"; then c=quick; else c=ambiguous; fi
-    printf 'class=%s\ndefault=%s\n' "$c" "${d:-$NO_DEFAULT}" ;;
+    if [ -z "$c" ] && matches "$P_SOFT" "${1:-}" && [ -n "$d" ] && ! matches "$P_REVERSIBLE" "$d"; then c=uncertain-irreversible; fi
+    if [ -n "$c" ]; then c="captain-only:$c"; elif [ -z "$d" ]; then c=returned; d=$RETURNED; elif is_quick "${1:-}"; then c=quick; else c=ambiguous; fi
+    printf 'class=%s\ndefault=%s\n' "$c" "$d" ;;
   sweep)
     [ "${1:-}" = --live ] && LIVE=1
     mkdir -p "$STATE" || die "cannot create $STATE"
@@ -545,19 +590,20 @@ case "$cmd" in
       auto=$(printf '%s' "$REPORT_ROWS" | grep -Ecv '^(captain-only|wait)' || true)
       immediate=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^(duplicate|moot|pr-merge|quick|parked)'$'\t' || true)
       ambiguous=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^ambiguous'$'\t' || true)
+      returned=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^returned'$'\t' || true)
       waiting=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^wait' || true)
       printf '# Captain hold backlog %s\n\nRead-only classification of every open captain hold in %s (nothing was changed).\n\n' "$TODAY" "$FM_HOME"
       printf 'Policy: only critical holds (production data/secrets writes, PHI/credential/security exposure, spend, destructive data operations, open incidents, legal/compliance/BAA) wait on the captain; every other hold resolves to its recorded recommendation.\n\n'
-      printf -- '- open holds: %s\n- resolve IMMEDIATELY (duplicate, moot, green+CLEAN PR, quick call, captain-parked): %s\n- resolve after the %sh ambiguous deadline: %s\n- critical, captain only: %s\n- unverifiable now (re-checked each sweep): %s\n\n' \
-        "$total" "$immediate" "$HOURS_DEFAULT" "$ambiguous" "$((total - auto - waiting))" "$waiting"
+      printf -- '- open holds: %s\n- resolve IMMEDIATELY (duplicate, moot, green+CLEAN PR, quick call, captain-parked): %s\n- resolve after the %sh deadline: %s\n- returned to the raising agent (no recommendation, not critical): %s\n- truly captain-only: %s\n- unverifiable now (re-checked each sweep): %s\n\n' \
+        "$total" "$immediate" "$HOURS_DEFAULT" "$ambiguous" "$returned" "$((total - auto - waiting))" "$waiting"
       printf '## Counts by record type\n\n'; printf '%s' "$REPORT_ROWS" | cut -f5 | sort | uniq -c | sort -rn | awk '{printf "- %s: %s\n", $2, $1}'
       printf '\n(status = an open keyed record in state/<owner>.status; :mirror = the parent copy of a secondmate captain-held task; task = a captain-held task in this home'"'"'s backlog.)\n\n'
       printf '## Counts by class\n\n'; printf '%s' "$REPORT_ROWS" | cut -f1 | sort | uniq -c | sort -rn | awk '{printf "- %s: %s\n", $2, $1}'
-      printf '\n## Outcome by record type\n\n| record type | immediate | after deadline | critical | unverifiable |\n| --- | --- | --- | --- | --- |\n'
+      printf '\n## Outcome by record type\n\n| record type | immediate | after deadline | returned | critical | unverifiable |\n| --- | --- | --- | --- | --- | --- |\n'
       printf '%s' "$REPORT_ROWS" | awk -F '\t' '
-        { b = ($1 ~ /^(duplicate|moot|pr-merge|quick|parked)$/) ? 1 : ($1 == "ambiguous") ? 2 : ($1 ~ /^captain-only/) ? 3 : 4
+        { b = ($1 ~ /^(duplicate|moot|pr-merge|quick|parked)$/) ? 1 : ($1 == "ambiguous") ? 2 : ($1 == "returned") ? 3 : ($1 ~ /^captain-only/) ? 4 : 5
           n[$5, b]++; t[$5] = 1 }
-        END { for (r in t) printf "| %s | %d | %d | %d | %d |\n", r, n[r,1], n[r,2], n[r,3], n[r,4] }' | sort
+        END { for (r in t) printf "| %s | %d | %d | %d | %d | %d |\n", r, n[r,1], n[r,2], n[r,3], n[r,4], n[r,5] }' | sort
       printf '\n## Age (hours since raised)\n\n'
       printf '%s' "$REPORT_ROWS" | awk -F '\t' '{ if ($2>=168) a++; else if ($2>=72) b++; else if ($2>=24) c++; else d++ } END { printf "- over 7 days: %d\n- 3-7 days: %d\n- 1-3 days: %d\n- under 1 day: %d\n", a, b, c, d }'
       for sect in auto captain; do
