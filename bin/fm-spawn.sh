@@ -3086,7 +3086,16 @@ launch_template() {
   # carries no such words. OpenCode 2.0.32 has no system-prompt flag, so the
   # doorbell line is self-describing and the worker opens it: verified live
   # that an OpenCode 2.0.32 worker reads the named record and acts on it.
-  opencode) printf '%s' 'OPENCODE_DB=__OPENCODEDB__ OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN____PIRESUME__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
+  # Prompt diet (measured 2026-11-19, opencode 2.3.2): by default opencode also
+  # loads ~/.claude/CLAUDE.md (an oh-my-claudecode orchestration file meant for
+  # Claude Code) plus every ~/.claude/skills and project .claude/skills entry,
+  # and re-sends them on every model call. DISABLE_CLAUDE_CODE_PROMPT drops the
+  # former; DISABLE_CLAUDE_CODE_SKILLS drops the .claude skill roots (not
+  # .agents, where firstmate's own skills and the shared global skills live).
+  # Together they cut the fixed prompt about 36 percent. Both sit before
+  # OPENCODE_DB so the OPENCODE_DB=/OPENCODE_CONFIG_CONTENT= launch substrings
+  # that the dispatch tests assert stay unchanged.
+  opencode) printf '%s' 'OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 OPENCODE_DB=__OPENCODEDB__ OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' __OPENCODEBIN____PIRESUME__ __MODELFLAG__--prompt __BRIEFDOORBELL__' ;;
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIEXCLUDE____PIRESUME__'
     if [ "$kind" = secondmate ]; then
