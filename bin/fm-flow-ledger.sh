@@ -33,19 +33,22 @@
 # unmeasured rule is never mistaken for a clean one.
 #
 # slo mode prints the published service-level figures from the same reads:
-# ask coverage, ask->issue p95, unowned-issue count, idle-owned count, and
-# merged-not-verified count. Figures a home cannot measure print `n/a` rather
-# than a guessed zero.
+# asks, asks_open, unowned_issues, idle_owned, merged_unverified, and breaches,
+# one `key value` line each. A count whose rule could not be measured is a
+# lower bound, so read the `# <note>` lines before treating a figure as clean.
 #
 # Inputs. Only existing records are read, never a network write:
 #   B1  state/asks.jsonl - one JSON object per line, appended by firstmate when
 #       the captain sends a message. Required members: `id` (unique string) and
 #       `at` (epoch seconds or ISO-8601). Optional `open` (default true) marks an
 #       ask still owed; a Linear issue whose title quotes the ask's `text` within
-#       LINEAR_ISSUE_WINDOW settles it. An ask is a breach when it is open, older
+#       LINEAR_ISSUE_WINDOW (the page size of the issue read, so this is a
+#       page-local window, not a title index) settles it. An ask is a breach when it is open, older
 #       than ASK_ISSUE_MAX, and no issue matches it.
-#   B2  Linear: every non-terminal issue (state type unstarted, started, or
-#       triage) with no owner. Owner is the first `agent:<x>` label, else an
+#   B2  Linear: every non-terminal issue with no owner. The read fetches state
+#       types triage, backlog, unstarted, and started, so a backlog item counts
+#       as owed an owner just like an unstarted one (the "refill pool" the
+#       fleet pulls from is backlog work). Owner is the first `agent:<x>` label, else an
 #       assignee. Breach when created more than OWNER_MAX ago.
 #   B3  Linear: an owned, non-terminal issue with no activity for IDLE_WARN
 #       (warn) or IDLE_ACT (breach). Activity is the issue's updatedAt, which any
@@ -54,9 +57,13 @@
 #       issues. Pools and ceilings come from the home's config/refill-pools file
 #       (`<team> <ceiling>` per line, `#` comments) when present.
 #   B5  Captain holds: any hold whose full text carries no `Recommend:` line
-#       (breach, rec), or a hold the hold-SLA classifier marks critical and that
-#       is older than CRITICAL_HOLD_MAX (breach, critical). Holds are read from
-#       the home's backlog through bin/fm-tasks-axi.sh.
+#       (breach), or a hold whose text reads critical (PHI, secrets, spend,
+#       deletion, incident and similar) and whose task was created more than
+#       CRITICAL_HOLD_MAX ago. Age is measured in whole UTC days from the
+#       task's `created` date at `--now`, so a 24h threshold flags on the first
+#       whole day past it. A hold with a captain-set `until` date is parked and
+#       is not aged. Holds are read from the home's backlog through
+#       bin/fm-tasks-axi.sh.
 #   B6  Linear: a parent issue whose every child is non-terminal and untouched
 #       for CHILD_IDLE_ACT. Reported once on the parent.
 #   B7  Linear: an issue merged (state `In Review`, or labelled `merged`/`queued`
@@ -66,13 +73,15 @@
 #   FM_HOME, FM_STATE_OVERRIDE, FM_CONFIG_OVERRIDE resolve the home exactly as
 #   the other bin/ scripts do.
 #   LINEAR_API_KEY overrides the key read from ~/.hermes/.env.
-#   FM_FLOW_LEDGER_GRAPHQL points the Linear read at a fixture file or URL,
-#   which is how the regression suite drives every rule without a network call.
+#   FM_FLOW_LEDGER_GRAPHQL points the Linear read at a fixture file
+#   (`file:<path>` or a bare existing path), which is how the regression suite
+#   drives every rule without a network call. It does not accept a URL.
 #
 # Exit status: 0 when the report is produced (breaches or not), 2 on a usage
 # error, 3 when a required input could not be read. A missing boundary input
-# (no Linear key, no backlog) is reported on stderr and the dependent rules are
-# skipped with a `n/a` note rather than silently reported as clean.
+# (no Linear key, no team list, no backlog) is named in a trailing `# <note>`
+# line and every rule that depends on it is skipped, so an unmeasured rule is
+# never reported as either a breach or clean.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -190,13 +199,13 @@ linear_key() {
 linear_precheck() {
   local graph=${FM_FLOW_LEDGER_GRAPHQL:-} teams
   if [ -z "$graph" ] && ! linear_key >/dev/null; then
-    NOTE+=("linear: no LINEAR_API_KEY, B2 B3 B4 B6 B7 skipped")
+    NOTE+=("linear: no LINEAR_API_KEY, B1 B2 B3 B4 B6 B7 skipped")
     return 1
   fi
   teams=$(linear_teams)
   # A fixture override stands in for the whole read, teams included.
   if [ -z "$teams" ] && [ -z "$graph" ]; then
-    NOTE+=("linear: no teams configured in config/linear-teams, B2 B3 B4 B6 B7 skipped")
+    NOTE+=("linear: no teams configured in config/linear-teams, B1 B2 B3 B4 B6 B7 skipped")
     return 1
   fi
   return 0
@@ -318,7 +327,7 @@ PY
 check_b1() {
   local asks="$STATE/asks.jsonl"
   [ -f "$asks" ] || return 0
-  [ -f "$LINEAR_DUMP" ] || { NOTE+=("B1: linear unavailable, ask->issue not measured"); return 0; }
+  [ "$LINEAR_OK" = 1 ] || { NOTE+=("B1: linear unavailable, ask->issue not measured"); return 0; }
   ASKS_FILE=$asks LINEAR_DUMP=$LINEAR_DUMP NOW=$NOW MAX_AGE=$ASK_ISSUE_MAX \
   LINEAR_WINDOW=$LINEAR_ISSUE_WINDOW python3 - <<'PY'
 import json, os, re, sys
@@ -393,7 +402,7 @@ PY
 
 # Print the issue-shaped rules as tab-separated lines.
 check_issues() {
-  [ -f "$LINEAR_DUMP" ] || return 0
+  [ "$LINEAR_OK" = 1 ] || return 0
   LINEAR_DUMP=$LINEAR_DUMP NOW=$NOW OWNER_MAX=$OWNER_MAX \
   IDLE_WARN=$IDLE_WARN IDLE_ACT=$IDLE_ACT CHILD_IDLE_ACT=$CHILD_IDLE_ACT \
   MERGED_MAX=$MERGED_MAX python3 - <<'PY'
@@ -486,7 +495,7 @@ PY
 check_b4() {
   local pools="$CONFIG/refill-pools"
   [ -f "$pools" ] || return 0
-  [ -f "$LINEAR_DUMP" ] || { NOTE+=("B4: linear unavailable, pool fill not measured"); return 0; }
+  [ "$LINEAR_OK" = 1 ] || { NOTE+=("B4: linear unavailable, pool fill not measured"); return 0; }
   POOLS_FILE=$pools LINEAR_DUMP=$LINEAR_DUMP FLOOR=$POOL_FLOOR python3 - <<'PY'
 import json, os
 
@@ -587,7 +596,11 @@ for line in sys.stdin:
         started = datetime.date.fromisoformat(created)
     except ValueError:
         continue
-    age = (datetime.datetime.now(datetime.timezone.utc).date() - started).days * 86400
+    # Age from the frozen clock, not the wall clock, so --now replays a past
+    # report exactly. Whole days is coarse; a 24h threshold therefore flags on
+    # the first whole day past it rather than at the 24-hour mark.
+    today = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).date()
+    age = (today - started).days * 86400
     if CRITICAL.search(text) and age > critical_max:
         rows.append(("B5", "breach", ident, str(age),
                      "critical hold older than 24h"))
@@ -667,6 +680,7 @@ PY
 # --- report ----------------------------------------------------------------
 
 LINEAR_DUMP=''
+LINEAR_OK=0
 main() {
   case "$cmd" in
     record-ask) record_ask; return ;;
@@ -679,11 +693,17 @@ main() {
     trap 'rm -f "$LINEAR_DUMP"' EXIT
     # read_linear runs in a subshell for its redirect, so a failure it would
     # have noted is detected here instead, where the note survives.
+    # LINEAR_OK is the single authority on whether the Linear read happened.
+    # A truncated dump still exists on disk, so rules must never test the file:
+    # an unreadable Linear would otherwise be measured as "zero issues" and
+    # turn every open ask into a false breach.
     if ! linear_precheck; then
       : > "$LINEAR_DUMP"
     elif ! read_linear > "$LINEAR_DUMP"; then
-      NOTE+=("linear: read failed, B2 B3 B4 B6 B7 skipped")
+      NOTE+=("linear: read failed, B1 B2 B3 B4 B6 B7 skipped")
       : > "$LINEAR_DUMP"
+    else
+      LINEAR_OK=1
     fi
   fi
 
@@ -703,7 +723,7 @@ main() {
 
 emit_report() {
   local rows=$1
-  { [ -n "$rows" ] && printf '%s\n' "$rows" | sort -t$'\t' -k1,1 -k3,3; } || true
+  { [ -n "$rows" ] && printf '%s\n' "$rows" | LC_ALL=C sort -t$'\t' -k1,1 -k3,3; } || true
   local note
   for note in "${NOTE[@]+"${NOTE[@]}"}"; do
     printf '# %s\n' "$note"

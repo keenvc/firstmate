@@ -264,22 +264,35 @@ test_unreadable_linear_input_is_named_not_reported_clean() {
   local home out
   home=$(fixture_home missing)
   printf 'ADC\n' > "$home/config/linear-teams"
+  # An ask that would breach against an empty issue set: an unreadable Linear
+  # must never be measured as "zero issues", which would invent this breach.
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
+    bash "$LEDGER" record-ask a1 'ship the widget' --now "$((NOW - 86400))" ||
+    fail "record-ask must append an ask"
+
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
         FM_CONFIG_OVERRIDE="$home/config" FM_FLOW_LEDGER_GRAPHQL='file:/nonexistent' \
         FM_FLOW_LEDGER_TEAMS='' bash "$LEDGER" report --now "$NOW" 2>&1)
   assert_contains "$out" 'linear: read failed' \
     "an unreadable Linear input must be named so a skipped rule is not read as clean"
+  assert_not_contains "$out" "$(printf 'B1\tbreach\ta1')" \
+    "an unreadable Linear input must never turn an open ask into a false B1 breach"
   pass "unmeasured rules are named"
 }
 
 test_missing_teams_is_named_rather_than_silently_clean() {
   local home out
   home=$(fixture_home noteams)
+  FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" FM_CONFIG_OVERRIDE="$home/config" \
+    bash "$LEDGER" record-ask a1 'ship the widget' --now "$((NOW - 86400))" ||
+    fail "record-ask must append an ask"
   out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
         FM_CONFIG_OVERRIDE="$home/config" FM_FLOW_LEDGER_TEAMS='' \
         bash "$LEDGER" report --now "$NOW" 2>&1)
   assert_contains "$out" 'no teams configured' \
     "an absent team list must be named so an unmeasured rule is not read as clean"
+  assert_not_contains "$out" "$(printf 'B1\tbreach\ta1')" \
+    "an absent team list must never turn an open ask into a false B1 breach"
   pass "absent team list is named"
 }
 
@@ -309,6 +322,47 @@ test_ask_log_round_trips_through_record_and_close() {
   pass "ask log"
 }
 
+test_b5_age_is_measured_from_the_frozen_clock() {
+  local home out
+  home=$(fixture_home b5clock)
+  write_linear "$home"
+  mkdir -p "$home/data"
+  fm_test_tasks_toml "$home/.tasks.toml"
+  FM_HOME="$home" bash "$ROOT/bin/fm-tasks-axi.sh" add hold-critical \
+    'rotate the leaked production secret' --repo demo >/dev/null 2>&1 ||
+    fail "fixture could not file the critical hold"
+  FM_HOME="$home" bash "$ROOT/bin/fm-captain-hold.sh" hold hold-critical \
+    --reason 'Recommend: rotate now. Decide which keys first.' >/dev/null 2>&1 ||
+    fail "fixture could not hold the critical task"
+
+  # tasks-axi records `created` from the backlog's `(since <date>)`, so rewrite
+  # it to sit exactly two whole UTC days before the frozen clock. That makes the
+  # hold inside the 24h window at NOW and past it at NOW + 48h; a rule reading
+  # the wall clock would report the same age for both runs.
+  local since later
+  since=$(date -u -d "@$((NOW - 172800))" +%Y-%m-%d)
+  later=$(date -u -d "@$((NOW + 172800))" +%Y-%m-%d)
+  sed -i "s/(since [0-9-]*)/(since $since)/" "$home/data/backlog.md"
+  assert_grep "(since $since)" "$home/data/backlog.md" \
+    "the fixture must backdate the hold it measures"
+
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+        FM_CONFIG_OVERRIDE="$home/config" FM_FLOW_LEDGER_GRAPHQL="file:$home/linear.json" \
+        FM_FLOW_LEDGER_TEAMS='' bash "$LEDGER" report --now "$NOW" 2>&1)
+  assert_contains "$out" "$(printf 'B5\tbreach\thold-critical')" \
+    "a critical hold two days old at the frozen clock must breach"
+
+  # Move the anchor forward so the same hold is only hours old at the later
+  # clock. If --now were ignored, the age would be unchanged and still breach.
+  sed -i "s/(since [0-9-]*)/(since $later)/" "$home/data/backlog.md"
+  out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
+        FM_CONFIG_OVERRIDE="$home/config" FM_FLOW_LEDGER_GRAPHQL="file:$home/linear.json" \
+        FM_FLOW_LEDGER_TEAMS='' bash "$LEDGER" report --now "$((NOW + 172800))" 2>&1)
+  assert_not_contains "$out" "$(printf 'B5\tbreach\thold-critical')" \
+    "the same hold must not breach when --now moves with its creation date"
+  pass "B5 uses the frozen clock"
+}
+
 test_report_is_deterministic_for_the_same_inputs() {
   local home first second
   home=$(fixture_home determinism)
@@ -332,5 +386,6 @@ fm_test_run \
   test_b5_holds_without_a_recommendation_are_reported \
   test_unreadable_linear_input_is_named_not_reported_clean \
   test_missing_teams_is_named_rather_than_silently_clean \
+  test_b5_age_is_measured_from_the_frozen_clock \
   test_ask_log_round_trips_through_record_and_close \
   test_report_is_deterministic_for_the_same_inputs
