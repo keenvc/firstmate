@@ -707,6 +707,15 @@ SHARED_NO_POLL_RULE="10. Never wait by polling: no \`sleep N\` followed by a sta
    Block in ONE shell command that returns when the state changes and prints one line: \`'$FM_WAIT_Q' pr <pr-url> --until checks\` (or \`merged\`, \`head\`, \`change\`); for a build, \`'$FM_WAIT_Q' status <owner/repo> <sha> --context buildkite/<pipeline>\` (one GitHub read, no Buildkite request); \`'$FM_WAIT_Q' file <path> --grep <regex>\` or \`'$FM_WAIT_Q' pid <pid>\` for your own jobs.
    Pass your shell tool its maximum timeout; on exit 124 run the same command again with nothing in between."
 
+# One shared string keeps the ship and scout read-size rule identical. A tool
+# result stays in the context and is re-sent on every later call, so one
+# 50k-character log read costs ~13k tokens per remaining call of the session.
+IFS= read -r -d '' SHARED_READ_CAP_RULE <<'EOF' || true
+11. Keep every tool output under about 8,000 characters. Read logs, CI output, reports and large files with `tail -c 8000`, `grep -n -m 40 <pattern>`, `sed -n '<from>,<to>p'` or `head -c 8000`, never a whole-file `cat`; pipe noisy commands through `| tail -c 8000`.
+   Read each file once: note what you need instead of re-reading it, and re-read only a range you have not seen.
+EOF
+SHARED_READ_CAP_RULE=${SHARED_READ_CAP_RULE%$'\n'}
+
 if [ -n "$BASE_BRANCH" ]; then
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean copy of its base branch.
 Base branch: $BASE_BRANCH"
@@ -757,6 +766,7 @@ $SHARED_INFRA_RULE
 $SHARED_NO_CD_RULE
 $SHARED_NO_NAME_KILL_RULE
 $SHARED_NO_POLL_RULE
+$SHARED_READ_CAP_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 
@@ -844,6 +854,7 @@ $SHARED_INFRA_RULE
 $SHARED_NO_CD_RULE
 $SHARED_NO_NAME_KILL_RULE
 $SHARED_NO_POLL_RULE
+$SHARED_READ_CAP_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 

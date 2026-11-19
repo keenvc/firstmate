@@ -4593,13 +4593,41 @@ if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   fi
   # Use the existing launch-brief overlay for every worker kind, including
   # pre-scope briefs and relaunches. Charters never enter this worker path.
+  #
+  # The launch copy carries only the newest few relaunch progress notes.
+  # bin/fm-control.sh appends one "## Progress note (<utc>)" section to the
+  # source brief per relaunch, and the launch brief is the worker's first
+  # prompt, re-sent on every model call of its session: a steward relaunched
+  # 51 times carried a 72.6k-character launch brief (~18k tokens) on every
+  # call. Older notes stay in the source brief, which the launch copy names.
+  # FM_LAUNCH_BRIEF_PROGRESS_NOTES (default 3) sets how many are carried.
+  launch_brief_body() {  # <source-brief>
+    local keep=${FM_LAUNCH_BRIEF_PROGRESS_NOTES:-3}
+    case "$keep" in ''|*[!0-9]*) keep=3 ;; esac
+    awk -v keep="$keep" -v src="$1" '
+      /^## Progress note \([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:]+Z\)$/ { n++ }
+      { line[NR] = $0; note[NR] = n }
+      END {
+        drop = n - keep
+        for (i = 1; i <= NR; i++) {
+          if (note[i] > 0 && note[i] <= drop) {
+            if (!told) {
+              printf "## Earlier progress notes\n\n%d earlier progress notes are omitted from this launch copy; the full text is in %s (search it with grep or read its tail rather than the whole file).\n\n", drop, src
+              told = 1
+            }
+            continue
+          }
+          print line[i]
+        }
+      }' "$1"
+  }
   SOURCE_BRIEF=$BRIEF
   BRIEF="$DATA/$ID/launch-brief.md"
   BRIEF_TMP="$DATA/$ID/.launch-brief.md.${BASHPID:-$$}"
   {
     fm_brief_worker_role "$STATE" "$ID" "$FM_ROOT" &&
       printf '\n' &&
-      cat "$SOURCE_BRIEF" &&
+      launch_brief_body "$SOURCE_BRIEF" &&
       if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
         fm_brief_intent_overlay "$CAPTAIN_INTENT"
       fi
