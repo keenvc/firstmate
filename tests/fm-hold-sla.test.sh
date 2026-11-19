@@ -51,6 +51,7 @@ SH
 }
 
 make_fake_send() {  # <dir>
+  # shellcheck disable=SC2016 # expanded by the fake, not here
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "${FAKE_SEND_LOG:?}"\n' > "$1/fm-send"
   chmod +x "$1/fm-send"
 }
@@ -88,6 +89,8 @@ needs-decision [key=dup-a] [at=$OLD]: merge https://github.com/o/r/pull/7 now?
 needs-decision [key=dup-b] [at=$((OLD + 10))]: ok to merge https://github.com/o/r/pull/7 once green?
 needs-decision [key=landed] [at=$OLD]: merge https://github.com/o/r/pull/9 ?
 needs-decision [key=no-rec] [at=$OLD]: what should the lane do next?
+needs-decision [key=fresh-amb] [at=$((NOW - 60))]: how should the retry behave? Recommend: retry twice
+needs-decision [key=baa-call] [at=$OLD]: [class=legal] does the vendor contract cover us? Recommend: sign it
 EOF
 }
 
@@ -98,9 +101,16 @@ test_classify_protects_captain_only_classes() {
   out=$("$SLA" classify "approve the ad spend top-up of 200 USD")
   assert_contains "$out" "class=captain-only:spend" "a spending hold was not captain-only: $out"
   out=$("$SLA" classify "rename the nav label? Recommend: Inbox")
-  assert_contains "$out" "class=routine" "a cosmetic hold was not routine: $out"
+  assert_contains "$out" "class=quick" "a naming call did not resolve immediately: $out"
   assert_contains "$out" "default=Inbox" "the recorded recommendation was not taken as the default: $out"
-  pass "classify separates routine from captain-only holds"
+  out=$("$SLA" classify "write the clinic rows into production data")
+  assert_contains "$out" "class=captain-only:prod-write" "a production data write was not critical: $out"
+  out=$("$SLA" classify "[class=incident] keep the flag off")
+  assert_contains "$out" "class=captain-only:incident" "an explicit critical class was ignored: $out"
+  out=$("$SLA" classify "should the worker retry the flaky step")
+  assert_contains "$out" "class=ambiguous" "an unclear hold was not ambiguous: $out"
+  assert_contains "$out" "not a captain call" "an ambiguous hold with no recommendation got no default: $out"
+  pass "classify keeps only critical holds for the captain"
 }
 
 test_report_is_read_only() {
@@ -112,8 +122,9 @@ test_report_is_read_only() {
   [ "$before" = "$after" ] || fail "report changed a status log"
   [ ! -e "$MAIN/state/hold-sla" ] || fail "report wrote SLA state"
   out=$(cat "$TMP_ROOT/report.md")
-  assert_contains "$out" "open holds: 9" "report headline count is wrong"
-  assert_contains "$out" "captain-only:prod" "report did not list the production hold as captain-only"
+  assert_contains "$out" "open holds: 11" "report headline count is wrong"
+  assert_contains "$out" "captain-only:prod-write" "report did not list the production hold as critical"
+  assert_contains "$out" "resolve IMMEDIATELY (duplicate, moot, green+CLEAN PR, quick call, captain-parked): 7" "report immediate count is wrong"
   assert_contains "$out" "| moot |" "report did not list the moot mirror"
   grep -q 'pr edit\|pr comment\|pr merge' "$TMP_ROOT/gh.log" && fail "report mutated a PR"
   [ ! -s "$TMP_ROOT/send.log" ] || fail "report sent a message"
@@ -130,9 +141,9 @@ test_dry_run_changes_nothing() {
   tasks_in "$MATE" show wording-q | grep -q 'held: yes' || fail "dry sweep closed a held task"
   grep -q 'pr edit\|pr comment\|pr merge' "$TMP_ROOT/gh.log" && fail "dry sweep mutated a PR"
   [ ! -s "$TMP_ROOT/send.log" ] || fail "dry sweep sent a message"
-  grep -q '^.* DRY expire ask .*key=ux-copy' "$MAIN/state/hold-sla/hold-sla.log" || fail "dry sweep did not log the planned ask resolution"
+  grep -q '^.* DRY expire quick .*key=ux-copy' "$MAIN/state/hold-sla/hold-sla.log" || fail "dry sweep did not log the planned ask resolution"
   [ -f "$MAIN/state/hold-sla/digest-latest.md" ] || fail "dry sweep wrote no digest"
-  ls "$MAIN/state/hold-sla/records/" | grep -q 'ux-copy' || fail "dry sweep did not record the SLA at first sight"
+  compgen -G "$MAIN/state/hold-sla/records/*ux-copy*" >/dev/null || fail "dry sweep did not record the SLA at first sight"
   pass "a dry sweep records SLAs and plans but changes nothing"
 }
 
@@ -141,10 +152,10 @@ test_live_sweep_resolves_routine_and_escalates_the_rest() {
   setup_world
   out=$(run_sla "$MAIN" sweep --live) || fail "live sweep failed: $out"
   open=$(open_keys "$MAIN/state/mate.status")
-  for k in ux-copy captain-hold-gone-q-1 captain-hold-wording-q-1 dup-a dup-b landed; do
-    case " $open " in *" $k "*) fail "routine hold $k stayed open: $open" ;; esac
+  for k in ux-copy captain-hold-gone-q-1 captain-hold-wording-q-1 dup-a dup-b landed fresh-ask no-rec; do
+    case " $open " in *" $k "*) fail "non-critical hold $k stayed open: $open" ;; esac
   done
-  for k in prod-flip fresh-ask no-rec; do
+  for k in prod-flip baa-call fresh-amb; do
     case " $open " in *" $k "*) ;; *) fail "hold $k should stay open: $open" ;; esac
   done
   show=$(tasks_in "$MATE" show wording-q --full)
@@ -155,12 +166,15 @@ test_live_sweep_resolves_routine_and_escalates_the_rest() {
   grep -q 'pr comment 7 -R o/r' "$TMP_ROOT/gh.log" || fail "the green CLEAN PR was not queued"
   grep -q 'pr edit 7 -R o/r --remove-label captain-hold' "$TMP_ROOT/gh.log" || fail "the hold label was not lifted"
   grep -q 'pr comment 9\|pr edit 9' "$TMP_ROOT/gh.log" && fail "the merged PR was touched"
-  grep -q 'mate --fire-and-forget .*ux-copy.*keep Save' "$TMP_ROOT/send.log" || fail "the ask default was not delivered to its owner"
+  grep -q 'mate --fire-and-forget .*ux-copy.*keep Save' "$TMP_ROOT/send.log" || fail "the quick default was not delivered to its owner"
+  grep -q 'mate --fire-and-forget .*no-rec.*decide it yourself' "$TMP_ROOT/send.log" || fail "a hold with no recommendation was not converted to the owner's own decision"
   digest=$(cat "$MAIN/state/hold-sla/digest-latest.md")
   assert_contains "$digest" "prod-flip" "the production hold is missing from the digest"
-  assert_contains "$digest" "no-rec" "the hold with no default is missing from the digest"
+  assert_contains "$digest" "baa-call" "the legal hold is missing from the digest"
+  assert_contains "$digest" "sign it" "the critical hold's recommendation is missing from the digest"
+  case "$digest" in *no-rec*) fail "a non-critical hold reached the digest" ;; esac
   assert_contains "$digest" "bin/fm-send.sh mate --resolve-key prod-flip" "the digest has no answer command"
-  case "$digest" in *fresh-ask*) fail "a hold inside its SLA reached the digest" ;; esac
+  case "$digest" in *fresh-amb*) fail "a hold inside its deadline reached the digest" ;; esac
   grep -rqs 'hold-sla-digest-' "$MAIN/state" --include='*' --exclude-dir=hold-sla || fail "the digest raised no captain wake"
   lines=$(wc -l < "$MAIN/state/mate.status")
   out=$(run_sla "$MAIN" sweep --live) || fail "second live sweep failed: $out"
@@ -172,13 +186,24 @@ test_live_sweep_resolves_routine_and_escalates_the_rest() {
 test_overrides_cannot_unprotect() {
   local out
   setup_world
-  run_sla "$MAIN" set prod-flip --class ask --default "flip it" >/dev/null
+  run_sla "$MAIN" set prod-flip --class quick --default "flip it" >/dev/null
   run_sla "$MAIN" set ux-copy --class captain-only:manual >/dev/null
   out=$(run_sla "$MAIN" sweep --live) || fail "sweep failed: $out"
   out=$(open_keys "$MAIN/state/mate.status")
   case " $out " in *" prod-flip "*) ;; *) fail "an override made a production hold routine" ;; esac
-  case " $out " in *" ux-copy "*) ;; *) fail "an override could not tighten a routine hold" ;; esac
+  case " $out " in *" ux-copy "*) ;; *) fail "an override could not make a hold critical" ;; esac
   pass "overrides tighten but never loosen protection"
+}
+
+test_action_cap_drains_gradually() {
+  local out before after
+  setup_world
+  before=$(open_keys "$MAIN/state/mate.status" | wc -w)
+  out=$(FM_HOLD_SLA_MAX_ACTIONS=2 run_sla "$MAIN" sweep --live) || fail "capped sweep failed: $out"
+  after=$(open_keys "$MAIN/state/mate.status" | wc -w)
+  [ $((before - after)) -le 2 ] || fail "the action cap let $((before - after)) holds resolve in one sweep"
+  grep -q 'action cap 2 reached' "$MAIN/state/hold-sla/hold-sla.log" || fail "the cap was not logged"
+  pass "a live sweep acts on at most FM_HOLD_SLA_MAX_ACTIONS holds"
 }
 
 test_sla_close_refuses_held_work_and_replays() {
@@ -190,8 +215,11 @@ test_sla_close_refuses_held_work_and_replays() {
   set +e
   out=$(captain_in "$home" sla-close work-item --evidence-file "$TMP_ROOT/ev.txt" 2>&1); rc=$?
   set -e
-  [ "$rc" -ne 0 ] || fail "sla-close freed a held work item"
-  assert_contains "$out" "held work item" "the refusal did not name the reason: $out"
+  [ "$rc" -ne 0 ] || fail "sla-close closed a held work item"
+  assert_contains "$out" "--release" "the refusal did not point at --release: $out"
+  captain_in "$home" sla-close work-item --evidence-file "$TMP_ROOT/ev.txt" --release >/dev/null || fail "sla-close --release failed"
+  tasks_in "$home" show work-item | grep -q 'held: no' || fail "sla-close --release did not lift the work hold"
+  tasks_in "$home" show work-item | grep -q 'state: done' && fail "sla-close --release closed the work"
   captain_in "$home" hold q --title "Captain call: q" --reason "q? Recommend: a" >/dev/null || fail "hold q"
   captain_in "$home" sla-close q --evidence-file "$TMP_ROOT/ev.txt" >/dev/null || fail "sla-close of a question failed"
   captain_in "$home" sla-close q --evidence-file "$TMP_ROOT/ev.txt" >/dev/null || fail "an exact sla-close retry was not idempotent"
@@ -202,7 +230,27 @@ test_sla_close_refuses_held_work_and_replays() {
   captain_in "$home" sla-close q2 --evidence-file "$TMP_ROOT/cw.txt" >/dev/null 2>&1; rc=$?
   set -e
   [ "$rc" -ne 0 ] || fail "sla-close replayed over a captain answer"
-  pass "sla-close closes only question rows and never overwrites a captain answer"
+  pass "sla-close closes question rows, releases work items, and never overwrites a captain answer"
+}
+
+test_hold_requires_a_critical_class_when_enforced() {
+  local home out rc
+  home=$(make_home enforce)
+  : > "$home/config/hold-require-class"
+  set +e
+  out=$(FM_CONFIG_OVERRIDE="$home/config" captain_in "$home" hold soft-q --title "Captain call: soft" --reason "which tab name?" 2>&1); rc=$?
+  set -e
+  [ "$rc" = 3 ] || fail "an unclassified hold was not converted (rc=$rc): $out"
+  assert_contains "$out" "converted: soft-q" "the conversion was not reported: $out"
+  tasks_in "$home" show soft-q >/dev/null 2>&1 && fail "a converted hold still created a task"
+  FM_CONFIG_OVERRIDE="$home/config" captain_in "$home" hold spend-q --title "Captain call: spend" --class spend --reason "buy the plan? Recommend: no" >/dev/null \
+    || fail "a classified hold was refused"
+  env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE FM_HOME="$home" "$ROOT/bin/fm-tasks-axi.sh" show spend-q | grep -q "class=spend" || fail "the class was not stored on the hold"
+  set +e
+  FM_CONFIG_OVERRIDE="$home/config" captain_in "$home" hold spend-q --class nonsense --reason x >/dev/null 2>&1; rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "an unknown class was accepted"
+  pass "with enforcement on, only a critical class can raise a captain hold"
 }
 
 set -e
@@ -214,5 +262,8 @@ rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
 test_live_sweep_resolves_routine_and_escalates_the_rest
 rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
 test_overrides_cannot_unprotect
+rm -rf "$TMP_ROOT/main" "$TMP_ROOT/mate"
+test_action_cap_drains_gradually
 test_sla_close_refuses_held_work_and_replays
+test_hold_requires_a_critical_class_when_enforced
 echo "ok: fm-hold-sla"

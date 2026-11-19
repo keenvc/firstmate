@@ -1,33 +1,39 @@
 #!/usr/bin/env bash
-# fm-hold-sla.sh - a deadline and a default action for every open captain hold.
+# fm-hold-sla.sh - resolve every captain hold that is not critical, and give
+# the critical ones a one-word answer in one daily digest.
 #
-# A captain hold that nobody answers is the slowest thing in the pipeline: the
-# answered ones take minutes, the unanswered ones sit for days. This command
-# gives every open hold a deadline (FM_HOLD_SLA_HOURS, default 24h, per class
-# FM_HOLD_SLA_HOURS_<CLASS>) and the default action recorded when it was first
-# seen - the recommendation the raising agent already wrote. At expiry:
+# Owner policy (2026-11-19): "significantly limit the human delay by not
+# requiring it unless absolutely critical." A hold costs the pipeline hours; an
+# answered one takes minutes. So the default for EVERY hold is its recorded
+# recommendation (the default the raising agent wrote: "Recommend: ...",
+# "Suggest: ...", "Default: ..."), applied by firstmate, not asked of the
+# captain:
 #
-#   routine classes resolve to their default automatically:
+#   immediate (no wait, FM_HOLD_SLA_HOURS_IMMEDIATE=0):
 #     duplicate   - another open hold has the same task, PR, or key; the older
 #                   copies close as superseded, the newest stays.
 #     moot        - the subject already resolved: a mirrored secondmate task is
-#                   closed or no longer held, or (routine only) the PR the hold
-#                   is about is merged or closed.
-#     pr-merge    - a routine hold on a PR: merged (Mergify queue by default)
-#                   only when CI is green AND the newest review VERDICT on the
-#                   current head is CLEAN; otherwise it stays and is listed.
-#     ask         - any other routine question with a recorded default: closed
-#                   with that default and the default delivered to its owner.
-#     parked      - a backlog hold the captain already parked ("deferred under
-#                   captain-approved triage", "keep paused"): not a question, so
-#                   it is re-held with --until today+FM_HOLD_SLA_PARK_DAYS (30)
-#                   and leaves Captain's Call until that date.
-#   captain-only classes never auto-resolve, whatever their age: production
-#   writes, PHI, credentials/security, spending money, destructive data changes,
-#   incidents (FM_HOLD_SLA_PROTECTED_* patterns, matched over the hold text and,
-#   for a PR, its title, labels, and changed paths). A routine-looking hold with
-#   no recorded default and a held WORK item (freeing work is attended-only) are
-#   treated the same way. They stay held and are escalated in ONE daily digest.
+#                   closed or no longer held, or the PR is merged or closed.
+#     pr-merge    - a hold on a PR that is CI green with a CLEAN review verdict
+#                   on its current head: hold labels lifted, Mergify queue. A PR
+#                   not yet green/CLEAN just waits; it is not a captain ask.
+#     quick       - design calls between equivalent options, naming/wording,
+#                   numbering and ordering rulings, requeue/dequeue, "which PR
+#                   first" (FM_HOLD_SLA_QUICK).
+#     parked      - a backlog hold the captain already parked; re-held with
+#                   --until today+FM_HOLD_SLA_PARK_DAYS so it leaves Captain's Call.
+#   ambiguous (everything else): FM_HOLD_SLA_HOURS (default 2h), then resolved
+#     to its recommendation; with none recorded, the owner is told it is not a
+#     captain call and to decide and record it. A held WORK item is released.
+#   critical (never auto-resolved): an explicit [class=<c>] tag
+#     (fm-captain-hold.sh hold --class) or a match on the FM_HOLD_SLA_CRIT_*
+#     patterns: prod-write (production data, production secrets, Key Vault),
+#     exposure (PHI / credential / security exposure findings), spend (spending
+#     money, paid plans), destructive (irreversible data operations), incident
+#     (an open incident), legal (legal / compliance / BAA). A PR also counts as
+#     prod-write when it changes migrations, secrets, infra, or deploy paths.
+#     These stay held and go into ONE daily digest, each with its recommendation
+#     and the one-line command that answers it.
 #
 # Usage:
 #   fm-hold-sla.sh scan                       TSV of open holds (read-only)
@@ -44,12 +50,13 @@
 #
 # sweep is a dry run unless --live or FM_HOLD_SLA_LIVE=1. A dry run writes only
 # under state/hold-sla/ (records, log, digest) and never closes, merges, sends,
-# or wakes. Live actions: a status-log close is one guarded self-announced
+# or wakes. A live sweep acts on at most FM_HOLD_SLA_MAX_ACTIONS (25) holds, so
+# a large backlog drains over several sweeps instead of in one burst. Live actions: a status-log close is one guarded self-announced
 # `resolved [key=...]: hold-sla ...` append (bin/fm-wake-lib.sh); a task-backed
 # hold closes through `fm-captain-hold.sh sla-close`, whose record says
-# "SLA default applied", never "Captain decision"; an ask's default is delivered
-# to its owner fire-and-forget through bin/fm-send.sh; the digest raises one
-# `check` wake per UTC day. Config: optional config/hold-sla.env (KEY=VALUE).
+# "SLA default applied", never "Captain decision" (`--release` for a held work
+# item); the applied default is delivered to its owner fire-and-forget through
+# bin/fm-send.sh; the digest raises one `check` wake per UTC day. Config: optional config/hold-sla.env (KEY=VALUE).
 #
 # State: state/hold-sla/records/<id>.sla (first_seen, deadline, class, default),
 # state/hold-sla/overrides/<key>.set, state/hold-sla/hold-sla.log,
@@ -75,7 +82,8 @@ if [ -f "$CONFIG/hold-sla.env" ]; then
   done < "$CONFIG/hold-sla.env"
 fi
 
-HOURS_DEFAULT=${FM_HOLD_SLA_HOURS:-24}
+HOURS_DEFAULT=${FM_HOLD_SLA_HOURS:-2}
+MAX_ACTIONS=${FM_HOLD_SLA_MAX_ACTIONS:-25}
 GH=${FM_HOLD_SLA_GH:-gh}
 TASKS_AXI=${FM_HOLD_SLA_TASKS_AXI:-$FM_ROOT/bin/fm-tasks-axi.sh}
 CAPTAIN_HOLD=${FM_HOLD_SLA_CAPTAIN_HOLD:-$FM_ROOT/bin/fm-captain-hold.sh}
@@ -93,32 +101,42 @@ NOTIFY_OWNER=${FM_HOLD_SLA_NOTIFY_OWNER:-1}
 NOW=${FM_HOLD_SLA_NOW:-$(date +%s)}
 TODAY=$(date -u -d "@$NOW" +%F 2>/dev/null || date -u -r "$NOW" +%F)
 
-# Captain-only patterns (extended regex, matched case-insensitively on word
-# boundaries). Each is overridable; the class name is what the digest prints.
-P_INCIDENT=${FM_HOLD_SLA_PROTECTED_INCIDENT:-incident|outage|sev[0-9]|p0|breach|leak|leaked|leaking|urgent}
-P_PHI=${FM_HOLD_SLA_PROTECTED_PHI:-phi|hipaa|baa|pii|patient|patients}
-P_SECURITY=${FM_HOLD_SLA_PROTECTED_SECURITY:-security|credential|credentials|secret|secrets|token|tokens|password|passwords|api[ -]?key|keys|pat|oauth|sso|rls|auth|vuln|vulnerability|cve|permission|permissions|access}
-P_SPEND=${FM_HOLD_SLA_PROTECTED_SPEND:-spend|spending|budget|billing|invoice|payment|payments|paid|purchase|buy|subscription|top-?up|credit|credits|cost|money|refund|stripe|usd|price|pricing}
-P_PROD=${FM_HOLD_SLA_PROTECTED_PROD:-prod|production|deploy|deployment|go-live|cutover|rollout|migration|migrations|migrate|dns|live}
-P_DESTRUCTIVE=${FM_HOLD_SLA_PROTECTED_DESTRUCTIVE:-delete|deletion|deleting|drop|truncate|purge|wipe|destroy|discard|force-push|backfill|reset}
-P_PARKED=${FM_HOLD_SLA_PARKED:-[Dd]eferred under captain-approved triage|[Kk]eep paused|parked list|[Pp]ark until}
+# Critical patterns (extended regex, lower-cased text, word boundaries). Each
+# is overridable; the class name is what the digest prints.
+P_PROD_WRITE=${FM_HOLD_SLA_CRIT_PROD_WRITE:-}; [ -n "$P_PROD_WRITE" ] || P_PROD_WRITE='key ?vault|kv secret|secret|secrets|credential|credentials|password|passwords|api ?keys?|rotate|rotation|prod(uction)? (data|db|database|secret|secrets|row|rows|write|writes|table|tables|records?|flag|flags|config|setting|settings|env)|(write|writes|insert|update|apply|set|rotate|seed)[a-z ]{0,30} (in|to|into|on) prod(uction)?|production secret|prod secret'
+P_EXPOSURE=${FM_HOLD_SLA_CRIT_EXPOSURE:-}; [ -n "$P_EXPOSURE" ] || P_EXPOSURE='phi|hipaa|pii|patient data|exposure|exposed|leak|leaked|leaking|breach|cross-(tenant|clinic)|vulnerability|vuln|cve|credential (leak|exposure)|secret exfil|security finding|security incident'
+P_SPEND=${FM_HOLD_SLA_CRIT_SPEND:-}; [ -n "$P_SPEND" ] || P_SPEND='spend|spending|ad spend|budget|invoice|payment|purchase|buy|paid plan|subscription|upgrade (the )?plan|top-?up|credit card|charge|\$[0-9]+|[0-9]+ ?usd'
+P_DESTRUCTIVE=${FM_HOLD_SLA_CRIT_DESTRUCTIVE:-}; [ -n "$P_DESTRUCTIVE" ] || P_DESTRUCTIVE='delete (the )?(data|rows|records|table|database|db|bucket|backups?)|drop (table|database|column)|truncate|purge|wipe|destroy|irreversible|backfill|overwrite (data|rows|records)|hard delete'
+P_INCIDENT=${FM_HOLD_SLA_CRIT_INCIDENT:-}; [ -n "$P_INCIDENT" ] || P_INCIDENT='incident|outage|sev[0-9]|p0'
+P_LEGAL=${FM_HOLD_SLA_CRIT_LEGAL:-}; [ -n "$P_LEGAL" ] || P_LEGAL='legal|compliance|baa|contract|counsel|lawyer|terms of service|gdpr|licen[cs]e|licensing|copyright|regulator|regulatory'
+P_QUICK=${FM_HOLD_SLA_QUICK:-}; [ -n "$P_QUICK" ] || P_QUICK='option [a-d]|options|either|equivalent|naming|name|rename|wording|copy|label|labels|design|layout|ordering|order|numbering|renumber|number|requeue|dequeue|queue|rebase|sequence|first|priority|prioriti[sz]e'
+P_PARKED=${FM_HOLD_SLA_PARKED:-}; [ -n "$P_PARKED" ] || P_PARKED='[Dd]eferred under captain-approved triage|[Kk]eep paused|parked list|[Pp]ark until'
 PARK_DAYS=${FM_HOLD_SLA_PARK_DAYS:-30}
-P_PATHS=${FM_HOLD_SLA_PROTECTED_PATHS:-(^|/)(infra|migrations?|db|auth|billing|payments?|secrets?)(/|$)|\.github/workflows/|\.buildkite/|\.env|deploy}
+P_PATHS=${FM_HOLD_SLA_CRIT_PATHS:-}; [ -n "$P_PATHS" ] || P_PATHS='(^|/)(infra|migrations?|secrets?|keyvault)(/|$)|\.env|deploy'
+CRIT_CLASSES='prod-write exposure spend destructive incident legal'
+NO_DEFAULT='no recommendation was recorded: this is not a captain call - decide it yourself, record the decision, and carry on'
 
-# Prints the captain-only class for <text>, or nothing when it is routine.
+# Prints the critical class for <text>, or nothing. An explicit [class=<c>] tag
+# naming a critical class wins; otherwise the patterns decide.
 protected_class() {  # <text>
-  local t c pat
+  local t c pat tag
+  tag=$(printf '%s' "$1" | grep -Eo '\[class=[a-z-]+\]' | head -1 | sed 's/^\[class=//; s/\]$//')
+  case " $CRIT_CLASSES " in *" $tag "*) [ -z "$tag" ] || { printf '%s\n' "$tag"; return 0; } ;; esac
   t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-  for c in incident phi security spend prod destructive; do
+  for c in $CRIT_CLASSES; do
     case "$c" in
-      incident) pat=$P_INCIDENT ;; phi) pat=$P_PHI ;; security) pat=$P_SECURITY ;;
-      spend) pat=$P_SPEND ;; prod) pat=$P_PROD ;; destructive) pat=$P_DESTRUCTIVE ;;
+      prod-write) pat=$P_PROD_WRITE ;; exposure) pat=$P_EXPOSURE ;; spend) pat=$P_SPEND ;;
+      destructive) pat=$P_DESTRUCTIVE ;; incident) pat=$P_INCIDENT ;; legal) pat=$P_LEGAL ;;
     esac
     if printf '%s' "$t" | grep -Eq "(^|[^a-z0-9])($pat)([^a-z0-9]|$)"; then
       printf '%s\n' "$c"; return 0
     fi
   done
   return 0
+}
+
+is_quick() {  # <text>
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | grep -Eq "(^|[^a-z0-9])($P_QUICK)([^a-z0-9]|$)"
 }
 
 # The agent's own recommendation, if it wrote one.
@@ -254,19 +272,20 @@ pr_facts() {  # <repo> <n>
         | last // "" | test("VERDICT\\W*:?\\W*(CLEAN|PASS|APPROVE)"; "i")' >/dev/null 2>&1; then
     PR_CLEAN=1
   fi
-  PR_PROTECT=$(protected_class "$(printf '%s' "$json" | jq -r '.title + " " + ([.labels[]?.name] | join(" "))')")
+  PR_PROTECT=$(protected_class "$(printf '%s' "$json" | jq -r '.title')")
   if [ -z "$PR_PROTECT" ] && printf '%s' "$json" | jq -r '.files[]?.path' | grep -Eiq "$P_PATHS"; then
-    PR_PROTECT=paths
+    PR_PROTECT=prod-write
   fi
   [ "$PR_GREEN" = 1 ] || PR_WHY="CI not green, draft, or conflicting"
   [ "$PR_CLEAN" = 1 ] || PR_WHY="${PR_WHY:+$PR_WHY; }no CLEAN verdict on head ${head:0:8}"
   return 0
 }
 
-# classify one row -> sets CLS (routine class or captain-only:<why>), DEFAULT
+# classify one row -> sets CLS, DEFAULT, HOURS, MOOT, RELEASE. CLS is one of
+# duplicate moot pr-merge quick parked ambiguous wait:<why> captain-only:<class>.
 classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
-  local rid=$1 source=$2 owner=$3 key=$4 task=$5 text=$6 dup=$7 prot ts ov
-  DEFAULT=$(extract_default "$text") HOURS=$HOURS_DEFAULT MOOT=''
+  local rid=$1 source=$2 owner=$3 key=$4 task=$5 text=$6 dup=$7 prot ts ov kindf=''
+  DEFAULT=$(extract_default "$text") HOURS=$HOURS_DEFAULT MOOT='' RELEASE=0
   ov="$SLA_DIR/overrides/$(safe_name "$key").set"
   prot=$(protected_class "$text")
   if [ "$dup" = 1 ]; then CLS=duplicate
@@ -274,41 +293,48 @@ classify_row() {  # <rid> <source> <owner> <key> <task> <text> <is_dup>
     # Already answered: the captain parked it. It is not an open question, only
     # an undated hold; the default re-dates it so it leaves Captain's Call.
     CLS=parked DEFAULT="re-hold with --until $(date -u -d "@$((NOW + PARK_DAYS * 86400))" +%F 2>/dev/null) (captain already parked it)"
-  elif [ "$source" = status ] && [ -n "$task" ]; then
-    ts=$(mirror_task_state "$owner" "$task")
-    case "$ts" in
-      unknown|'') CLS="captain-only:unverifiable-mirror" ;;
-      absent) CLS=moot MOOT="mirrored task $task is absent from $owner's backlog" ;;
-      done\ *) CLS=moot MOOT="mirrored task $task is closed in $owner's home" ;;
-      *\ no\ *) CLS=moot MOOT="mirrored task $task is no longer held in $owner's home" ;;
-      *) CLS='' ;;
-    esac
+  else
+    if [ "$source" = status ] && [ -n "$task" ]; then
+      ts=$(mirror_task_state "$owner" "$task")
+      case "$ts" in
+        unknown|'') CLS="wait:unverifiable-mirror" ;;
+        absent) CLS=moot MOOT="mirrored task $task is absent from $owner's backlog" ;;
+        done\ *) CLS=moot MOOT="mirrored task $task is closed in $owner's home" ;;
+        *\ no\ *) CLS=moot MOOT="mirrored task $task is no longer held in $owner's home" ;;
+        *) CLS=''; kindf=${ts##* } ;;
+      esac
+    elif [ "$source" = task ]; then
+      CLS=''; kindf=$(mirror_kind_main "$key")
+    else
+      CLS=''
+    fi
     if [ -z "$CLS" ]; then
       if [ -n "$prot" ]; then CLS="captain-only:$prot"
-      elif [ "${ts##* }" != captain ]; then CLS="captain-only:held-work"
-      elif [ -z "$DEFAULT" ]; then CLS="captain-only:no-default"
-      else CLS=ask; fi
+      elif [ "${rid%%:*}" = pr ]; then CLS="pr-merge"
+      elif is_quick "$text"; then CLS=quick
+      else CLS=ambiguous; fi
+      [ -n "$kindf" ] && [ "$kindf" != captain ] && RELEASE=1
     fi
-  elif [ "${rid%%:*}" = pr ]; then
-    if [ -n "$prot" ]; then CLS="captain-only:$prot"; else CLS="pr-merge"; fi
-  elif [ -n "$prot" ]; then CLS="captain-only:$prot"
-  elif [ "$source" = task ] && [ -z "$DEFAULT" ]; then CLS="captain-only:no-default"
-  elif [ -z "$DEFAULT" ]; then CLS="captain-only:no-default"
-  else CLS=ask; fi
+  fi
   if [ -f "$ov" ]; then
     local oc od oh
     oc=$(meta_get "$ov" class); od=$(meta_get "$ov" default); oh=$(meta_get "$ov" hours)
-    # An override may tighten a routine hold to captain-only, or record the
-    # default; it can never turn a protected hold routine.
-    if [ -n "$oc" ] && { [ "${CLS%%:*}" != captain-only ] || [ "${oc%%:*}" = captain-only ]; }; then CLS=$oc; fi
+    # An override may make a hold critical, or record its default; it can never
+    # make a pattern-critical hold routine.
+    if [ -n "$oc" ] && { [ -z "$prot" ] || [ "${oc%%:*}" = captain-only ]; }; then CLS=$oc; fi
     [ -z "$od" ] || DEFAULT=$od
     [ -z "$oh" ] || HOURS=$oh
-    if [ "$CLS" = captain-only:no-default ] && [ -n "$DEFAULT" ] && [ -z "$prot" ]; then CLS=ask; fi
   fi
   local ck
-  ck=$(printf '%s' "${CLS%%:*}" | tr 'a-z-' 'A-Z_')
-  ck="FM_HOLD_SLA_HOURS_$ck"
-  [ -f "$ov" ] && [ -n "$(meta_get "$ov" hours)" ] || HOURS=${!ck:-$HOURS}
+  case "$CLS" in duplicate|moot|pr-merge|quick|parked) ck=FM_HOLD_SLA_HOURS_IMMEDIATE; HOURS=${!ck:-0} ;; esac
+  case "$CLS" in captain-only:*) HOURS=${FM_HOLD_SLA_HOURS_CRITICAL:-0} ;; esac
+  [ -f "$ov" ] && [ -n "$(meta_get "$ov" hours)" ] && HOURS=$(meta_get "$ov" hours)
+  [ -n "$DEFAULT" ] || case "$CLS" in quick|ambiguous) DEFAULT=$NO_DEFAULT ;; esac
+  return 0
+}
+
+mirror_kind_main() {  # <task-id> -> kind of a main-home task
+  "$TASKS_AXI" show "$1" 2>/dev/null | sed -n 's/^  kind: //p' | head -1
 }
 
 dedupe() {  # rows on stdin -> rows with a trailing is_dup column (newest per rid is 0)
@@ -345,10 +371,11 @@ status_close() {  # <owner> <key> <note>
 
 deliver_default() {  # <owner> <key> <default> <hours>
   [ "$NOTIFY_OWNER" = 1 ] || return 0
+  [ "$1" != main ] || return 0
   local id
   id=$(printf '%s %s %s' "$1" "$2" "$TODAY" | sha256sum | cut -c1-16)
   "$SEND" "$1" --fire-and-forget "$id" \
-    "hold-sla: your captain call [key=$2] passed its ${4}h deadline unanswered and was closed with your recorded default. Apply it now: $3. (The captain can still override.)" >/dev/null 2>&1
+    "hold-sla: [key=$2] is not a critical captain call, so firstmate decided it (${4}h): $3. Act on that now and record it; the captain can still override." >/dev/null 2>&1
 }
 
 pr_merge() {  # <repo> <n>
@@ -364,22 +391,23 @@ pr_merge() {  # <repo> <n>
 
 # Evaluate every row. mode=report prints a classification table only.
 evaluate() {  # <mode: sweep|report>
-  local mode=$1 rid source owner key task verb raised text dup deadline age expired outcome cmd ev pr repo num park_until reason
+  local mode=$1 rid source owner key task verb raised text dup deadline age expired outcome cmd ev pr repo num park_until reason rel
   [ "$mode" = report ] || mkdir -p "$SLA_DIR"
-  DIGEST_ROWS='' REPORT_ROWS=''
+  DIGEST_ROWS='' REPORT_ROWS='' ACTIONS=0
   while IFS=$'\t' read -r rid source owner key task verb raised text dup; do
     [ -n "$rid" ] || continue
     # scan writes "-" for an empty field: bash read collapses adjacent tabs.
     [ "$task" != - ] || task=''
-    classify_row "$rid" "$source" "$owner" "$key" "$task" "$text" "$dup"
+    # The key is part of the text: ids like clinica-prod-era-phi carry the subject.
+    classify_row "$rid" "$source" "$owner" "$key" "$task" "$key: $text" "$dup"
     pr=''
     if [ "$CLS" = pr-merge ]; then
       repo=${rid#pr:}; num=${repo##*#}; repo=${repo%#*}
       if pr_facts "$repo" "$num"; then
         pr="$repo#$num"
         if [ "$PR_STATE" = MERGED ] || [ "$PR_STATE" = CLOSED ]; then
-          [ "${CLS%%:*}" = captain-only ] || { CLS=moot; MOOT="PR $pr is $PR_STATE"; }
-        elif [ -n "$PR_PROTECT" ]; then CLS="captain-only:pr-$PR_PROTECT"
+          CLS=moot; MOOT="PR $pr is $PR_STATE"
+        elif [ -n "$PR_PROTECT" ]; then CLS="captain-only:$PR_PROTECT"
         else DEFAULT="merge once CI is green and the head verdict is CLEAN (now: green=$PR_GREEN clean=$PR_CLEAN)"
         fi
       else
@@ -395,28 +423,34 @@ evaluate() {  # <mode: sweep|report>
       continue
     fi
     record_sla "$rid" "$key" "$raised" "$deadline" "$CLS" "$DEFAULT"
+    case "$CLS" in wait:*) continue ;; esac
     if [ "${CLS%%:*}" = captain-only ] || [ "$expired" = 0 ]; then
       if [ "${CLS%%:*}" = captain-only ] && [ "$expired" = 1 ]; then
-        DIGEST_ROWS+="$age"$'\t'"| ${age}h | ${CLS#captain-only:} | $owner | \`$key\` | $(one_line "${DEFAULT:-none recorded}" 120 | tr '|' '/') | \`$cmd\` |"$'\n'
+        DIGEST_ROWS+="$age"$'\t'"| ${age}h | ${CLS#captain-only:} | $owner | \`$key\` | $(one_line "${DEFAULT:-none recorded - ask the raiser for one}" 120 | tr '|' '/') | \`$cmd\` |"$'\n'
       fi
+      continue
+    fi
+    if [ "$LIVE" = 1 ] && [ "$ACTIONS" -ge "$MAX_ACTIONS" ]; then
+      slog "action cap $MAX_ACTIONS reached; $key waits for the next sweep"
       continue
     fi
     outcome=''
     case "$CLS" in
       duplicate) outcome="superseded by a newer open hold on $rid" ;;
       moot) outcome="moot: $MOOT" ;;
-      ask) outcome="default applied after ${HOURS}h unanswered: $DEFAULT" ;;
+      quick|ambiguous) outcome="not a captain call ($CLS, ${HOURS}h): firstmate applied the recorded default: $DEFAULT" ;;
       parked) outcome="captain-parked hold re-dated: $DEFAULT" ;;
       pr-merge)
         if [ "$PR_STATE" = OPEN ] && [ "$PR_GREEN" = 1 ] && [ "$PR_CLEAN" = 1 ]; then
           outcome="default applied after ${HOURS}h: merge $pr (CI green, verdict CLEAN)"
         else
-          DIGEST_ROWS+="$age"$'\t'"| ${age}h | pr-merge blocked: ${PR_WHY:-PR unreadable} | $owner | \`$key\` | merge when green+CLEAN | \`$cmd\` |"$'\n'
+          slog "pr-merge waits: $pr ${PR_WHY:-PR unreadable} (key=$key)"
           continue
         fi ;;
     esac
     slog "expire $CLS rid=$rid key=$key owner=$owner age=${age}h -> $outcome"
     [ "$LIVE" = 1 ] || continue
+    ACTIONS=$((ACTIONS + 1))
     if [ "$CLS" = pr-merge ]; then pr_merge "${pr%#*}" "${pr##*#}" || { slog "merge failed $pr"; continue; }; fi
     if [ "$CLS" = parked ]; then
       park_until=$(date -u -d "@$((NOW + PARK_DAYS * 86400))" +%F 2>/dev/null)
@@ -429,12 +463,13 @@ evaluate() {  # <mode: sweep|report>
       fi
       continue
     fi
-    if [ "$source" = task ] || { [ -n "$task" ] && [ "$CLS" = ask ]; }; then
+    if [ "$source" = task ] || { [ -n "$task" ] && { [ "$CLS" = quick ] || [ "$CLS" = ambiguous ] || [ "$CLS" = pr-merge ]; }; }; then
       ev=$(mktemp "${TMPDIR:-/tmp}/fm-hold-sla.XXXXXX") || continue
       printf 'hold-sla %s: %s\nRaised: %s; deadline %sh; class %s.\n' "$TODAY" "$outcome" \
         "$(date -u -d "@$raised" +%FT%TZ 2>/dev/null)" "$HOURS" "$CLS" > "$ev"
       if [ "$source" = task ]; then set -- "$CAPTAIN_HOLD"; else set -- in_home "$(owner_home "$owner")" "$CAPTAIN_HOLD"; fi
-      if "$@" sla-close "${task:-$key}" --evidence-file "$ev" >/dev/null 2>>"$SLA_DIR/hold-sla.log"; then
+      rel=''; [ "$RELEASE" = 0 ] || rel=--release
+      if "$@" sla-close "${task:-$key}" --evidence-file "$ev" ${rel:+"$rel"} >/dev/null 2>>"$SLA_DIR/hold-sla.log"; then
         slog "sla-closed ${task:-$key} in $(owner_home "$owner")"
       else
         slog "sla-close refused for ${task:-$key}; left for the captain"
@@ -445,7 +480,7 @@ evaluate() {  # <mode: sweep|report>
     fi
     if status_close "$owner" "$key" "$outcome"; then
       slog "closed status key $key in $owner.status"
-      [ "$CLS" = ask ] && deliver_default "$owner" "$key" "$DEFAULT" "$HOURS"
+      case "$CLS" in quick|ambiguous) deliver_default "$owner" "$key" "$DEFAULT" "$HOURS" ;; esac
     else
       slog "status close failed for $key in $owner.status"
     fi
@@ -457,14 +492,14 @@ write_digest() {
   n=$(printf '%s' "$DIGEST_ROWS" | grep -c . || true)
   {
     printf '# Captain hold digest %s\n\n' "$TODAY"
-    printf '%s open captain-only holds are past their SLA (%s). Routine holds were resolved to their defaults; see state/hold-sla/hold-sla.log.\n\n' \
+    printf '%s critical holds wait on you (%s). Every other hold was resolved to its recorded recommendation; see state/hold-sla/hold-sla.log. Answer each with one word in the command shown (e.g. "yes" applies the recommendation).\n\n' \
       "$n" "$([ "$LIVE" = 1 ] && echo live || echo 'dry run: nothing was changed')"
     printf '| age | class | owner | key | recommendation | answer with |\n| --- | --- | --- | --- | --- | --- |\n'
     printf '%s' "$DIGEST_ROWS" | sort -t $'\t' -k1,1nr | cut -f2-
   } > "$f.tmp" && mv -f "$f.tmp" "$f" && cp -f "$f" "$SLA_DIR/digest-latest.md"
   # One captain-facing wake per UTC day, only when something is waiting.
   if [ "$LIVE" = 1 ] && [ "$n" -gt 0 ] && [ ! -e "$SLA_DIR/.notified-$TODAY" ]; then
-    if load_wake_lib && fm_wake_append check "hold-sla-digest-$TODAY" "check: hold SLA digest: $n captain-only holds are past their deadline and wait on you; one answer command each in $f"; then
+    if load_wake_lib && fm_wake_append check "hold-sla-digest-$TODAY" "check: hold SLA digest: $n critical holds wait on the captain; each has a recommendation and a one-word answer command in $f"; then
       : > "$SLA_DIR/.notified-$TODAY"
     fi
   fi
@@ -492,7 +527,8 @@ case "$cmd" in
   scan) scan ;;
   classify)
     c=$(protected_class "${1:-}"); d=$(extract_default "${1:-}")
-    printf 'class=%s\ndefault=%s\n' "${c:+captain-only:$c}${c:-routine}" "$d" ;;
+    if [ -n "$c" ]; then c="captain-only:$c"; elif is_quick "${1:-}"; then c=quick; else c=ambiguous; fi
+    printf 'class=%s\ndefault=%s\n' "$c" "${d:-$NO_DEFAULT}" ;;
   sweep)
     [ "${1:-}" = --live ] && LIVE=1
     mkdir -p "$STATE" || die "cannot create $STATE"
@@ -506,17 +542,27 @@ case "$cmd" in
     evaluate report < <(scan | dedupe)
     {
       total=$(printf '%s' "$REPORT_ROWS" | grep -c . || true)
-      auto=$(printf '%s' "$REPORT_ROWS" | grep -cv '^captain-only' || true)
+      auto=$(printf '%s' "$REPORT_ROWS" | grep -Ecv '^(captain-only|wait)' || true)
+      immediate=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^(duplicate|moot|pr-merge|quick|parked)'$'\t' || true)
+      ambiguous=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^ambiguous'$'\t' || true)
+      waiting=$(printf '%s' "$REPORT_ROWS" | grep -Ec '^wait' || true)
       printf '# Captain hold backlog %s\n\nRead-only classification of every open captain hold in %s (nothing was changed).\n\n' "$TODAY" "$FM_HOME"
-      printf -- '- open holds: %s\n- auto-resolvable at SLA expiry: %s\n- captain-only: %s\n\n' "$total" "$auto" "$((total - auto))"
+      printf 'Policy: only critical holds (production data/secrets writes, PHI/credential/security exposure, spend, destructive data operations, open incidents, legal/compliance/BAA) wait on the captain; every other hold resolves to its recorded recommendation.\n\n'
+      printf -- '- open holds: %s\n- resolve IMMEDIATELY (duplicate, moot, green+CLEAN PR, quick call, captain-parked): %s\n- resolve after the %sh ambiguous deadline: %s\n- critical, captain only: %s\n- unverifiable now (re-checked each sweep): %s\n\n' \
+        "$total" "$immediate" "$HOURS_DEFAULT" "$ambiguous" "$((total - auto - waiting))" "$waiting"
       printf '## Counts by record type\n\n'; printf '%s' "$REPORT_ROWS" | cut -f5 | sort | uniq -c | sort -rn | awk '{printf "- %s: %s\n", $2, $1}'
       printf '\n(status = an open keyed record in state/<owner>.status; :mirror = the parent copy of a secondmate captain-held task; task = a captain-held task in this home'"'"'s backlog.)\n\n'
       printf '## Counts by class\n\n'; printf '%s' "$REPORT_ROWS" | cut -f1 | sort | uniq -c | sort -rn | awk '{printf "- %s: %s\n", $2, $1}'
+      printf '\n## Outcome by record type\n\n| record type | immediate | after deadline | critical | unverifiable |\n| --- | --- | --- | --- | --- |\n'
+      printf '%s' "$REPORT_ROWS" | awk -F '\t' '
+        { b = ($1 ~ /^(duplicate|moot|pr-merge|quick|parked)$/) ? 1 : ($1 == "ambiguous") ? 2 : ($1 ~ /^captain-only/) ? 3 : 4
+          n[$5, b]++; t[$5] = 1 }
+        END { for (r in t) printf "| %s | %d | %d | %d | %d |\n", r, n[r,1], n[r,2], n[r,3], n[r,4] }' | sort
       printf '\n## Age (hours since raised)\n\n'
       printf '%s' "$REPORT_ROWS" | awk -F '\t' '{ if ($2>=168) a++; else if ($2>=72) b++; else if ($2>=24) c++; else d++ } END { printf "- over 7 days: %d\n- 3-7 days: %d\n- 1-3 days: %d\n- under 1 day: %d\n", a, b, c, d }'
       for sect in auto captain; do
-        if [ "$sect" = auto ]; then printf '\n## Auto-resolvable (would resolve to the default at expiry)\n\n'; sel='^captain-only'; inv=-v
-        else printf '\n## Captain-only (answer these)\n\n'; sel='^captain-only'; inv=''; fi
+        if [ "$sect" = auto ]; then printf '\n## Firstmate resolves these itself\n\n'; sel='^captain-only'; inv=-v
+        else printf '\n## Critical: captain only (one word each)\n\n'; sel='^captain-only'; inv=''; fi
         printf '| age h | class | owner | key | default / why moot | answer with | hold |\n| --- | --- | --- | --- | --- | --- | --- |\n'
         printf '%s' "$REPORT_ROWS" | grep -E $inv "$sel" | sort -t $'\t' -k2,2nr \
           | awk -F '\t' '{ for (i=1;i<=NF;i++) gsub(/\|/, "/", $i); printf "| %s | %s | %s | `%s` | %s | `%s` | %s |\n", $2, $1, $3, $4, $6, $7, $8 }'
