@@ -43,6 +43,7 @@ It never reads report bodies, review artifacts, terminal output, or chat.
 | `reconcile-requests` | Internal intake that records a reconcile request from a board selection. | [Reconcile](#reconcile-re-check-reality-never-a-blind-close) |
 | `reconcile close`, `reconcile note`, `reconcile list` | Retire or list pending reconcile requests. | [Verifying and retiring a request](#verifying-and-retiring-a-request) |
 | `diverged` | Read-only report of a call whose two records disagree. | [Record divergence](#record-divergence) |
+| `sla-close` | Closes an unanswered routine question row with the default recorded when it was raised. | [Hold SLA](#hold-sla-sla-close) |
 
 ### Creating a hold (`hold`)
 
@@ -328,6 +329,19 @@ A successful normal answer also retires any pending request, because an answered
 Every retirement is checked.
 If request removal fails after an answer, close, or note is already durable, the durable outcome stands, but the command fails and leaves the pending request visible for retry.
 No path here closes a captain call without either the captain's words through `answer` or the evidence through `reconcile close`.
+
+## Hold SLA (`sla-close`)
+
+An answered captain call takes minutes; an unanswered one can sit for days.
+`bin/fm-hold-sla.sh` gives every open hold a deadline and records the raising agent's own recommendation as its default when it first sees the hold.
+Its header owns the classes, the captain-only patterns, and the dry-run default.
+
+`sla-close <task-id> --evidence-file <path>` is the only backlog mutation it makes on a question.
+It writes a resolution record with mode `sla-default` under an `SLA default applied:` label, so the record never reads as the captain's words, then closes the task and publishes the resolution to the parent like any other close.
+It refuses a held work item (kind other than `captain`), because freeing held work stays attended-only, and it refuses to replay over a record of any other mode.
+Captain-only classes (production writes, PHI, credentials and security, spending, destructive data changes, incidents) never reach it; they are listed in the daily digest with the command that answers each one.
+
+Tests: `tests/fm-hold-sla.test.sh`.
 
 ## Card hygiene: a landed subject is not a live call
 

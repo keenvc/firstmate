@@ -35,6 +35,7 @@
 #   fm-captain-hold.sh reconcile list
 #   fm-captain-hold.sh reconcile close <task-id> --evidence-file <path>
 #   fm-captain-hold.sh reconcile note <task-id> --note-file <path>
+#   fm-captain-hold.sh sla-close <task-id> --evidence-file <path>
 #
 # `hold` places an existing task under an active captain hold, or creates the
 # task first when no work item exists to hold (--title required to create; the
@@ -204,9 +205,16 @@
 # `diverged` is the read-only guard over the seam between the two records of
 # one captain call. See "record divergence" beside command_diverged below.
 #
+# `sla-close` is the hold-SLA outcome (bin/fm-hold-sla.sh owns when it runs):
+# a routine captain question whose deadline passed unanswered is closed with
+# the default action recorded when it was raised. Its record carries mode
+# `sla-default` under an `SLA default applied:` label, so it never reads as the
+# captain's words, and it closes only a minted question row (kind captain); a
+# held WORK item stays held, because freeing work remains attended-only.
+#
 # Resolution records: the block written into the body names this script, the
-# decision digest, and a `Resolution mode:` of answered, released, repaired, or
-# reconciled. Records written by the retired fm-decision-hold.sh (routed,
+# decision digest, and a `Resolution mode:` of answered, released, repaired,
+# reconciled, or sla-default. Records written by the retired fm-decision-hold.sh (routed,
 # declined, answered, repaired) are recognized everywhere a record is read, so
 # nothing already closed needs rewriting.
 #
@@ -481,6 +489,7 @@ body_has_resolution_record() {  # <task-body>
     *"Resolution recorded by fm-captain-hold."*"Captain decision:"*) return 0 ;;
     *"Resolution recorded by fm-decision-hold."*"Captain decision:"*) return 0 ;;
     *"Resolution recorded by fm-captain-hold."*"Reconciliation evidence:"*) return 0 ;;
+    *"Resolution recorded by fm-captain-hold."*"SLA default applied:"*) return 0 ;;
   esac
   return 1
 }
@@ -532,6 +541,7 @@ closed_answer_replay_mode_compatible() {  # <mode> <task-body>
 resolution_block() {  # <mode>
   local label='Captain decision:'
   [ "$1" != reconciled ] || label='Reconciliation evidence:'
+  [ "$1" != sla-default ] || label='SLA default applied:'
   printf 'Resolution recorded by fm-captain-hold.\nDecision digest: %s\nResolution mode: %s\n\n%s\n%s\n' \
     "$DECISION_DIGEST" "$1" "$label" "$DECISION_TEXT"
 }
@@ -1939,6 +1949,70 @@ reconcile_note() {
   printf 'still-open: %s\n' "$id"
 }
 
+# The hold-SLA outcome. Mirrors reconcile_close without the board request: the
+# caller (bin/fm-hold-sla.sh) has already decided the class is routine and the
+# deadline passed; this command owns the durable record and the close.
+command_sla_close() {
+  local id=${1:-} evidence_file='' show state hold_kind kind body occurrence recorded_mode
+  [ "$#" -ge 1 ] || { usage >&2; exit 2; }
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --evidence-file) shift; evidence_file=${1:-} ;;
+      *) usage >&2; exit 2 ;;
+    esac
+    shift
+  done
+  validate_slug task-id "$id"
+  [ -n "$evidence_file" ] || fail "--evidence-file is required; an SLA close records the default it applied"
+  load_decision "$evidence_file"
+  acquire_task_control_lock "$id"
+  require_tasks_axi
+  task_show_or_fail "$id" "captain-held task $id is absent from this home's configured backlog (data directory $DATA)"
+  state=$(show_field "$show" state)
+  hold_kind=$(show_field_value "$show" hold_kind)
+  kind=$(show_field_value "$show" kind)
+  body=$(show_field "$show" body)
+  occurrence=$(( $(resolution_record_count "$body") + 1 ))
+  if [ "$state" = "done" ]; then
+    body_has_resolution_record "$body" \
+      || fail "task $id is already closed with no resolution record; use answer to record what closed it"
+    [ "$(recorded_decision_digest "$body" || true)" = "$DECISION_DIGEST" ] \
+      || fail "task $id records a different resolution; it cannot be SLA-closed again"
+    [ "$(recorded_resolution_mode "$body" || true)" = sla-default ] \
+      || fail "task $id was not closed by the hold SLA"
+    occurrence=$(resolution_record_count "$body")
+    remove_interrupted_answer_stamp "$id"
+    publish_parent_hold "$id" "$occurrence" resolved sla-default
+    [ "$PARENT_HOLD_PUBLISHED" = 1 ] \
+      || fail "could not publish the SLA-closed captain-held task $id to its parent"
+    printf 'sla-closed: %s\n' "$id"
+    return 0
+  fi
+  [ "$hold_kind" = captain ] \
+    || fail "task $id is not held for the captain; there is no captain call to close"
+  [ "$kind" = captain ] \
+    || fail "task $id is a held work item (kind ${kind:-unknown}); freeing held work stays attended-only, so the SLA leaves it for the captain"
+  if body_has_resolution_record "$body" \
+    && [ "$(recorded_decision_digest "$body" || true)" = "$DECISION_DIGEST" ]; then
+    recorded_mode=$(recorded_resolution_mode "$body" || true)
+    [ "$recorded_mode" = sla-default ] \
+      || fail "task $id records this resolution with mode ${recorded_mode:-unknown}; it is not an SLA retry"
+    occurrence=$(resolution_record_count "$body")
+  else
+    write_resolution_record "$id" sla-default "$body"
+  fi
+  close_answered "$id" 0 || fail "could not close SLA-expired captain-held task $id"
+  remove_interrupted_answer_stamp "$id"
+  task_show_or_fail "$id" "task $id disappeared after closing"
+  body_has_resolution_record "$(show_field "$show" body)" \
+    || fail "captain-held task $id did not retain its durable resolution record"
+  publish_parent_hold "$id" "$occurrence" resolved sla-default
+  [ "$PARENT_HOLD_PUBLISHED" = 1 ] \
+    || fail "could not publish the SLA-closed captain-held task $id to its parent"
+  printf 'sla-closed: %s\n' "$id"
+}
+
 command_complete() {
   local origin=${1:-} meta previous='' supplied='' keys='' entry key status_file open has_meta=0 transfer_rc transfers=() resolved
   local resolved_how attested_by_prefix='' origin_state unrecorded_origin='' tmp
@@ -2271,6 +2345,7 @@ case "${1:-}" in
   open) shift; command_open "$@" ;;
   diverged) shift; command_diverged "$@" ;;
   reconcile) shift; command_reconcile "$@" ;;
+  sla-close) shift; command_sla_close "$@" ;;
   -h|--help) usage ;;
   *) usage >&2; exit 2 ;;
 esac
