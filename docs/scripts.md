@@ -137,6 +137,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-vendor-auth-probe.sh`| Run one hard-bounded, non-destructive authentication probe of a named vendor CLI and report the fact |
 | `fm-context-rotate.sh`  | Rotate an OpenCode secondmate onto a fresh session from its `data/handoff/LATEST.md` once its context passes the per-home threshold (`config/context-rotate-tokens`, default 60000); `scan` is a silent zero-token watcher check |
 | `fm-wait.sh`            | Block in bash until a PR, a commit status (Buildkite build via GitHub), a Buildkite build, a file or a pid changes, then print one line; the zero-token replacement for sleep-poll turns |
+| `fm-check-emit.sh`      | Filter for the last stage of a custom watcher check: print its wake text only when it differs from what that check last emitted |
 | `fm-wake-drain.sh`       | Present and acknowledge the current actor's claimed wake rows alongside status, outcome-backstop, decision, divergence, supervision-host outcome, recovery, and supervision checks |
 | `fm-wake-grant.sh`       | Serialize Pi supervision-branch wake-row claim activation, publication, release, and deactivation |
 | `fm-wake-lib.sh`         | Shared durable wake queue, recovery generations, portable locks, and watcher identity/health helpers |
