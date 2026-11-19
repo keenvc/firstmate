@@ -335,7 +335,7 @@ kbd{font:11px/1 ui-monospace,Menlo,monospace;padding:2px 5px;border:1px solid #3
 .nyrow:hover{border-color:#3a3a3a;background:#1d1d1d}.nyrow:focus-visible{outline:2px solid #7fb3ff;outline-offset:2px}
 .nyrow.sent{opacity:.55}
 .nysrc{flex:0 0 auto;font-size:10.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid #3a3a3a;color:#c9c6bf;margin-top:1px}
-.nysrc.s-card{border-color:#7f1d1d;color:#fca5a5;background:#2a1919}.nysrc.s-hold{border-color:#4a3a12;color:#fbbf24;background:#211b0d}.nysrc.s-call{border-color:#1e3a5f;color:#93c5fd;background:#111c2b}
+.nysrc.s-board{border-color:#7a5a12;color:#fbbf24;background:#2a2410}.nysrc.s-card{border-color:#7f1d1d;color:#fca5a5;background:#2a1919}.nysrc.s-hold{border-color:#4a3a12;color:#fbbf24;background:#211b0d}.nysrc.s-call{border-color:#1e3a5f;color:#93c5fd;background:#111c2b}
 .nyq{flex:1 1 auto;min-width:0;font-size:14px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .nysub{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}.nyrec{color:#4ade80}
 .nyage{flex:0 0 auto;font-size:12px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
@@ -369,6 +369,31 @@ kbd{font:11px/1 ui-monospace,Menlo,monospace;padding:2px 5px;border:1px solid #3
  #rvModal.open{align-items:flex-end}.rvsheet{width:100vw;max-height:94vh;border-radius:14px 14px 0 0}
  .rvopt{padding:13px 12px;font-size:15px}.rvkeys{display:none}.nyrow{padding:12px 10px}
 }
+/* Critical decisions: header alert + centered modal (captain order 2026-11-19) */
+.cdbadge{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:#2a2410;color:#fbbf24;font-size:12.5px;font-weight:600;border:1px solid #7a5a12}
+.cdbadge:focus-visible{outline:2px solid #fbbf24;outline-offset:2px}.cdbadge .cdl{font-weight:400;color:#fcd34d}
+#cdModal{position:fixed;inset:0;z-index:80;display:none;background:rgba(0,0,0,.7);padding:12px;box-sizing:border-box}
+#cdModal.open{display:flex;align-items:center;justify-content:center}
+.cdsheet{width:min(640px,100%);max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);display:flex;flex-direction:column;background:#141414;border:1px solid #3a3020;border-radius:16px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.cdhead{display:flex;align-items:center;gap:10px;padding:12px 14px 6px}
+.cdtag{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#fbbf24;background:#2a2410;border:1px solid #7a5a12;border-radius:999px;padding:2px 8px}
+.cdx{all:unset;cursor:pointer;margin-left:auto;font-size:26px;line-height:1;color:#9a978f;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:10px}
+.cdbody{padding:4px 16px 12px;overflow:auto;display:grid;gap:10px;min-width:0}
+.cdbody h2{margin:0;font-size:19px;line-height:1.35;overflow-wrap:anywhere}
+.cdctx{font-size:13.5px;line-height:1.5;color:#c9c6bf;white-space:pre-wrap;overflow-wrap:anywhere}.cdctx a{color:#7fb3ff}
+.cdu{font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:.05em}.cdu.u-high{color:#f87171}.cdu.u-medium{color:#fbbf24}.cdu.u-low{color:#9a978f}
+.cdopts{display:grid;gap:8px}
+.cdopt{all:unset;box-sizing:border-box;cursor:pointer;display:block;width:100%;min-height:52px;padding:12px 14px;border:1px solid #2b2b2b;border-radius:12px;background:#191919;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+.cdopt:hover{border-color:#4a4a4a}.cdopt:focus-visible{outline:2px solid #7fb3ff;outline-offset:2px}
+.cdopt.rec{border-color:#2f7a4a;background:#13251a}.cdopt[disabled]{opacity:.55;cursor:default}
+.cdol{display:block;font-weight:600}.cdow{display:block;font-size:13px;color:#a8a6a1;margin-top:4px;font-weight:400}
+#cdText{width:100%;box-sizing:border-box;background:#101010;color:var(--ink);border:1px solid #2b2b2b;border-radius:12px;padding:10px 12px;font:inherit;font-size:15px;resize:vertical}
+.cdact{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #262626;flex-wrap:wrap}
+.cdbtn{all:unset;box-sizing:border-box;cursor:pointer;min-height:48px;padding:0 18px;border-radius:12px;border:1px solid #3a3a3a;background:#1f1f1f;font-size:15px;font-weight:600;display:inline-flex;align-items:center;justify-content:center}
+.cdbtn.go{margin-left:auto;background:#1f6f43;border-color:#1f6f43;color:#fff}.cdbtn[disabled]{opacity:.5;cursor:default}
+.cdbtn:focus-visible{outline:2px solid #7fb3ff;outline-offset:2px}
+.cdmsg{font-size:13px;color:var(--muted);flex:1 1 100%;order:-1}.cdmsg:empty{display:none}.cdmsg.ok{color:#4ade80}.cdmsg.err{color:#f87171}.cdmsg.warn{color:#fbbf24}
+@media(max-width:520px){.cdbtn{flex:1 1 0}.cdbtn.go{margin-left:0}.cdbody h2{font-size:18px}}
 </style></head><body>
 <div id=app>
   <header>
@@ -377,6 +402,9 @@ kbd{font:11px/1 ui-monospace,Menlo,monospace;padding:2px 5px;border:1px solid #3
     <button id=askBadge class=askbadge type=button hidden aria-haspopup="dialog" aria-label="Open approvals needing you">
       <span class=askbell aria-hidden=true>&#128276;</span><span id=askCount>0</span>
       <span class=asklabel>need you</span>
+    </button>
+    <button id=cdBadge class=cdbadge type=button hidden aria-haspopup="dialog" aria-label="Open the critical decisions waiting on you">
+      <span aria-hidden=true>&#9873;</span><span id=cdCount>0</span><span class=cdl>critical</span>
     </button>
     <button id=soundToggle class=soundbtn type=button hidden title="Enable the chime">&#128263; enable sound</button>
     <button id=themeToggle class=themebtn type=button aria-pressed=false title="Switch light / dark">&#9728; Light</button>
@@ -4367,7 +4395,7 @@ var NY={d:null,err:null,last:null},NY_MS=15000;
 var RV={open:false,list:[],i:0,sel:{},text:{},sent:{},busy:false};
 // ?test=1 marks every answer from the modal as a TEST answer (QA only; the server labels and ignores them).
 var NY_TEST=/[?&]test=1(&|$)/.test(location.search);
-var NY_SRC={card:"Decision",hold:"Captain hold",call:"Owner call"};
+var NY_SRC={board:"Critical",card:"Decision",hold:"Captain hold",call:"Owner call"};
 var NY_DEFAULT_OPTS=["Yes, go ahead","No, do not","Not now"];
 function nyLoad(){
  fetch("/api/console/urgent-questions",{credentials:"same-origin",cache:"no-store"}).then(function(r){
@@ -4386,12 +4414,12 @@ function nyAgeTxt(it){if(it.age_days==null)return "";return it.age_days<1?"today
 // than the sweep's cut-off goes to the collapsed "older" group, in the same order.
 function nyOrder(list){
  return list.slice().sort(function(a,b){
-  var sa=a.source==="card"?0:1,sb=b.source==="card"?0:1;if(sa!==sb)return sa-sb;
+  var SO={board:0,card:1},sa=SO[a.source]!=null?SO[a.source]:2,sb=SO[b.source]!=null?SO[b.source]:2;if(sa!==sb)return sa-sb;
   var aa=a.age_days==null?9999:a.age_days,ab=b.age_days==null?9999:b.age_days;return aa-ab})}
 function nyGroups(){var all=nyOrder(nyItems());
  return {fresh:all.filter(function(it){return !it.old}),old:all.filter(function(it){return it.old})}}
-function nyBreakdown(){var b={card:0,hold:0,call:0};nyOpenItems().forEach(function(it){b[it.source]=(b[it.source]||0)+1});
- var bits=[];if(b.card)bits.push(b.card+" decision"+(b.card===1?"":"s"));if(b.hold)bits.push(b.hold+" captain hold"+(b.hold===1?"":"s"));
+function nyBreakdown(){var b={board:0,card:0,hold:0,call:0};nyOpenItems().forEach(function(it){b[it.source]=(b[it.source]||0)+1});
+ var bits=[];if(b.board)bits.push(b.board+" critical");if(b.card)bits.push(b.card+" decision"+(b.card===1?"":"s"));if(b.hold)bits.push(b.hold+" captain hold"+(b.hold===1?"":"s"));
  if(b.call)bits.push(b.call+" owner call"+(b.call===1?"":"s"));return bits.join(" · ")}
 function nyPaint(){
  var n=nyCount(),el=document.getElementById("askBadge");
@@ -4522,7 +4550,8 @@ function rvSend(){
  var msg=document.getElementById("rvMsg");
  if(!choice&&!text){msg.className="rvmsg err";msg.textContent="Pick an option or write a reply first.";return}
  var url,body;
- if(it.source==="card"&&it.card){url="/api/console/decision";body={card:String(it.id),choice:choice,text:text}}
+ if(it.source==="board"){url="/api/console/decision";body={board:String(it.id),choice:choice,text:text}}
+ else if(it.source==="card"&&it.card){url="/api/console/decision";body={card:String(it.id),choice:choice,text:text}}
  else if(it.source==="card"){url="/api/console/decision";body={n:String(it.n),choice:"",text:[choice,text].filter(Boolean).join(". ")}}
  else{url="/api/console/answer";body={qid:it.qid||it.id,title:(it.source==="hold"?"Captain hold in the "+(it.home||"?")+" home: ":"")+String(it.question||"").slice(0,440),choice:choice,text:text}}
  if(NY_TEST)body.test=true;
@@ -4583,13 +4612,97 @@ function pfClose(){var m=document.getElementById("pfModal");if(m)m.classList.rem
 (function(){var b=document.getElementById("brandIcon");if(!b)return;b.onclick=pfOpen;
  b.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();pfOpen()}}})();
 document.addEventListener("keydown",function(e){var m=document.getElementById("pfModal");if(e.key==="Escape"&&m&&m.classList.contains("open")){e.stopPropagation();pfClose()}},true);
+// ---- Critical decisions: header alert + centered modal (captain order 2026-11-19, corr=05757a51f125374d) ----
+// Source of truth: firstmate's data/board-decisions.json, read LIVE through /api/console/board-decisions on
+// every poll (no-store); nothing is copied into the page, and an item the latest read no longer lists is
+// dropped at once. Only `recommended` and `alternatives` the file carries are shown - nothing is invented.
+// An answer is one POST to the existing /api/console/decision with {board:id}; the server writes the note
+// 'CAPTAIN ANSWER (via console) to [<id>] <option label or text>'. Skip snoozes that item on this browser only.
+var CD={items:[],err:null,loaded:false,open:false,cur:null,busy:false,done:{},autoOpened:false},CD_MS=15000,CD_SNOOZE_MS=4*3600*1000;
+function cdSnoozed(){var m={};try{m=JSON.parse(sessionStorage.getItem("cdSnooze")||"{}")||{}}catch(_){}var now=Date.now(),o={};for(var k in m)if(m[k]>now)o[k]=m[k];return o}
+function cdSnooze(id){var m=cdSnoozed();m[id]=Date.now()+CD_SNOOZE_MS;try{sessionStorage.setItem("cdSnooze",JSON.stringify(m))}catch(_){}}
+function cdOpenItems(){return CD.items.filter(function(it){return !CD.done[it.id]})}
+function cdQueue(){var sn=cdSnoozed();return cdOpenItems().filter(function(it){return !sn[it.id]})}
+function cdLoad(){
+ fetch("/api/console/board-decisions",{credentials:"same-origin",cache:"no-store"}).then(function(r){
+  if(!r.ok)throw new Error("the decisions read answered "+r.status);return r.json()}).then(function(d){
+  if(!d||!Array.isArray(d.items))throw new Error("the decisions read is not a list");
+  CD.items=d.items;CD.err=(d.problems||[]).length?d.problems.join("; "):null;CD.loaded=true;
+  var live={};d.items.forEach(function(it){live[it.id]=1});for(var k in CD.done)if(!live[k])delete CD.done[k];
+  cdPaint();
+  if(!CD.autoOpened){CD.autoOpened=true;if(cdQueue().length&&!RV.open)cdOpen()}
+ }).catch(function(e){CD.err=String(e&&e.message||e);CD.loaded=true;cdPaint()})}
+function cdPaint(){
+ var b=document.getElementById("cdBadge"),n=cdOpenItems().length;
+ if(b){b.hidden=!(n||CD.err);document.getElementById("cdCount").textContent=CD.err&&!n?"!":String(n);
+  b.title=CD.err&&!n?"The critical decisions could not be read: "+CD.err:n+" critical decision"+(n===1?"":"s")+" waiting on you"}
+ if(CD.open){var still=CD.cur&&cdOpenItems().some(function(it){return it.id===CD.cur});
+  if(!still){if(!CD.busy)cdNext()}else cdRender()}}
+function cdEl(){var m=document.getElementById("cdModal");if(m)return m;
+ m=document.createElement("div");m.id="cdModal";m.setAttribute("role","dialog");m.setAttribute("aria-modal","true");m.setAttribute("aria-labelledby","cdTitle");
+ m.innerHTML='<div class=cdsheet><div class=cdhead><span class=cdtag>Critical decision</span><span class=sub id=cdPos></span>'+
+  '<button type=button class=cdx id=cdClose aria-label="Close">&times;</button></div>'+
+  '<div class=cdbody><div class=sub id=cdMeta></div><h2 id=cdTitle></h2><div class=cdctx id=cdCtx></div><div id=cdOpts class=cdopts></div>'+
+  '<label class=sub for=cdText style="display:block;margin-top:4px">Or answer in your own words</label>'+
+  '<textarea id=cdText rows=3 maxlength=1500 placeholder="Your answer"></textarea></div>'+
+  '<div class=cdact><button type=button class=cdbtn id=cdSkip>Skip for now</button><span class=cdmsg id=cdMsg role=status></span>'+
+  '<button type=button class="cdbtn go" id=cdSendText disabled>Send my words</button></div></div>';
+ document.body.appendChild(m);
+ m.addEventListener("click",function(e){if(e.target===m)cdClose()});
+ document.getElementById("cdClose").onclick=cdClose;
+ document.getElementById("cdSkip").onclick=function(){if(CD.cur&&!CD.busy){cdSnooze(CD.cur);cdPaint();cdNext()}};
+ var ta=document.getElementById("cdText");ta.oninput=function(){document.getElementById("cdSendText").disabled=CD.busy||!ta.value.trim()};
+ document.getElementById("cdSendText").onclick=function(){var t=ta.value.trim();if(t)cdSend("",t)};
+ return m}
+function cdOpen(id){var q=cdQueue();if(!q.length&&!id)return;
+ CD.cur=id||q[0].id;CD.open=true;cdEl().classList.add("open");document.getElementById("cdText").value="";cdRender();
+ var r=document.querySelector("#cdOpts .cdopt.rec")||document.querySelector("#cdOpts .cdopt");if(r)r.focus()}
+function cdClose(){CD.open=false;var m=document.getElementById("cdModal");if(m)m.classList.remove("open")}
+function cdNext(){var q=cdQueue();if(!q.length){cdRender(true);return}CD.cur=q[0].id;document.getElementById("cdText").value="";cdRender();
+ var r=document.querySelector("#cdOpts .cdopt.rec")||document.querySelector("#cdOpts .cdopt");if(r)r.focus()}
+function cdRender(empty){
+ var it=null;cdOpenItems().forEach(function(x){if(x.id===CD.cur)it=x});
+ var q=cdQueue(),all=cdOpenItems();
+ if(empty||!it){document.getElementById("cdPos").textContent="";document.getElementById("cdMeta").textContent="";
+  document.getElementById("cdTitle").textContent=all.length?"Every open decision is snoozed":"No critical decision is waiting";
+  document.getElementById("cdCtx").textContent=all.length?all.length+" skipped for now; they come back later, or open one from the Inbox.":"";
+  document.getElementById("cdOpts").innerHTML="";document.getElementById("cdSendText").disabled=true;document.getElementById("cdText").disabled=true;return}
+ document.getElementById("cdText").disabled=CD.busy;
+ var pos=q.findIndex(function(x){return x.id===it.id});
+ document.getElementById("cdPos").textContent=(pos>=0?(pos+1)+" of "+q.length:"snoozed")+(all.length>q.length?" · "+(all.length-q.length)+" skipped":"");
+ document.getElementById("cdMeta").innerHTML='<span class="cdu u-'+esc(it.urgency)+'">'+esc(it.urgency)+'</span>'+(it.project?" · "+esc(it.project):"")+' · <span class=mono>'+esc(it.id)+'</span>';
+ document.getElementById("cdTitle").textContent=it.title;
+ document.getElementById("cdCtx").innerHTML=linkify(it.context);
+ var opts=(it.recommended?[{label:it.recommended.label,why:it.recommended.why,rec:true}]:[]).concat(it.alternatives||[]);
+ document.getElementById("cdOpts").innerHTML=(it.recommended?"":'<div class=sub>No recommended option is on record for this one; pick an alternative or answer in your own words.</div>')+
+  opts.map(function(o,i){return '<button type=button class="cdopt'+(o.rec?" rec":"")+'" data-cd-i="'+i+'"'+(CD.busy?" disabled":"")+'>'+
+   '<span class=cdol><kbd>'+(i+1)+'</kbd> '+esc(o.label)+(o.rec?' <span class=drecmk>Recommended</span>':"")+'</span>'+
+   (o.why?'<span class=cdow>'+esc(o.why)+'</span>':"")+'</button>'}).join("");
+ document.querySelectorAll("#cdOpts [data-cd-i]").forEach(function(b){b.onclick=function(){var o=opts[Number(b.dataset.cdI)];if(o)cdSend(o.label,"")}});
+ document.getElementById("cdSendText").disabled=CD.busy||!document.getElementById("cdText").value.trim()}
+function cdSend(label,text){
+ var id=CD.cur;if(!id||CD.busy)return;var msg=document.getElementById("cdMsg");
+ var body={board:id,choice:label,text:text};if(NY_TEST)body.test=true;
+ CD.busy=true;msg.className="cdmsg";msg.textContent="Sending…";cdRender();
+ post("/api/console/decision",body,function(code,resp){CD.busy=false;var r={};try{r=JSON.parse(resp||"{}")}catch(_){}
+  if(code===200){CD.done[id]=1;msg.className="cdmsg ok";msg.textContent="Sent: "+(r.answer||label||text)+(r.test?" (TEST)":"");
+   cdPaint();setTimeout(function(){nyLoad()},1500);if(CD.open)cdNext()}
+  else if(code===409){CD.done[id]=1;msg.className="cdmsg warn";msg.textContent=r.error||"This decision is no longer open.";cdPaint();if(CD.open)cdNext();cdLoad()}
+  else{msg.className="cdmsg err";msg.textContent=(code===403?(/test answers/i.test(r.error||"")?"This sign-in may only send TEST answers; open the board with ?test=1.":"This board is signed out, so it would not send. Open it at board.advancedcare.com and send again."):(r.error||"Could not send ("+code+")."))+(text?" Your words are still in the box.":"");cdRender()}})}
+document.addEventListener("keydown",function(e){if(!CD.open)return;var typing=e.target&&e.target.id==="cdText";
+ if(e.key==="Escape"){e.preventDefault();e.stopPropagation();if(typing)e.target.blur();else cdClose();return}
+ if(typing){if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)){e.preventDefault();var t=e.target.value.trim();if(t)cdSend("",t)}return}
+ if(e.metaKey||e.ctrlKey||e.altKey)return;
+ if(/^[1-9]$/.test(e.key)){var b=document.querySelector('#cdOpts [data-cd-i="'+(Number(e.key)-1)+'"]');if(b){e.preventDefault();e.stopPropagation();b.click()}return}
+ if(e.key.toLowerCase()==="s"){e.preventDefault();e.stopPropagation();document.getElementById("cdSkip").click()}},true);
+(function(){var b=document.getElementById("cdBadge");if(b)b.onclick=function(){if(CD.open)cdClose();else{var q=cdQueue();cdOpen(q.length?q[0].id:(cdOpenItems()[0]||{}).id)}}})();
 renderNav();go(st.tab);loadQ();qpane();refreshAll();dload();loadLanes();loadCalls();loadCopper();loadSA();loadPph();loadPhases();loadTasks();loadOutstanding();
 // The zone label is stated once, in the header, so a reader never has to infer it per timestamp.
 (function(){var e=document.getElementById("tzName");if(e)e.textContent=TZ_NAME||"your local time"})();
 // Nick's questions refreshes on its own slower cadence: the collector re-reads transcripts
 // only when one changed, so this is a local file read, but 30s is enough for a question log.
 setInterval(function(){if(st.tab==="nicks")nickLoad()},30000);
-nyLoad();setInterval(nyLoad,NY_MS);
+nyLoad();setInterval(nyLoad,NY_MS);cdLoad();setInterval(cdLoad,CD_MS);
 // A direct link followed while the board is already open changes only the hash, so apply it here too.
 window.addEventListener("hashchange",function(){var h=decodeURIComponent((location.hash||"").slice(1)),m=/^inbox-(.+)$/.exec(h);
  if(m){if(st.tab!=="inbox")go("inbox");if(!RV.open||!RV.list[RV.i]||RV.list[RV.i].key!==m[1]){if(NY.d)rvOpenKey(m[1]);else NY_HASH_KEY=m[1]}return}

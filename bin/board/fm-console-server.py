@@ -509,6 +509,56 @@ def flight_state(keys):
         pass
     return {"at": int(time.time()), "window_sec": 300, "rows": {},
             "error": "flight requests unreadable: " + (r.stderr or r.stdout or "no answer")[-160:]}
+# Critical decisions (captain order 2026-11-19, corr=05757a51f125374d): firstmate writes
+# data/board-decisions.json (schema board-decisions.v1); the board only READS it, on every request, and
+# answers through /api/console/decision. An item vanishes when the file drops it or marks it answered,
+# or once the board has recorded a real answer for it (a TEST answer only counts on a test- item).
+BOARD_DECISIONS = os.environ.get("FM_BOARD_DECISIONS") or FM + "/data/board-decisions.json"
+BOARD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")
+URGENCY = {"high": 0, "medium": 1, "low": 2}
+def board_answered():
+    out = {}
+    for a in read_ans():
+        if a.get("kind") != "board-decision" or not (a.get("choice") or a.get("text")) or a.get("conflict"):
+            continue
+        qid = str(a.get("qid") or "")
+        if a.get("test") and not qid.startswith("test-"):
+            continue
+        out.setdefault(qid, a)
+    return out
+def board_decisions():
+    """The open items, read live. A file that cannot be read is reported, never shown as empty."""
+    try:
+        d = json.load(open(BOARD_DECISIONS, encoding="utf-8"))
+    except FileNotFoundError:
+        return {"schema": "board-decisions.v1", "at": int(time.time()), "items": [], "problems": ["the decisions file does not exist"]}
+    except Exception as ex:
+        return {"schema": "board-decisions.v1", "at": int(time.time()), "items": [], "problems": ["the decisions file could not be read: " + str(ex)[:160]]}
+    probs = [] if d.get("schema") == "board-decisions.v1" else ["unexpected schema %r" % d.get("schema")]
+    given = board_answered()
+    items = []
+    for n, it in enumerate(d.get("items") or []):
+        if not isinstance(it, dict) or not BOARD_ID.match(str(it.get("id") or "")):
+            probs.append("item %d has no usable id" % n)
+            continue
+        if it.get("answered") or str(it.get("status") or "").lower() in ("answered", "closed", "done", "removed"):
+            continue
+        if it["id"] in given:
+            continue
+        rec = it.get("recommended") if isinstance(it.get("recommended"), dict) and it["recommended"].get("label") else None
+        alts = [a for a in (it.get("alternatives") or []) if isinstance(a, dict) and a.get("label")]
+        items.append({"id": it["id"], "project": str(it.get("project") or ""), "title": str(it.get("title") or it["id"]),
+                      "urgency": str(it.get("urgency") or "low").lower(), "context": str(it.get("context") or ""),
+                      "recommended": {"label": str(rec["label"]), "why": str(rec.get("why") or "")} if rec else None,
+                      "alternatives": [{"label": str(a["label"]), "why": str(a.get("why") or "")} for a in alts],
+                      "order": n})
+    items.sort(key=lambda x: (URGENCY.get(x["urgency"], 3), x["order"]))
+    return {"schema": "board-decisions.v1", "updated": d.get("updated"), "at": int(time.time()), "items": items, "problems": probs}
+def board_item(ident):
+    for it in board_decisions().get("items", []):
+        if it["id"] == ident:
+            return it
+    return None
 def flight_row(key):
     """The flight as the board's own flights payload shows it, read server-side so an unowned request
     carries the payload's facts rather than whatever the page sent."""
@@ -795,6 +845,8 @@ class H(BaseHTTPRequestHandler):
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             keys = [k.upper() for k in re.split(r"[,\s]+", q.get("key", "")[0]) if UPDATE_KEY.match(k)]
             return self.send(200, json.dumps(flight_state(sorted(set(keys))[:20])))
+        if p == "/api/console/board-decisions":
+            return self.send(200, json.dumps(board_decisions()))
         if p == "/api/console/decisions":
             try: return self.send(200, json.dumps(deck_state()))
             except Exception as ex: return self.send(500, json.dumps({"error": "decision deck failed: " + str(ex)[:200]}))
@@ -971,6 +1023,35 @@ class H(BaseHTTPRequestHandler):
         if not text and not choice: return self.send(400, json.dumps({"error": "empty"}))
         title = re.sub(r"\s+", " ", str(d.get("title", "")))[:500]
         if p.endswith("decision"):
+            # A critical decision from data/board-decisions.json (captain order 2026-11-19): `board` names
+            # the item, `choice` must be one of its own labels verbatim, `text` is the captain's own words.
+            # The note is exactly 'CAPTAIN ANSWER (via console) to [<id>] <option label or text>'.
+            if d.get("board"):
+                ident = str(d.get("board") or "").strip()
+                if not BOARD_ID.match(ident):
+                    return self.send(400, json.dumps({"error": "bad decision id"}))
+                if test_only and not d.get("test"):
+                    return self.send(403, json.dumps({"error": "this identity may only send test answers"}))
+                it = board_item(ident)
+                if not it:
+                    return self.send(409, json.dumps({"error": "this decision is no longer open - it was answered or removed"}))
+                labels = ([it["recommended"]["label"]] if it.get("recommended") else []) + [a["label"] for a in it["alternatives"]]
+                bchoice = str(d.get("choice") or "").strip()
+                btext = re.sub(r"\s+", " ", str(d.get("text") or "")).strip()[:1500]
+                if bchoice and bchoice not in labels:
+                    return self.send(400, json.dumps({"error": "that is not one of this decision's options"}))
+                if not bchoice and not btext:
+                    return self.send(400, json.dumps({"error": "pick an option or write an answer"}))
+                btest = bool(d.get("test")) or test_only
+                answer = bchoice + ((". " + btext) if (bchoice and btext) else btext)
+                rid = "console-board-%s-%d" % (ident, int(time.time() * 1000))
+                res = note(("TEST " if btest else "") + "CAPTAIN ANSWER (via console) to [%s] %s" % (ident, answer), rid)
+                if "error" in res:
+                    return self.send(502, json.dumps({"error": "could not reach firstmate inbox, so nothing was recorded"}))
+                rec = record("board-decision", ident, it["title"], bchoice, btext, btest, rid)
+                return self.send(200, json.dumps({"ok": True, "id": ident, "answer": answer, "note": res.get("id"),
+                                                  "test": btest, "duplicate": rec is None,
+                                                  "conflict": bool(rec and rec.get("conflict"))}))
             # Structured card (captain 2026-11-16): `card` names a file in the deck, and the whole
             # answer - card move, answers.jsonl, the captain record, firstmate's note, the asker's
             # note and the project's decisions line - succeeds before the POST answers anything.

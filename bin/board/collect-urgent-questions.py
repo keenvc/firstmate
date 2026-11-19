@@ -171,6 +171,26 @@ def cards(problems, items):
                       "record": "/home/azureuser/firstmate/data/decision-cards/open-decisions.md"})
 
 
+def board(problems, items):
+    """Family 0: firstmate's critical decisions (data/board-decisions.json), read through the board's own
+    /api/console/board-decisions so the open set and its answered filter match the board exactly."""
+    try:
+        d = get(CONSOLE + "/api/console/board-decisions")
+    except Exception as ex:
+        problems.append({"source": "board-decisions", "path": CONSOLE + "/api/console/board-decisions",
+                         "error": "the critical decisions could not be read: " + str(ex)[:160]})
+        return
+    for p in d.get("problems") or []:
+        problems.append({"source": "board-decisions", "path": "/home/azureuser/firstmate/data/board-decisions.json", "error": str(p)[:200]})
+    for it in d.get("items") or []:
+        opts = ([{"label": it["recommended"]["label"], "detail": it["recommended"].get("why", ""), "recommended": True}]
+                if it.get("recommended") else []) + [{"label": a["label"], "detail": a.get("why", "")} for a in it.get("alternatives") or []]
+        items.append({"source": "board", "id": it["id"], "project": it.get("project", ""), "question": it.get("title", ""),
+                      "context": it.get("context", ""), "options": opts, "urgency": it.get("urgency", ""),
+                      "asked_at": "", "stale": False, "problems": [], "card": False,
+                      "record": "/home/azureuser/firstmate/data/board-decisions.json"})
+
+
 def holds(problems, items):
     """Family 2: held backlog items, every home, read as the plain markdown records they are."""
     for home in HOMES:
@@ -251,7 +271,7 @@ def calls(problems, items):
 def main():
     t0 = time.time()
     problems, items = [], []
-    for fam in (cards, holds, calls):
+    for fam in (board, cards, holds, calls):
         try:
             fam(problems, items)
         except Exception as ex:                       # a family failure is reported, never fatal
@@ -288,7 +308,7 @@ def main():
         else:
             need.append(it)
     payload = {"at": int(now), "took_ms": int((time.time() - t0) * 1000), "count": len(need),
-               "by_source": {s: len([i for i in need if i["source"] == s]) for s in ("card", "hold", "call")},
+               "by_source": {s: len([i for i in need if i["source"] == s]) for s in ("board", "card", "hold", "call")},
                "old_days": OLD_DAYS, "older_n": len([i for i in need if i["old"]]),
                "items": need, "answered": answered, "answered_n": len(answered), "problems": problems,
                "sources": {"cards": CONSOLE + "/api/console/decisions", "holds": [h + "/data/backlog.md" for h in HOMES],
