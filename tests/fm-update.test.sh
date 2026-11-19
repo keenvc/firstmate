@@ -456,9 +456,11 @@ test_same_patch_with_later_edit_reconciles() {
 }
 
 # The same shape with one extra local change the target lacks: the merge is clean
-# but its tree is not the target's, so the home stays diverged and keeps its commit.
-test_extra_local_change_stays_diverged() {
-  local w out before marker
+# but its tree is not the target's, so the divergence is not redundant. fm-update
+# salvages it (FF_SALVAGE): the unique commit is parked on a fm-update-parked/
+# branch with its extra change intact before the home is reset to the target.
+test_extra_local_change_is_parked() {
+  local w out before marker branch
   w=$(new_world t5d)
   seed_file_lines "$w" notes.txt
   add_sm "$w" sm1
@@ -478,17 +480,28 @@ test_extra_local_change_stays_diverged() {
   out=$(run_update "$w")
 
   marker="$w/home/state/.secondmate-update-reconcile/sm1.pending"
-  assert_contains "$out" "secondmate sm1: skipped: diverged from origin/main" \
-    "a home with a change the target lacks was not protected"
-  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$before" ] \
-    || fail "diverged secondmate lost its commit (unlanded work at risk)"
-  assert_present "$marker" "the unique divergence left no durable record"
-  pass "T5d an extra local change stays diverged and keeps its commit"
+  assert_not_contains "$out" "secondmate sm1: reconciled redundant divergence" \
+    "a home with a change the target lacks was treated as redundant"
+  assert_contains "$out" "secondmate sm1: reset diverged home to origin/main" \
+    "a home with a change the target lacks did not converge after salvage"
+  assert_contains "$out" "parked local commits on fm-update-parked/sm1-" \
+    "a home with a change the target lacks was reset without parking its work"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$(git -C "$w/sm1" rev-parse origin/main)" ] \
+    || fail "salvaged secondmate did not reach origin/main"
+  branch=$(git -C "$w/sm1" for-each-ref --format='%(refname:short)' 'refs/heads/fm-update-parked/*')
+  [ -n "$branch" ] || fail "the unique local change was not parked (unlanded work at risk)"
+  [ "$(git -C "$w/sm1" rev-parse "$branch")" = "$before" ] \
+    || fail "parked branch does not hold the unlanded commit"
+  git -C "$w/sm1" show "$branch:notes.txt" | grep -qx fifteen \
+    || fail "parked branch lost the change the target lacks"
+  assert_absent "$marker" "a parked divergence left the .pending record behind"
+  pass "T5d an extra local change is parked on a branch before the home converges"
 }
 
 # A conflict is never redundant: the target rewrote the very line the home changed.
-test_conflicting_divergence_stays_diverged() {
-  local w out before
+# fm-update parks the conflicting commit rather than merging or discarding it.
+test_conflicting_divergence_is_parked() {
+  local w out before branch
   w=$(new_world t5e)
   seed_file_lines "$w" notes.txt
   add_sm "$w" sm1
@@ -507,11 +520,19 @@ test_conflicting_divergence_stays_diverged() {
 
   out=$(run_update "$w")
 
-  assert_contains "$out" "secondmate sm1: skipped: diverged from origin/main" \
-    "a conflicting divergence was not protected"
-  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$before" ] \
-    || fail "conflicting secondmate lost its commit (unlanded work at risk)"
-  pass "T5e a conflicting divergence stays diverged and keeps its commit"
+  assert_not_contains "$out" "secondmate sm1: reconciled redundant divergence" \
+    "a conflicting divergence was treated as redundant"
+  assert_contains "$out" "secondmate sm1: reset diverged home to origin/main" \
+    "a conflicting divergence did not converge after salvage"
+  branch=$(git -C "$w/sm1" for-each-ref --format='%(refname:short)' 'refs/heads/fm-update-parked/*')
+  [ -n "$branch" ] || fail "conflicting secondmate's commit was not parked (unlanded work at risk)"
+  [ "$(git -C "$w/sm1" rev-parse "$branch")" = "$before" ] \
+    || fail "parked branch does not hold the conflicting commit"
+  git -C "$w/sm1" show "$branch:notes.txt" | grep -qx five \
+    || fail "parked branch lost the conflicting local edit"
+  [ "$(git -C "$w/sm1" rev-parse HEAD)" = "$(git -C "$w/sm1" rev-parse origin/main)" ] \
+    || fail "salvaged conflicting secondmate did not reach origin/main"
+  pass "T5e a conflicting divergence is parked on a branch before the home converges"
 }
 
 # --- T6: the git side is idempotent; the restart set is not -----------------
@@ -830,8 +851,8 @@ test_dirty_secondmate_unsavable_is_skipped
 test_diverged_secondmate_parked
 test_squash_merged_divergence_reconciles
 test_same_patch_with_later_edit_reconciles
-test_extra_local_change_stays_diverged
-test_conflicting_divergence_stays_diverged
+test_extra_local_change_is_parked
+test_conflicting_divergence_is_parked
 test_already_current_secondmate_still_restarts
 test_already_current_unprovable_mate_is_nudged
 test_registry_backstop_dedup_and_self_exclusion

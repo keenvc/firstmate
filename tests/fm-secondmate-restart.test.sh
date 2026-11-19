@@ -80,6 +80,7 @@ case "${1:-}" in
           if [ -e "$D/remote-relaunch-start" ] && [ ! -e "$D/remote-relaunch-end" ]; then
             : > "$D/local-relaunch-during-remote"
           fi
+          : > "$D/local-exit-seen"
           printf 'zsh' > "$D/command.$target"
           ;;
         *'encode launch-brief'* | *'Firstmate operational input waiting: read'*) cat "$D/becomes" > "$D/command.$target" ;;
@@ -491,6 +492,18 @@ case "${rargs[1]:-}" in
         /bin/sleep 2
         : > "$FM_FAKE_DIR/remote-relaunch-end"
         ;;
+      overlap-relaunch)
+        # Hold this relaunch open until a local mate has been stopped, bounded so a
+        # serialized pass fails the overlap check instead of hanging. A fixed sleep
+        # raced the local stop path on a loaded host and failed with no regression.
+        : > "$FM_FAKE_DIR/remote-relaunch-start"
+        n=0
+        while [ ! -e "$FM_FAKE_DIR/local-exit-seen" ] && [ "$n" -lt 300 ]; do
+          /bin/sleep 0.1
+          n=$((n + 1))
+        done
+        : > "$FM_FAKE_DIR/remote-relaunch-end"
+        ;;
     esac
     printf 'relaunched %s harness=%s from=claude model=%s effort=%s backend=herdr endpoint=fm-remote:2ndmate-%s worktree=/srv/fm\n' \
       "${rargs[2]}" "${rargs[3]}" "${rargs[4]}" "${rargs[5]}" "${rargs[2]}"
@@ -771,7 +784,7 @@ test_post_stop_failure_is_reported_unreached() {
 test_relaunches_do_not_block_persist_polling() {
   local dir out rc
   dir=$(new_case relaunch-polling)
-  setup_remote_case "$dir" sm1 slow-relaunch
+  setup_remote_case "$dir" sm1 overlap-relaunch
   add_local_mate "$dir" sm2
   printf -- '- sm2 - local domain (home: %s; scope: things; projects: p; added 2026-09-03)\n' \
     "$dir/sm2-home" >> "$dir/home/data/secondmates.md"
