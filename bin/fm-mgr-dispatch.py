@@ -31,10 +31,14 @@ The rules this script enforces (spec 4a, approved 2026-11-19):
 * Every refusal prints one reason line and appends it to the dispatch log, so
   a quiet queue can never be mistaken for a filtered one.
 
-Reads go through the `linear` CLI that already holds the workspace credential,
-and fall back to the GraphQL API the way qa-shared/issue_claim.py does.
-Reads are cached under FM_MGR_DISPATCH_STATE for FM_MGR_DISPATCH_TTL seconds
-(default 90); every claim drops that cache.
+Reads come from the Linear GraphQL API, the only source that returns the
+numeric `sortOrder` this queue ranks by; the `linear` CLI does not return one,
+so it is used for writes and never for reads. A row without a numeric
+sortOrder, or a read that ends before its last page, is a hard failure rather
+than a shorter or reshuffled board. Reads are cached under
+FM_MGR_DISPATCH_STATE for FM_MGR_DISPATCH_TTL seconds (default 90) for `next`
+and `list`; `claim`, the write path, and `check`, the alerting view, always
+read fresh, and every claim drops the cache.
 
 Lanes on a shared host may be team-scoped: `ADC:firstmate` keeps two homes that
 both run a lane called `firstmate` apart on Linear, and a bare lane name is
@@ -84,6 +88,12 @@ DEFAULT_LEASE_MINUTES = 90
 # Non-In-Progress started states. WIP is one issue per lane, and "In Review"
 # is a finish for the lane: the work moved on and the lane is free again.
 LANE_RELEASING_STATES = ("in review", "review", "in-review")
+
+# Linear state types that mean work has begun. A claim is placed here, and only
+# a started issue can be owned, so an issue handed back to Todo or Backlog
+# drops its owner with the state change.
+STARTED_TYPES = ("started", "in progress", "in-progress", "inprogress", "claimed",
+                 "active", "in review", "review")
 
 TEAM_QUERY = """
 query($t:String!,$a:String){ teams(first:1, filter:{key:{eq:$t}}){
@@ -281,17 +291,19 @@ def _write_seam(writer, args):
 
 
 def read_team(team):
-    """Every open issue of one team with its labels. CLI first, GraphQL on failure."""
+    """Every open issue of one team, or a hard failure.
+
+    One source only: the GraphQL API, because ranking needs each row's
+    numeric `sortOrder` and the `linear` CLI's issue query does not return one.
+    A CLI fallback would answer with every issue inside a priority tier tied
+    and ordered by identifier, so it is deliberately not used for reads:
+    ranking fails closed rather than reading a board it cannot order right.
+    The CLI is still what performs writes, and it is what supplies the API
+    credential for an operator who logged in there."""
     reader = os.environ.get("FM_MGR_READER")
     if reader:
         return _read_team_seam(reader, team)
-    try:
-        return _read_team_api(team)
-    except LinearError as api_err:
-        try:
-            return _read_team_cli(team)
-        except LinearError as cli_err:
-            raise LinearError(f"{team}: {api_err}; also {cli_err}") from cli_err
+    return _read_team_api(team)
 
 
 def _read_team_seam(reader, team):
@@ -312,36 +324,36 @@ def _read_team_seam(reader, team):
     return {"key": team, "issues": [_norm_issue(i) for i in issues if _is_open(i)]}
 
 
+MAX_PAGES = 20
+
+
 def _read_team_api(team):
+    """Every open issue of one team, or LinearError: never a partial board.
+
+    A truncated read is the dangerous failure here: a missed Urgent issue
+    silently opens the Urgent gate, and a missed In Progress issue silently
+    frees a lane that is still working, so an unfinished pagination ends in
+    LinearError rather than a shorter list."""
     nodes, after = [], None
-    for _ in range(20):
+    pages = 0
+    while True:
         found = gql(TEAM_QUERY, {"t": team, "a": after}).get("teams", {}).get("nodes") or []
         if not found:
             raise LinearError(f"no {team} team in the workspace")
-        data = found[0]
-        page = data["issues"]
+        page = found[0].get("issues")
+        if not isinstance(page, dict) or "nodes" not in page or "pageInfo" not in page:
+            raise LinearError(f"{team}: Linear returned a malformed issue page")
         nodes += page["nodes"]
-        if not page["pageInfo"]["hasNextPage"]:
-            break
-        after = page["pageInfo"]["endCursor"]
-    return {"key": team, "issues": [_norm_issue(i) for i in nodes]}
-
-
-def _read_team_cli(team):
-    # The CLI's issue query has no label filter for "every open state", so the
-    # fallback asks for each open state TYPE in turn and unions the results.
-    seen = {}
-    for state in ("unstarted", "started", "triage", "backlog"):
-        text = run_linear(["issue", "query", "--team", team, "--state", state,
-                           "--limit", "all", "--json", "--no-pager", "--no-input"])
-        try:
-            rows = json.loads(text)
-        except ValueError as e:
-            raise LinearError(f"`linear issue query --state {state}` printed no JSON") from e
-        for row in rows:
-            if _is_open(row) and row.get("identifier") not in seen:
-                seen[row["identifier"]] = _norm_issue(row)
-    return {"key": team, "issues": list(seen.values())}
+        pages += 1
+        info = page["pageInfo"] or {}
+        if not info.get("hasNextPage"):
+            return {"key": team, "issues": [_norm_issue(i) for i in nodes]}
+        after = info.get("endCursor")
+        if not after:
+            raise LinearError(f"{team}: Linear reported another page with no cursor")
+        if pages >= MAX_PAGES:
+            raise LinearError(f"{team}: partial read after {MAX_PAGES} pages of "
+                              f"{len(nodes)} issues; ranking refuses a truncated board")
 
 
 def _state_of(i):
@@ -441,10 +453,15 @@ def priority_label(issue):
 
 def rank_key(issue):
     """(priority, sortOrder, identifier). Linear's sortOrder is the tie-break,
-    and the identifier only ever separates two issues Linear itself left tied."""
+    and the identifier only ever separates two issues Linear itself left tied.
+
+    A row without a numeric sortOrder raises instead of sorting to the back:
+    otherwise one unreadable field silently collapses a priority tier into
+    identifier order, which looks like a working queue and is not one."""
     so = issue.get("sortOrder")
-    if so is None:
-        so = float("inf")
+    if isinstance(so, bool) or not isinstance(so, (int, float)):
+        raise LinearError(f"{issue.get('identifier') or 'an issue'} has no numeric sortOrder "
+                          f"({so!r}); the queue cannot be ranked without one")
     return (priority_rank(issue), so, issue.get("identifier") or "")
 
 
@@ -458,6 +475,15 @@ def ordered(board):
 
 
 def owners_of(issue):
+    """The lanes that own this issue, or none if it is not owned any more.
+
+    A hand-back moves the issue back to Todo or Backlog and leaves the claim
+    label behind, so a label on an unstarted issue is a stale record rather
+    than an owner: counting it would keep the issue out of the Urgent gate and
+    keep a lane at WIP 1 for work nobody is doing. Ownership therefore reads
+    as the label AND the issue still being started."""
+    if state_type(issue) not in STARTED_TYPES:
+        return []
     labels = issue.get("labels") or []
     return [n[len(CLAIM_LABEL):] for n in labels
             if n.startswith(CLAIM_LABEL) and len(n) > len(CLAIM_LABEL)]
@@ -647,7 +673,12 @@ def plan_claim(board, lane, task, lease_minutes=DEFAULT_LEASE_MINUTES):
 
 
 def cmd_claim(args):
-    board = load_board()
+    # The write path reads fresh on purpose. Every refusal is a statement about
+    # the board as it is now - that lane's WIP, that issue's owner, the Urgent
+    # gate - and a cached board could let a claim through against an issue that
+    # was finished or taken since the cache was filled. next and list keep the
+    # cache; a claim never does.
+    board = load_board(use_cache=False)
     lane = normalize_lane(args.lane)
     try:
         issue, plan = plan_claim(board, lane, args.issue, args.lease_minutes)
@@ -664,16 +695,21 @@ def cmd_claim(args):
 
     done = []
     try:
-        if plan["move"]:
-            run_linear(["issue", "update", issue["identifier"],
-                        "--state", "In Progress", "--no-input"])
-            done.append("state")
         if plan["label"] not in (issue.get("labels") or []):
+            # Label first, state second. A claim's dangerous half-failure is an
+            # In Progress issue nobody owns: it would be invisible to the Urgent
+            # gate and to WIP 1, and two lanes could then pick up the same work.
+            # A label without the state change is just an owner that has not
+            # started yet, which the next claim attempt can complete.
             # --add-label, never --label: --label replaces the whole label set,
             # which would silently strip an issue's other labels on claim.
             run_linear(["issue", "update", issue["identifier"],
                         "--add-label", plan["label"], "--no-input"])
             done.append("label")
+        if plan["move"]:
+            run_linear(["issue", "update", issue["identifier"],
+                        "--state", "In Progress", "--no-input"])
+            done.append("state")
         run_linear(["issue", "comment", "create", issue["identifier"],
                     "--body", plan["comment"], "--no-input"])
         done.append("comment")
@@ -708,7 +744,10 @@ def build_check(board):
 
 
 def cmd_check(args):
-    report = build_check(load_board())
+    # Fresh, never cached: check is the alerting view an operator reads before
+    # acting, and a stale board would report a lane as blocked or as working
+    # when the previous claim or a teammate's hand-back has already changed it.
+    report = build_check(load_board(use_cache=False))
     if args.json:
         print(json.dumps(report, indent=2))
     else:

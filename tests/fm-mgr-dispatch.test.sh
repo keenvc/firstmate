@@ -43,6 +43,11 @@ cat > "$FAKEBIN/queue-reader" <<'PY'
 import json, os, sys
 teams = [t.strip().upper() for t in os.environ.get("FM_MGR_TEAMS", "ADC,NIC,FDC").split(",") if t.strip()]
 doc = json.load(open(os.environ["FM_MGR_QUEUE"]))
+# Every call is counted so a test can prove which subcommands bypass the cache.
+count = os.environ.get("FM_MGR_READS")
+if count:
+    with open(count, "a") as f:
+        f.write("read\n")
 print(json.dumps({"teams": {t: doc.get(t, []) for t in teams}}))
 PY
 chmod +x "$FAKEBIN/queue-reader"
@@ -79,17 +84,38 @@ dispatch() {
   return $rc
 }
 
+# dispatch_keep_cache <queue-json-file> <reads-log> <args...> - like dispatch,
+# but keeps the cache and the write log between calls, so a test can see that a
+# second call re-read the board rather than answering from the first call's
+# cached copy. Every read the script makes is appended to <reads-log>.
+dispatch_keep_cache() {
+  local queue=$1 reads=$2
+  shift 2
+  local out rc
+  out=$(FM_MGR_QUEUE="$queue" FM_MGR_WRITES="$WRITES" FM_MGR_READS="$reads" \
+        FM_MGR_READER="$FAKEBIN/queue-reader" FM_MGR_WRITER="$FAKEBIN/queue-writer" \
+        FM_MGR_DISPATCH_STATE="$TMP_ROOT/state" \
+        python3 "$DISPATCH" "$@" 2>&1)
+  rc=$?
+  printf '%s\n' "$out"
+  return $rc
+}
+
 # issue <identifier> <priority> <sortOrder> <state> [labels-csv]
 issue() {
   python3 - "$@" <<'PY'
 import json, sys
-ident, priority, sort, state = sys.argv[1], int(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+ident, priority, sort, state = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 labels = [l for l in (sys.argv[5].split(",") if len(sys.argv) > 5 and sys.argv[5] else []) if l]
-print(json.dumps({"identifier": ident, "title": f"title for {ident}", "priority": priority,
-                  "sortOrder": sort,
-                  "state": json.loads(state) if state.startswith("{") else state,
-                  "labels": [{"name": l} for l in labels],
-                  "url": f"https://linear.app/x/issue/{ident.lower()}"}))
+row = {"identifier": ident, "title": f"title for {ident}", "priority": priority,
+       "state": json.loads(state) if state.startswith("{") else state,
+       "labels": [{"name": l} for l in labels],
+       "url": f"https://linear.app/x/issue/{ident.lower()}"}
+# A `none` sortOrder reproduces the CLI's payload, which carries no sortOrder
+# at all: the key is absent rather than null, exactly as a real client sends it.
+if sort != "none":
+    row["sortOrder"] = float(sort)
+print(json.dumps(row))
 PY
 }
 
@@ -323,6 +349,109 @@ t_dry_run_writes_nothing_and_real_claim_writes_three() {
   if [ "$n" -eq 3 ]; then pass "the claim is exactly state, label and comment"; else fail "claim wrote $n operations"; fi
 }
 
+# A row without a numeric sortOrder cannot be ranked. Failing is the point:
+# sorting it to the back would collapse a priority tier into identifier order
+# and still look like a working queue.
+t_row_without_sortorder_is_refused() {
+  local q="$TMP_ROOT/nosortorder.json"
+  queue "$q" \
+    "NIC=[$(issue NIC-10 2 -100 'Todo'),
+           $(issue NIC-11 2 none 'Todo')]" \
+    "ADC=[]" "FDC=[]"
+  local out rc=0
+  out=$(dispatch "$q" list) || rc=$?
+  if [ "$rc" -eq 2 ]; then pass "an unrankable row stops the queue with exit 2"; else fail "list exited $rc: $out"; fi
+  assert_contains "$out" "no numeric sortOrder" "the failure names the missing sortOrder"
+  assert_contains "$out" "NIC-11" "the failure names the row it cannot rank"
+
+  local out2 rc2=0
+  out2=$(dispatch "$q" next lane-a) || rc2=$?
+  if [ "$rc2" -eq 2 ]; then pass "next fails too rather than offering an unranked issue"; else fail "next exited $rc2: $out2"; fi
+}
+
+# The write path and the alerting view must never answer from a cached board:
+# a claim decided on a stale board could take an issue already finished or
+# already taken, and check could report a lane as free while it is working.
+t_claim_and_check_read_fresh() {
+  local q="$TMP_ROOT/fresh.json" reads="$TMP_ROOT/reads.log"
+  queue "$q" \
+    "NIC=[$(issue NIC-10 2 -100 'Todo'),
+           $(issue NIC-11 2 -200 'Todo')]" \
+    "ADC=[]" "FDC=[]"
+  rm -rf "$TMP_ROOT/state"
+  : > "$reads"
+  : > "$WRITES"
+
+  local out
+  out=$(dispatch_keep_cache "$q" "$reads" list) || fail "list exited non-zero: $out"
+  local after_list
+  after_list=$(grep -c . "$reads")
+
+  out=$(dispatch_keep_cache "$q" "$reads" check) || fail "check exited non-zero: $out"
+  local after_check
+  after_check=$(grep -c . "$reads")
+  if [ "$after_check" -gt "$after_list" ]; then
+    pass "check re-reads the board instead of answering from the cache"
+  else
+    fail "check answered from the cache (reads before: $after_list, after: $after_check)"
+  fi
+
+  out=$(dispatch_keep_cache "$q" "$reads" claim lane-a NIC-10) || fail "claim exited non-zero: $out"
+  local after_claim
+  after_claim=$(grep -c . "$reads")
+  if [ "$after_claim" -gt "$after_check" ]; then
+    pass "claim re-reads the board instead of answering from the cache"
+  else
+    fail "claim answered from the cache (reads before: $after_check, after: $after_claim)"
+  fi
+}
+
+# The label is written before the state change. An In Progress issue with no
+# owner is the dangerous half-failure: it would be invisible to the Urgent gate
+# and to WIP 1, and two lanes could then take the same work.
+t_claim_labels_before_moving_state() {
+  local q="$TMP_ROOT/order.json"
+  queue "$q" "NIC=[$(issue NIC-12 3 -1 'Todo')]" "ADC=[]" "FDC=[]"
+  local out
+  out=$(dispatch "$q" claim lane-a NIC-12) || fail "claim exited non-zero: $out"
+  local first second
+  first=$(python3 -c "import json,sys; print(json.loads(open(sys.argv[1]).readline())['op'])" "$WRITES")
+  second=$(python3 -c "import json,sys; print(json.loads(open(sys.argv[1]).readlines()[1])['op'])" "$WRITES")
+  if [ "$first" = "label" ] && [ "$second" = "state" ]; then
+    pass "the claim writes the ownership label before the In Progress state"
+  else
+    fail "claim write order (first: $first, second: $second)"
+  fi
+}
+
+# A hand-back moves an issue to Todo or Backlog and leaves the claim label
+# behind. The label alone is a stale record: reading it as ownership would keep
+# the issue out of the Urgent gate and keep its lane stuck at WIP 1.
+t_handed_back_issue_is_not_owned() {
+  local q="$TMP_ROOT/handback.json"
+  queue "$q" \
+    "NIC=[$(issue NIC-11 1 -20 'Todo' 'agent:lane-b'),
+           $(issue NIC-12 3 -9999 'Todo')]" \
+    "ADC=[]" "FDC=[]"
+  local out rc=0
+  out=$(dispatch "$q" check) || rc=$?
+  if [ "$rc" -eq 1 ]; then pass "check still sees a handed-back Urgent issue as unowned"; else fail "check exited $rc: $out"; fi
+  assert_contains "$out" "UNOWNED URGENT" "the handed-back Urgent issue is reported unowned"
+  assert_contains "$out" "NIC-11" "the handed-back Urgent issue is named"
+
+  local out2
+  out2=$(dispatch "$q" next lane-b) || fail "next exited non-zero: $out2"
+  if printf '%s\n' "$out2" | grep -q '^NIC-11'; then
+    pass "the handed-back Urgent issue is offered first, not treated as lane-b's work"
+  else
+    fail "next did not offer the handed-back Urgent issue: $out2"
+  fi
+
+  local out3 rc3=0
+  out3=$(dispatch "$q" claim lane-b NIC-11) || rc3=$?
+  if [ "$rc3" -eq 0 ]; then pass "lane-b can reclaim the issue it handed back"; else fail "claim exited $rc3: $out3"; fi
+}
+
 fm_test_run \
   t_order_is_priority_then_sortorder \
   t_next_equals_queue_head \
@@ -332,4 +461,8 @@ fm_test_run \
   t_wip_one_refuses_second_claim \
   t_unowned_urgent_blocks_nonurgent \
   t_check_exit_codes \
-  t_dry_run_writes_nothing_and_real_claim_writes_three
+  t_dry_run_writes_nothing_and_real_claim_writes_three \
+  t_row_without_sortorder_is_refused \
+  t_claim_and_check_read_fresh \
+  t_claim_labels_before_moving_state \
+  t_handed_back_issue_is_not_owned
