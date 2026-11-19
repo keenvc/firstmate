@@ -41,9 +41,14 @@
 # firstmate environment: the flag lives in <config> and the state directory is
 # the status file's directory.
 # pr_ready, merged, and cleaned_up first capture their own task, so its status
-# records precede them. cleaned_up then deletes the task's offset, because teardown
-# retires that status log right after. dispatched deletes any leftover offset
-# so a reused task id starts at byte 0 of its fresh log.
+# records precede them. cleaned_up then deletes the task's offset and its
+# dispatch marker, because teardown retires that status log right after.
+# dispatched leaves state/.<task>.fleet-ledger-dispatched behind. A dispatched
+# for a task that still has that marker is a relaunch or respawn of a live task
+# (a second mate respawn reaches bin/fm-spawn.sh as a fresh spawn): it records
+# nothing and keeps the offset, because the retained status log was already
+# captured. A dispatched without the marker is a new task, or a reused id after
+# cleaned_up: it deletes any leftover offset so the fresh log starts at byte 0.
 # Every write holds state/.fleet-ledger.lock.
 #
 # Environment: FM_HOME, FM_STATE_OVERRIDE, and FM_CONFIG_OVERRIDE resolve the
@@ -101,6 +106,8 @@ esac
 [ -d "$STATE" ] && [ ! -L "$STATE" ] || exit 1
 
 offset_path() { printf '%s/.%s.fleet-ledger-offset' "$STATE" "$1"; }
+
+dispatched_marker_path() { printf '%s/.%s.fleet-ledger-dispatched' "$STATE" "$1"; }
 
 read_offset() { # <task> <out-var>: saved byte offset, 0 when absent or malformed
   local value=0
@@ -207,10 +214,13 @@ case "$cmd" in
     capture_task "$APPENDED_TASK" || rc=1
     ;;
   dispatched)
+    marker=$(dispatched_marker_path "$2")
+    [ ! -e "$marker" ] || exit 0
     rm -f -- "$(offset_path "$2")"
     append task.dispatched "$2" \
       '{kind: ($kind | n), project: ($project | n), harness: ($harness | n), model: ($model | n)}' \
       --arg kind "$3" --arg project "$4" --arg harness "$5" --arg model "$6" || rc=1
+    [ "$rc" -ne 0 ] || : > "$marker" || rc=1
     ;;
   pr_ready)
     capture_task "$2" || rc=1
@@ -227,7 +237,7 @@ case "$cmd" in
   cleaned_up)
     capture_task "$2" || rc=1
     append task.cleaned_up "$2" '{}' || rc=1
-    [ "$rc" -ne 0 ] || rm -f -- "$(offset_path "$2")"
+    [ "$rc" -ne 0 ] || rm -f -- "$(offset_path "$2")" "$(dispatched_marker_path "$2")"
     ;;
 esac
 [ "$rc" -eq 0 ] || echo "fm-fleet-ledger: could not record $cmd${2:+ for $2}; the ledger may be missing records" >&2

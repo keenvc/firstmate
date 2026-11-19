@@ -70,7 +70,9 @@ Example:
 - When a home turns the ledger on, status lines already in a live task's log are recorded on that task's next capture (which may be a worker status command, PR registration, merge, cleanup, or monitor poll); tasks dispatched or cleaned up while the flag was absent have no record of that.
 - There is no sequence number and no gap detection.
 - Writes are plain appends with no forced flush to disk, so a machine crash can lose the newest records.
-- The file is never rotated and grows until truncated.
+- A second mate respawn is not a new task: while a task's dispatch marker (`state/.<task>.fleet-ledger-dispatched`) exists, a repeated `task.dispatched` call records nothing and leaves the task's status offset alone, so a retained status log is not replayed. Cleanup removes the marker. A task dispatched before this marker existed has none, so its first relaunch after the upgrade can still replay its log once.
+- Status lines that are not status lines (markdown rules, code fences, table rows a worker appended as continuation lines, or a literal unexpanded `[at=$(date +%s)]`) are recorded like any other nonblank line, with `state` `null` when no leading state word is found. Readers that want only real status transitions should filter on `state`.
+- The file is never rotated and grows until truncated. To shrink one that holds duplicates, write a de-duplicated copy offline with `bin/fm-fleet-ledger-compact.sh [--ignore-ts] <in> <out>` (it never edits its input; see its header for what `--ignore-ts` also drops) and swap it in while no writer runs.
   To truncate it, stop reading, then empty it with `: > state/fleet-ledger.jsonl`; later records append to the empty file.
 - The ledger copies status text verbatim from the home's `state/` directory and adds no scrubbing, so give its readers exactly the trust you give `state/`.
 

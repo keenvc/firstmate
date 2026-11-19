@@ -288,6 +288,76 @@ test_flag_off_writes_nothing() {
   pass "flag off: the whole lifecycle leaves no ledger file, offset, or lock"
 }
 
+test_relaunch_of_a_recorded_task_does_not_replay_its_status_log() {
+  local ledger out i before
+  make_case on-relaunch on
+  ledger="$HOME_DIR/state/fleet-ledger.jsonl"
+  printf 'working: before dispatch\n' > "$HOME_DIR/state/$TASK.status"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" dispatched "$TASK" secondmate "" claude opus 2>&1) \
+    || fail "dispatched failed: $out"
+  printf 'working: one\nblocked: two\n' >> "$HOME_DIR/state/$TASK.status"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" capture 2>&1) || fail "capture failed: $out"
+  before=$(cat "$ledger")
+  assert_equals 3 "$(grep -c '"event":"task.status"' "$ledger")" "status records before the relaunches"
+  for i in 1 2 3; do
+    out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" dispatched "$TASK" secondmate "" claude opus 2>&1) \
+      || fail "relaunch dispatched failed: $out"
+    out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" capture 2>&1) || fail "capture after relaunch failed: $out"
+  done
+  assert_equals "$before" "$(cat "$ledger")" "ledger after three relaunches of a retained status log"
+  assert_equals 1 "$(grep -c '"event":"task.dispatched"' "$ledger")" "dispatched records"
+  printf 'done: after relaunch\n' >> "$HOME_DIR/state/$TASK.status"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" capture 2>&1) || fail "capture failed: $out"
+  assert_equals 4 "$(grep -c '"event":"task.status"' "$ledger")" "status records after a new line"
+  pass "flag on: relaunching a recorded task records no second dispatch and does not replay its retained status log"
+}
+
+test_new_or_reused_task_records_from_byte_zero() {
+  local ledger out
+  make_case on-reuse on
+  ledger="$HOME_DIR/state/fleet-ledger.jsonl"
+  printf 'working: first life\n' > "$HOME_DIR/state/$TASK.status"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" dispatched "$TASK" ship sample claude "" 2>&1) \
+    || fail "dispatched failed: $out"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" cleaned_up "$TASK" 2>&1) || fail "cleaned_up failed: $out"
+  assert_absent "$HOME_DIR/state/.$TASK.fleet-ledger-offset" "cleanup left the offset"
+  assert_absent "$HOME_DIR/state/.$TASK.fleet-ledger-dispatched" "cleanup left the dispatch marker"
+  printf 'working: second life\n' > "$HOME_DIR/state/$TASK.status"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" dispatched "$TASK" ship sample claude "" 2>&1) \
+    || fail "second dispatched failed: $out"
+  out=$(in_home "$ROOT/bin/fm-fleet-ledger.sh" capture 2>&1) || fail "capture failed: $out"
+  assert_equals "$(cat <<EOF
+["task.dispatched",null]
+["task.status"," first life"]
+["task.cleaned_up",null]
+["task.dispatched",null]
+["task.status"," second life"]
+EOF
+)" "$(ledger_rows '[.event, .text]')" "ledger rows across a reused task id"
+  pass "flag on: a new task, including a reused id after cleanup, records its dispatch and its status log from byte 0"
+}
+
+test_compaction_writes_a_deduplicated_copy_and_never_touches_the_input() {
+  local dir="$TMP_ROOT/compact" in out before
+  mkdir -p "$dir"
+  in="$dir/in.jsonl"
+  out="$dir/out.jsonl"
+  cat > "$in" <<'EOF'
+{"v":1,"ts":10,"event":"task.status","task":"a","state":"working","key":null,"text":" x"}
+{"v":1,"ts":11,"event":"task.status","task":"a","state":"done","key":null,"text":" y"}
+{"v":1,"ts":10,"event":"task.status","task":"a","state":"working","key":null,"text":" x"}
+{"v":1,"ts":20,"event":"task.status","task":"a","state":"working","key":null,"text":" x"}
+EOF
+  before=$(cat "$in")
+  "$ROOT/bin/fm-fleet-ledger-compact.sh" "$in" "$out" >/dev/null || fail "compaction failed"
+  assert_equals 3 "$(wc -l < "$out" | tr -d ' ')" "exact mode keeps only byte-identical repeats out"
+  assert_equals "$before" "$(cat "$in")" "the input"
+  "$ROOT/bin/fm-fleet-ledger-compact.sh" "$in" "$out" >/dev/null 2>&1 && fail "compaction overwrote an existing output"
+  "$ROOT/bin/fm-fleet-ledger-compact.sh" --ignore-ts "$in" "$dir/nots.jsonl" >/dev/null || fail "ignore-ts compaction failed"
+  assert_equals '[10,11]' "$(jq -sc 'map(.ts)' "$dir/nots.jsonl")" "ignore-ts keeps the first of each record, in order"
+  pass "compaction writes a new de-duplicated copy in order, refuses to overwrite, and leaves its input alone"
+}
+
 test_flag_on_records_the_task_lifecycle
 test_flag_on_records_a_pr_merge_once
 test_flag_on_records_a_pr_registration
@@ -298,3 +368,6 @@ test_worker_status_command_fails_when_the_append_fails
 test_worker_status_line_lands_when_the_ledger_fails
 test_worker_status_line_with_the_flag_absent
 test_flag_off_writes_nothing
+test_relaunch_of_a_recorded_task_does_not_replay_its_status_log
+test_new_or_reused_task_records_from_byte_zero
+test_compaction_writes_a_deduplicated_copy_and_never_touches_the_input
