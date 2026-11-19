@@ -149,13 +149,16 @@ first_reported_line() {  # <text>
 # Send the ordinary re-read steer to a mate this pass will not restart, and say
 # plainly which it was. A nudge is a partial reload and is never reported as more.
 # The nudge asks for no answer, so it is sent fire-and-forget and never creates a
-# pending-reply expectation that could later be reported as a missed report.
+# pending-reply expectation that could later be reported as a missed report; its
+# delivery id comes from the shared notice helper (bin/fm-secondmate-nudge-lib.sh).
+# new_token mints the beacon token a remote mate's persist request names.
 new_token() { od -An -tx1 -N8 /dev/urandom | tr -d ' \n'; }
 
 fall_back_to_nudge() {  # <id> <reason>
   local id=$1 reason=$2 out
   if out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$SCRIPT_DIR/fm-send.sh" "$id" --fire-and-forget "$(new_token)" "$FM_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
+    "$SCRIPT_DIR/fm-send.sh" "$id" --fire-and-forget "$(fm_secondmate_nudge_delivery_id)" \
+    "$FM_SECOND_MATE_NUDGE_MESSAGE" 2>&1); then
     nudged_count=$((nudged_count + 1))
     printf 'nudged: %s: %s\n' "$id" "$reason"
   else
