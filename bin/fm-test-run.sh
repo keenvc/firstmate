@@ -564,6 +564,7 @@ tests/fm-captain-hold-lifecycle.test.sh 343658
 tests/fm-cd-pretool-check.test.sh 16801
 tests/fm-composer-ghost.test.sh 2292
 tests/fm-composer-lib.test.sh 9521
+tests/fm-credit-preflight.test.sh 1500
 tests/fm-crew-state.test.sh 82058
 tests/fm-ensure-agents-md.test.sh 895
 tests/fm-grok-harness.test.sh 7666
