@@ -5868,6 +5868,51 @@ test_dispatch_composer_state_routes_by_backend() {
   pass "fm_backend_composer_state dispatches every backend to its named thin classifier, unknown for unrecognized backends"
 }
 
+test_control_explain_unknown_composer_sources_herdr() {
+  # fm-control exit, on an `unknown` composer verdict, calls
+  # fm_control_explain_unknown_composer (bin/fm-control.sh) to name the shapes
+  # the screen offered. Its herdr branch reads the pane through the adapter's
+  # OWN capture helper (fm_backend_herdr_visible_capture_ansi), which only
+  # exists once bin/backends/herdr.sh is sourced in that shell. The tmux branch
+  # sources its adapter explicitly; without the same line the herdr call hit an
+  # undefined function and refused with no explanation at all.
+  # The function is a pure reader of the pane, so this drives the real
+  # definition, extracted from the shipping script, against a fake herdr CLI;
+  # it asserts the explanation is produced AND that the preferred styled
+  # viewport read is the one it used.
+  local dir log resp fb out rc us
+  us=$'\x1f'
+  dir="$TMP_ROOT/control-explain-herdr"; log="$dir/log"; resp="$dir/resp"
+  mkdir -p "$resp"; : > "$log"
+  fb=$(make_herdr_fakebin "$dir")
+  # The fake answers `status --json` itself, so it consumes no canned slot; the
+  # first scripted response is therefore the styled viewport read. It carries a
+  # bare agent glyph row, a shape fm_composer_explain_unknown names rather than
+  # an empty answer.
+  printf '\xe2\x9d\xad hello\n' > "$resp/1.out"
+  out=$(PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '
+      set -u
+      . "$1/bin/fm-backend.sh" >/dev/null 2>&1
+      BACKEND=herdr LABEL= T="default:w1:p2"
+      eval "$(awk '"'"'/^fm_control_explain_unknown_composer\(\)/{f=1} f{print} f&&/^}/{exit}'"'"' "$1/bin/fm-control.sh")"
+      fm_control_explain_unknown_composer
+    ' _ "$ROOT" 2>&1); rc=$?
+  [ "$rc" = 0 ] || fail "the explanation should read the herdr screen once its adapter is loaded, got rc=$rc: $out"
+  case "$out" in
+    *'bare-glyph'*) : ;;
+    '') fail "the explanation was empty, so a refusal would name no shapes (the defect)" ;;
+    *) fail "the explanation should name the shapes the screen offered, got: $out" ;;
+  esac
+  # The preferred styled read is the one that produced the shapes: a
+  # `pane read ... --source visible --format ansi` line must be logged. The
+  # argument separator is unit-separator (0x1f), which is an ordinary byte to
+  # grep, so match it literally rather than through a shell escape.
+  grep -qF "pane${us}read${us}w1:p2${us}--source${us}visible${us}--format${us}ansi" "$log" \
+    || fail "the explanation should read the styled viewport (--source visible --format ansi) with the loaded adapter, not decline: $(tr '\037' '|' < "$log")"
+  pass "fm_control_explain_unknown_composer loads the herdr adapter and names the pane's shapes"
+}
+
 test_scripts_route_explicit_target_through_meta_backend() {
   local dir state log resp fb neutral out
   dir="$TMP_ROOT/script-explicit-target"; state="$dir/state"; mkdir -p "$state" "$dir/responses"
@@ -6718,6 +6763,7 @@ test_send_text_submit_non_claude_skips_the_payload_proof
 test_dispatch_routes_herdr_backend
 test_dispatch_busy_state_unknown_for_tmux
 test_dispatch_composer_state_routes_by_backend
+test_control_explain_unknown_composer_sources_herdr
 test_scripts_route_explicit_target_through_meta_backend
 test_normalize_event_leaves_from_empty
 test_escalation_marker_keys_like_watcher

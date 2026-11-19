@@ -527,7 +527,12 @@ fm_control_explain_unknown_composer() {
       ;;
     herdr)
       # Herdr prefers its styled viewport and degrades to plain, and classifies
-      # with identity on (it may re-run the identity probe).
+      # with identity on (it may re-run the identity probe). Load the adapter
+      # siblings that define its composer capture, exactly as the tmux branch
+      # above already does: without this the preferred ANSI capture and the
+      # plain fallback both call functions this shell never sourced, so the
+      # explanation silently declines and the refusal names no shapes.
+      fm_backend_source herdr || return 1
       if cap=$(fm_backend_herdr_visible_capture_ansi "$T" 2>/dev/null) && [ -n "$cap" ]; then
         caps=$(printf 'styled=1\ncursor=0\nidentity=1')
       else
