@@ -453,11 +453,23 @@ shell_quote() {
 }
 
 STATUS_FILE=$(shell_quote "$STATE/$ID.status")
-# The worker's status command: the plain append always carries the line, then
-# the opt-in fleet ledger (docs/fleet-ledger.md) records it at once, costing one
-# file test when the flag is absent. A host without that flag, such as a remote
-# second mate's, runs only the append; the watcher capture is the backstop.
-STATUS_APPEND="echo \"{state} [at=<epoch>]: {one short line}\" >> $STATUS_FILE && { [ ! -e $(shell_quote "$CONFIG/fleet-ledger") ] || $(shell_quote "$FM_ROOT/bin/fm-fleet-ledger.sh") appended $(shell_quote "$CONFIG") $STATUS_FILE >/dev/null 2>&1 || true; }"
+# The untimed line a worker's status command carries, and the plain append to
+# that worker's own status file: the line, then the opt-in fleet ledger
+# (docs/fleet-ledger.md) recording it at once, costing one file test when the
+# flag is absent. A host without that flag, such as a remote second mate's,
+# runs only the append; the watcher capture is the backstop.
+STATUS_LINE='"{state} [at=<epoch>]: {one short line}"'
+STATUS_APPEND_LOCAL="echo $STATUS_LINE >> $STATUS_FILE && { [ ! -e $(shell_quote "$CONFIG/fleet-ledger") ] || $(shell_quote "$FM_ROOT/bin/fm-fleet-ledger.sh") appended $(shell_quote "$CONFIG") $STATUS_FILE >/dev/null 2>&1 || true; }"
+# A secondmate's status line is a captain-facing outcome on its parent channel,
+# never a self-home task log: it resolves the channel through the one owner
+# (bin/fm-parent-channel-lib.sh) and refuses with a named error rather than
+# falling back to $STATUS_FILE when that channel cannot be resolved. The
+# library stamps the line, so it carries no second append here.
+if [ "$KIND" = secondmate ]; then
+STATUS_APPEND="$(shell_quote "$FM_ROOT/bin/fm-parent-channel-report.sh") $STATUS_LINE"
+else
+STATUS_APPEND=$STATUS_APPEND_LOCAL
+fi
 INBOX_DIR=$(shell_quote "$STATE/$ID.inbox")
 
 # The receive-and-ack half of the steering-inbox contract, included in every
@@ -548,8 +560,9 @@ Act only on tasks the main firstmate routes to you.
 Never start a survey, audit, or "find improvements" sweep on your own initiative; that is not your job and it is unwanted.
 
 # The captain and the parent channel
-Nobody reads this chat: the captain and the main firstmate see only what is appended to $STATUS_FILE, and a captain-facing sentence that is not appended there has not been sent.
-That file is your parent channel, and in this home it IS the captain: every sentence you would say to the captain, and every outcome the local AGENTS.md tells a firstmate to bring to the captain, is one appended line there, never chat.
+Nobody reads this chat: the captain and the main firstmate see only what is appended to your parent channel, and a captain-facing sentence that is not appended there has not been sent.
+The file behind it is \`$STATUS_FILE\`, and in this home your parent channel IS the captain: every sentence you would say to the captain, and every outcome the local AGENTS.md tells a firstmate to bring to the captain, is one appended line there, never chat.
+The status command below resolves that channel for you and refuses with a named error rather than writing anywhere else when this home cannot reach it; such a refusal means the line was not recorded, so fix the cause instead of hand-writing a path under this home.
 Your own machinery publishes the durable facts about your crew's work for you (\`bin/fm-parent-channel-lib.sh\`): a child's terminal done or failed line with its note and PR on every supervision poll, a PR-ready line when you register a PR, a task you hold for the captain and its answer, a merge, and a child's final line at cleanup all reach the parent channel from the scripts that record them, whether or not you append anything.
 What only you can append is judgement: the answer to a marked request below, a recommendation or caveat on a delivered outcome, a blocker or failure of your own, and anything else you would otherwise say to the captain.
 

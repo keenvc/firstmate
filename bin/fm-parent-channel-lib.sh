@@ -25,6 +25,10 @@
 #                                    remove the child while it is undelivered
 #   - bin/fm-secondmate-report.sh     a marked request's correlated answer,
 #                                    with this resolver choosing its destination
+#   - bin/fm-parent-channel-report.sh the secondmate charter's own status
+#                                    command (bin/fm-brief.sh), so a mate's
+#                                    judgement line has the same channel and the
+#                                    same refusal as the publishers
 # The mate's own appends are reserved for judgement (bin/fm-brief.sh charter).
 # docs/secondmate-parent-channel.md records the design and its coverage.
 #
@@ -173,3 +177,4 @@ fm_parent_channel_report() {  # <home> <state> <line>
   [ "$rc" -eq 0 ] || return "$rc"
   fm_parent_channel_append_once "$destination" "$(status_stamp_line "$line")" || return 4
 }
+

@@ -30,7 +30,7 @@ Every captain-facing outcome that leaves durable evidence in the mate home is pu
 | Child leaving the home | its final ledger line | `bin/fm-teardown.sh`, which refuses to remove the child while that line is undelivered |
 | Child ended silently | terminal current state with a silent ledger | the existing inactive-outcome scan in `bin/fm-inactive-reconcile.sh` |
 | Answer to a marked request | a correlated line guarded by the pending-reply record | `bin/fm-secondmate-report.sh`, which resolves the parent channel from the mate home; the pending-reply guard repairs a line stranded in the local mate's same-basename status file before recovery or escalation |
-| An outcome that exists only in the mate's reasoning | none | the charter and the `AGENTS.md` carve-outs only |
+| An outcome that exists only in the mate's reasoning | the mate's own appended status line | `bin/fm-parent-channel-report.sh`, the status command the charter hands the mate: it resolves the channel from the home's binding exactly as the publishers do, and refuses with a named error rather than writing the line into the lane's own log when the channel cannot be resolved |
 
 The ledger delivery reads files, plus a local git reachability check on a ship `done:` with no delivery record yet (`bin/fm-dod-lib.sh`): it calls no harness, no forge, and no current-state reader, so it is identical for every harness and runtime backend.
 Each delivery is keyed with the first eight hexadecimal characters of its receipt fingerprint and uses the shared append contract above, and the ledger path reuses the inactive scan's per-fingerprint receipts, so a replayed poll or restart cannot deliver an event twice while a genuinely new terminal event is delivered again.
@@ -56,7 +56,8 @@ A missed-reply escalation includes the complete first sighting path and line num
 `tests/fm-pr-merge.test.sh` covers the PR-ready line at registration and the merge outcome's upward report.
 `tests/fm-teardown.test.sh` covers teardown delivering a child's final line and refusing when the channel cannot be written.
 It also covers the registration-time ready line and its withholding until checks are green under `config/ready-after-green`.
-`tests/fm-brief.test.sh` pins the charter's channel rule.
+`tests/fm-brief.test.sh` pins the charter's channel rule and runs each generated status command: every local worker's line reaches its own status file, and a secondmate's line with no resolvable channel refuses instead of logging locally.
+`tests/fm-status-parent-channel-required.test.sh` runs the appended secondmate status command for a seeded local mate, a mate home whose parent binding is missing, and one whose binding is unusable: the seeded mate's line lands on the parent channel only, and both unresolvable homes exit non-zero with a refusal naming the parent channel and write nothing into their own state log.
 `tests/fm-pending-reply.test.sh` covers helper-selected local routing, remote-channel classification, same-basename restatement before false escalation, readable wrong-home diagnostics, and the rule that arbitrary mate-home sightings never acknowledge a reply.
 `tests/fm-parent-channel-scan-exclusion.test.sh` covers the home-shape-aware scan exclusion against real remote, main-home, and local-mate fixtures: the watcher signal scan, both heartbeat backstops, the fleet-wide folds, and the real `fm-wake-drain.sh` end to end.
 

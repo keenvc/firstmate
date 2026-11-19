@@ -780,7 +780,7 @@ test_secondmate_no_projects_charter() {
     "secondmate charter lost the parent-channel section"
   assert_grep 'Nobody reads this chat' "$brief" \
     "secondmate charter no longer says the chat is unread"
-  assert_grep 'in this home it IS the captain' "$brief" \
+  assert_grep 'and in this home your parent channel IS the captain' "$brief" \
     "secondmate charter no longer names the parent channel as the captain"
   assert_grep 'working [key=<work-slug>]' "$brief" \
     "secondmate charter did not key material routed-work phases"
@@ -882,7 +882,9 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   )
   cmp -s "$baseline" "$brief" \
     || fail "relative FM_HOME changed charter bytes compared with the same absolute home"
-  assert_grep ">> '$home/state/relative-home.status'" "$brief" \
+  assert_grep "fm-parent-channel-report.sh" "$brief" \
+    "relative FM_HOME did not render the secondmate status command"
+  assert_grep "The file behind it is \`'$home/state/relative-home.status'\`" "$brief" \
     "relative FM_HOME did not render an absolute secondmate status path"
 
   brief="$home/data/relative-state/brief.md"
@@ -898,7 +900,7 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   )
   cmp -s "$baseline" "$brief" \
     || fail "relative FM_STATE_OVERRIDE changed charter bytes compared with the same absolute state directory"
-  assert_grep ">> '$state_override/relative-state.status'" "$brief" \
+  assert_grep "The file behind it is \`'$state_override/relative-state.status'\`" "$brief" \
     "relative FM_STATE_OVERRIDE did not render an absolute secondmate status path"
 
   brief="$data_override/relative-data/brief.md"
@@ -914,7 +916,7 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   )
   cmp -s "$baseline" "$brief" \
     || fail "relative FM_DATA_OVERRIDE changed charter bytes compared with the same absolute data directory"
-  assert_grep ">> '$home/state/relative-data.status'" "$brief" \
+  assert_grep "The file behind it is \`'$home/state/relative-data.status'\`" "$brief" \
     "relative FM_DATA_OVERRIDE changed the absolute default status path"
 
   err="$root/unresolved.err"
@@ -965,7 +967,7 @@ test_herdr_lab_contract_applies_to_scouts_but_not_secondmates() {
 }
 
 test_pause_verb_override_renders_all_brief_scaffolds() {
-  local home kind id brief append now epoch templates template line signals
+  local home kind id brief append now epoch templates template line signals status out
   home="$TMP_ROOT/pause-verb-home"
   mkdir -p "$home/data"
 
@@ -990,8 +992,9 @@ test_pause_verb_override_renders_all_brief_scaffolds() {
     # and run it. The stamp must be a value the worker supplies, so the command
     # may not carry an unevaluated substitution that a file-write tool would
     # copy through verbatim.
-    # shellcheck disable=SC2016 # Match literal backticks in the generated interface.
-    append=$(sed -n '/`echo "{state}/s/.*`\(echo .*\)`.*/\1/p' "$brief")
+    # shellcheck disable=SC2016 # Match literal backticks and braces in the generated interface.
+    append=$(sed -n '/`.*{state} \[at=<epoch>\]/s/^[^`]*`\(.*\)`$/\1/p' "$brief" | head -1)
+    [ -n "$append" ] || fail "$kind scaffold carried no status-append command"
     now=$(date +%s)
     append=${append//\{state\}/done}
     append=${append//\{one short line\}/test event}
@@ -1000,10 +1003,25 @@ test_pause_verb_override_renders_all_brief_scaffolds() {
       *"\$("*) fail "$kind scaffold left an unevaluated command in its status-append line" ;;
     esac
     mkdir -p "$home/state"
-    bash -c "$append" || fail "generated status command failed"
-    epoch=$(bash -c '. "$1"; status_line_at_epoch "$(cat "$2")"' _ \
-      "$ROOT/bin/fm-classify-lib.sh" "$home/state/$id.status")
-    [ "$epoch" = "$now" ] || fail "$kind scaffold did not record the worker's event time"
+    # A secondmate's line is a parent-channel outcome: without a seeded parent
+    # binding the generated command must refuse and record nothing locally,
+    # which is exactly what keeps a misbound mate from reporting into silence.
+    if [ "$kind" = secondmate ]; then
+      status=0
+      out=$(FM_HOME="$home" bash -c "$append" 2>&1) || status=$?
+      expect_code 1 "$status" "$kind status command accepted a line with no parent channel: $out"
+      case "$out" in
+        *'parent channel'*) ;;
+        *) fail "$kind status refusal did not name the parent channel: $out" ;;
+      esac
+      assert_absent "$home/state/$id.status" \
+        "$kind status command fell back to its local status log"
+    else
+      bash -c "$append" || fail "generated status command failed"
+      epoch=$(bash -c '. "$1"; status_line_at_epoch "$(cat "$2")"' _ \
+        "$ROOT/bin/fm-classify-lib.sh" "$home/state/$id.status")
+      [ "$epoch" = "$now" ] || fail "$kind scaffold did not record the worker's event time"
+    fi
     # Every status signal the brief instructs a worker to append is a template
     # the worker fills in and writes verbatim, with or without a shell, not only
     # rule 4's echo: substitute each one's named placeholders and read the stamp
@@ -1017,6 +1035,7 @@ test_pause_verb_override_renders_all_brief_scaffolds() {
       [ -n "$template" ] || continue
       case "$template" in
         'echo "'*) template=${template#echo \"}; template=${template%%\" >>*} ;;
+        *'fm-parent-channel-report.sh '*) template=${template##*fm-parent-channel-report.sh } ;;
       esac
       case "$template" in
         *"\$("*) fail "$kind signal embeds an unevaluated command: $template" ;;
@@ -1332,7 +1351,8 @@ test_worker_role_scope() {
   assert_no_grep '# Current worker role contract' "$brief" "secondmate received the worker exception"
   assert_no_grep 'do not adopt the supervisor identity' "$brief" "secondmate received the worker exception"
   assert_grep "The local \`AGENTS.md\` is your job description" "$brief" "secondmate lost its supervisor contract"
-  assert_grep 'That file is your parent channel' "$brief" "secondmate lost its parent channel"
+  assert_grep 'and in this home your parent channel IS the captain' "$brief" "secondmate lost its parent channel"
+  assert_grep 'fm-parent-channel-report.sh' "$brief" "secondmate status append does not resolve its parent channel"
   pass "fm-brief: scaffolds leave the worker role scope to the launch boundary and keep the secondmate contract"
 }
 
