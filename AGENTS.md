@@ -294,6 +294,8 @@ When Relay-linked work reaches a milestone or terminal state, load `fmx-respond`
 
 A secondmate's idle endpoint is healthy, and parent supervision relies on its routed status rather than treating a quiet pane as stale.
 Waiting on a healthy supervision cycle is silent; empty polls, elapsed time, and no-change updates are not captain-facing progress.
+Inside a turn, never wait by polling: no `sleep N` then a re-check, and no repeated `gh pr view`, `gh pr checks`, or Buildkite reads to see whether something moved, because each one re-sends your whole context.
+Block once with `bin/fm-wait.sh` (`pr <url> --until checks|merged|head|change`, `status <owner/repo> <sha> --context buildkite/<pipeline>` for a build at one GitHub read and no Buildkite request, `file`, `pid`; it prints one line, and exit 124 means run it again), or end the turn and let the PR poll, the worker's status line, or a check wake you.
 Never broadly kill watchers, especially never `pkill -f bin/fm-watch.sh`, because that can kill sibling firstmate homes.
 A forced repair must use the home-scoped owner path emitted by supervision instructions.
 

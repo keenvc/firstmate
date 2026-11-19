@@ -490,7 +490,7 @@ IFS= read -r -d '' WAIT_SECTION <<'EOF' || true
 # Waiting
 Every turn you take resends your whole context, so a wait must cost no turns.
 After you append `needs-decision:` or `blocked:`, end your turn at once: do not check the inbox, the status file, or anything else, because the answer arrives as a terminal message that starts your next turn.
-Wait on anything external - a pipeline gate, PR checks - with ONE blocking shell command that returns when the state changes: `no-mistakes axi run` or `respond` with `--wait`, `gh pr checks <pr> --watch`, or `until <condition>; do sleep 30; done` for anything else.
+Wait on anything external - a pipeline gate, PR checks - with ONE blocking shell command that returns when the state changes: `no-mistakes axi run` or `respond` with `--wait`, firstmate's `fm-wait.sh` (rule 10) or `gh pr checks <pr> --watch`, or `until <condition>; do sleep 30; done` for anything else.
 Never spend turns on `sleep` followed by a status check, and never background a command in order to poll it.
 In Claude Code that `until` loop in a single Bash call is the sanctioned foreground wait: when the harness refuses a sleep-then-check command and points you at backgrounding instead, reissue the wait as the loop rather than accepting the background.
 Bound that command by what your harness lets one command run: in Pi pass the bash tool a `timeout` of at most 2700 seconds, because Pi sets none by default; in Claude Code pass the Bash tool its maximum `timeout` of 600000 ms, because its default is 2 minutes; in Codex keep waiting on a still-running command with empty `write_stdin` polls of up to 300000 ms; elsewhere pass your shell tool its largest timeout and assume at most 10 minutes.
@@ -697,6 +697,16 @@ IFS= read -r -d '' SHARED_NO_NAME_KILL_RULE <<'EOF' || true
 EOF
 SHARED_NO_NAME_KILL_RULE=${SHARED_NO_NAME_KILL_RULE%$'\n'}
 
+# One shared string keeps the ship and scout no-poll rule identical. Every
+# model turn re-sends the whole context, so a sleep-then-check loop costs a
+# full-context call per iteration; bin/fm-wait.sh blocks in bash instead and
+# prints one line. Always emitted: unlike the config/wait-no-turns section it
+# names only the blocking primitive, not a turn-ending policy.
+FM_WAIT_Q=$(printf '%s' "$SCRIPT_DIR/fm-wait.sh" | sed "s/'/'\\\\''/g")
+SHARED_NO_POLL_RULE="10. Never wait by polling: no \`sleep N\` followed by a status check, and no repeated \`gh pr view\`, \`gh pr checks\` or Buildkite reads to see whether something changed - each one re-sends your whole context.
+   Block in ONE shell command that returns when the state changes and prints one line: \`'$FM_WAIT_Q' pr <pr-url> --until checks\` (or \`merged\`, \`head\`, \`change\`); for a build, \`'$FM_WAIT_Q' status <owner/repo> <sha> --context buildkite/<pipeline>\` (one GitHub read, no Buildkite request); \`'$FM_WAIT_Q' file <path> --grep <regex>\` or \`'$FM_WAIT_Q' pid <pid>\` for your own jobs.
+   Pass your shell tool its maximum timeout; on exit 124 run the same command again with nothing in between."
+
 if [ -n "$BASE_BRANCH" ]; then
   SETUP_BASE="You are in a disposable git worktree of $REPO, at a detached HEAD on a clean copy of its base branch.
 Base branch: $BASE_BRANCH"
@@ -746,6 +756,7 @@ $CREWMATE_PAUSE_INSTRUCTIONS
 $SHARED_INFRA_RULE
 $SHARED_NO_CD_RULE
 $SHARED_NO_NAME_KILL_RULE
+$SHARED_NO_POLL_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 
@@ -832,6 +843,7 @@ $ASK_USER_BLOCK
 $SHARED_INFRA_RULE
 $SHARED_NO_CD_RULE
 $SHARED_NO_NAME_KILL_RULE
+$SHARED_NO_POLL_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 
